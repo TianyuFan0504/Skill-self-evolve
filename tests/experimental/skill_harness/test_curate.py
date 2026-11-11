@@ -373,8 +373,10 @@ class CurateTest(unittest.TestCase):
         for parent in [public, public.parent, public.parent.parent]:
             self.assertTrue(parent.stat().st_mode & 0o001)
         wrapper = Path(runtime.codex_bin).read_text()
-        for feature in ("shell_tool", "unified_exec", "multi_agent"):
+        for feature in ("shell_tool", "unified_exec", "multi_agent", "goals"):
             self.assertIn("--disable " + feature, wrapper)
+        for override in curate.NATIVE_CONFIG_OVERRIDES:
+            self.assertIn(override, wrapper)
         self.assertIn("--ignore-user-config", wrapper)
         self.assertIn("CURATOR_CODEX_HOME", wrapper)
         self.assertNotIn("--output-schema", wrapper)

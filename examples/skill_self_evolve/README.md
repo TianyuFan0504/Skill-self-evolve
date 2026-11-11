@@ -73,6 +73,10 @@ creates a unique attempt directory for every rollout and epoch.
 
 ## Start a run
 
+Apply the narrowly pinned [Uni-Agent compatibility fix](patches/UNI_AGENT_COMPATIBILITY.md)
+offline after stopping old workers. The launcher verifies the dependency and
+prints the explicit application command if it is absent.
+
 From the server checkout:
 
 ```bash
@@ -216,6 +220,26 @@ actions through replay and positive utility admits skills into the main store.
 Curate actions never enter the solver's GRPO groups. Recovery requires the
 separate COMPLETE joint manifest, including online optimizer, EMA, skill store,
 replay, credit ledger, controller and dataloader state.
+
+The joint recipe samples one curator candidate per source episode. Its signed
+counterfactual advantage supplies an external baseline, so curator candidates
+do not need a multi-sample GRPO group. This also avoids censoring an otherwise
+valid candidate when a sibling has invalid output. Solver `ROLLOUT_N` remains
+four. Curator sampling stays at temperature one with original processed
+behavior probabilities; malformed JSON and missing identity fields remain
+rejected. The system instructions enumerate every required field, and the task
+ends with the exact host-assigned identity and output structure. These prompt
+and candidate-count changes require a fresh protocol/template version.
+
+The curator wrapper disables native goals, web search and request-user-input
+registration in addition to execution features. A CPU-only native HTTP capture
+on Codex 0.167.0 confirmed that these settings removed the remaining five tool
+declarations. This capture used an explicit failing mock endpoint and provides
+configuration evidence only; it contains no model tokens or training reward.
+The catalog's parallel-tool flag alone did not control the observed HTTP flag,
+so the harness preserves the native request value without rewriting it.
+The capture inventory is retained at
+`/root/nas_chaohuang/skill_training/diagnostics/native_curator_tool_flags_1794430776109031851/evidence-manifest.json`.
 
 The common model configuration enables the official fused Torch output head.
 It was checked on a saved 33,322-token native trajectory: finite likelihood,

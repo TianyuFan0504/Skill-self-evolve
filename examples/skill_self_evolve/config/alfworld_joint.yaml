@@ -45,7 +45,9 @@ skill_harness:
     route_tensor_parallel_size: 1
     gateway_count: 2
     sources_per_step: 1
-    candidates_per_source: 2
+    # Curate uses an external signed advantage, so one candidate needs no
+    # within-group baseline and avoids censoring a valid sibling's cohort.
+    candidates_per_source: 1
     probes_per_step: 2
     required_exposures: 1
     min_delay_steps: 1

@@ -41,6 +41,10 @@ from .store import SkillArtifact, SkillCandidate, SkillStore
 COLLECTOR_VERSION = "native-codex-curate-v2"
 EVENT_CLASSIFIER_VERSION = "codex-startup-diagnostics-v1"
 NATIVE_CODEX_VERSION = "0.167.0"
+NATIVE_CONFIG_OVERRIDES = (
+    'web_search="disabled"',
+    "tools.experimental_request_user_input.enabled=false",
+)
 SAMPLING = {
     "temperature": 1.0,
     "top_p": 1.0,
@@ -68,6 +72,7 @@ DISABLED_FEATURES = (
     "skill_search",
     "workspace_dependencies",
     "sleep_tool",
+    "goals",
 )
 SKILL_FIELDS = {"skill_id", "title", "principle", "when_to_apply", "task_families"}
 SKILL_SCHEMA = {
@@ -448,6 +453,7 @@ class NativeCuratorRuntime:
             "model_name": self.model_name,
             "unix_user": self.unix_user,
             "disabled_features": list(DISABLED_FEATURES),
+            "native_config_overrides": list(NATIVE_CONFIG_OVERRIDES),
             "native_output_schema_enabled": False,
             "isolation": "dedicated_nonroot_account; clean_environment; no_game_session_capability",
             "files": {
@@ -544,8 +550,8 @@ def provision_native_curator_runtime(
     if len(models) != 1:
         raise CurateProtocolError("The native model catalog must identify one exact curator model")
     model = copy.deepcopy(models[0])
-    # The pinned Responses adapter rejects parallel_tool_calls=false, even when
-    # the tool feature flags below remove executable capabilities.
+    # Native built-in tool declarations can remain even with execution
+    # features disabled. False is supported only for an empty effective set.
     model.update(base_instructions=system, supports_parallel_tool_calls=True, experimental_supported_tools=[])
     template_version = "sha256:" + _digest(
         {
@@ -555,6 +561,7 @@ def provision_native_curator_runtime(
             "model": model,
             "native_version": native_version,
             "disabled_features": DISABLED_FEATURES,
+            "native_config_overrides": NATIVE_CONFIG_OVERRIDES,
         }
     )
     public = _runtime_directory(Path(public_root) / template_version.removeprefix("sha256:"), public=True)
@@ -580,6 +587,8 @@ def provision_native_curator_runtime(
         "--enable",
         "skip_host_skill_discovery",
     ]
+    for override in NATIVE_CONFIG_OVERRIDES:
+        command.extend(["-c", override])
     for feature in DISABLED_FEATURES:
         command.extend(["--disable", feature])
     command.extend(["exec", "--ignore-user-config", "--ignore-rules"])
