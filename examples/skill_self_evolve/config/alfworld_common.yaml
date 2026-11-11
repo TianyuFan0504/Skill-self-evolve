@@ -82,7 +82,9 @@ actor_rollout_ref:
 
     ppo_micro_batch_size_per_gpu: 1
 
-    use_dynamic_bsz: true
+    # No-remove-padding forwards allocate B * max(length), not sum(length).
+    # Keep one complete trajectory per microbatch and accumulate one global step.
+    use_dynamic_bsz: false
 
     ppo_max_token_len_per_gpu: ${oc.decode:${oc.env:TRAIN_MAX_TOKENS_PER_GPU,36864}}
 
@@ -108,6 +110,9 @@ actor_rollout_ref:
 
       use_torch_compile: ${oc.decode:${oc.env:USE_TORCH_COMPILE,false}}
 
+      # Retaining full unsharded gradients across long microbatches is costly.
+      use_no_sync_for_gradient_accumulation: false
+
     checkpoint:
 
       save_contents: [model, optimizer, extra]
@@ -116,7 +121,9 @@ actor_rollout_ref:
 
     strategy: fsdp2
 
-    log_prob_use_dynamic_bsz: true
+    log_prob_use_dynamic_bsz: false
+
+    log_prob_micro_batch_size_per_gpu: 1
 
     log_prob_max_token_len_per_gpu: ${oc.decode:${oc.env:TRAIN_MAX_TOKENS_PER_GPU,36864}}
 
@@ -135,6 +142,10 @@ actor_rollout_ref:
     top_k: -1
 
     calculate_log_probs: true
+
+    log_prob_use_dynamic_bsz: false
+
+    log_prob_micro_batch_size_per_gpu: 1
 
     logprobs_mode: processed_logprobs
 
