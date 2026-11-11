@@ -133,6 +133,12 @@ actor_rollout_ref:
 
     mode: async
 
+    engine_kwargs:
+      vllm:
+        # Keep the asynchronous API while using one backend scheduler batch.
+        # This isolates the observed vLLM sample_tokens/output-queue stall.
+        async_scheduling: false
+
     n: ${oc.decode:${oc.env:ROLLOUT_N,4}}
 
     temperature: 1.0
