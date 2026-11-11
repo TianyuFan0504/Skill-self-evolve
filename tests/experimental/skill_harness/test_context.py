@@ -196,6 +196,27 @@ class ContextTest(unittest.TestCase):
             self.messages[-1]["content"], "Clean and place the mug.\nInitial game state: sink, mug, counter."
         )
 
+    def test_host_snapshot_identity_does_not_change_model_header_for_identical_retained_skills(self):
+        before = self.publish()
+        self.store.create_branch("unrelated", from_snapshot=before.snapshot_id)
+        artifact = store_module.SkillArtifact(
+            "cooling",
+            "Cooling procedure",
+            "Cool the object.",
+            "Cooling tasks",
+            ("cool",),
+        )
+        candidate = self.store.stage_candidate(artifact, branch="unrelated")
+        self.store.admit(candidate.candidate_id)
+        after = self.store.publish([candidate.candidate_id], branch="unrelated", expected_parent=before.snapshot_id)
+        first, second = self.build(snapshot_id=before.snapshot_id), self.build(snapshot_id=after.snapshot_id)
+        self.assertNotEqual(first.manifest["snapshot_id"], second.manifest["snapshot_id"])
+        self.assertEqual(first.manifest["injected_refs"], second.manifest["injected_refs"])
+        self.assertEqual(first.messages, second.messages)
+        self.assertNotIn(before.snapshot_id, first.messages[-1]["content"])
+        self.assertNotIn(after.snapshot_id, second.messages[-1]["content"])
+        self.assertEqual(first.manifest["builder_version"], "host-skill-context-v2")
+
     def test_whole_skills_skip_oversize_and_preserve_small_later_candidate(self):
         self.publish("a-long", principle="Oversized cleaning notes. " * 300)
         self.publish("b-short")

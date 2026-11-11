@@ -34,6 +34,8 @@ sys.modules[PACKAGE] = package
 controller_module = importlib.import_module(PACKAGE + ".controller")
 curate = importlib.import_module(PACKAGE + ".curate")
 probes = importlib.import_module(PACKAGE + ".probes")
+context = importlib.import_module(PACKAGE + ".context")
+store_module = importlib.import_module(PACKAGE + ".store")
 data_module = importlib.import_module(PACKAGE + ".alfworld.data")
 batcher = importlib.import_module(PACKAGE + ".replay_batch")
 
@@ -214,6 +216,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.actor, self.gateways, self.probe_calls, self.curate_calls = FakeActor(), [], [], []
         self.negative_probe = False
         self.unknown_backend = False
+        self.cf_input_attack = None
         self.curate_bad_content = {}
         self.curate_bad_fields = {}
         self.curate_tool_indices = set()
@@ -358,7 +361,29 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                 json.dumps({"game_sha256": metadata["game_sha256"], "split": "train", "won": bool(reward)})
             )
             (output / "initial-state.json").write_text(json.dumps({"observation": "Identical paired game state"}))
-            refs = store.get_snapshot(metadata["skill_snapshot_id"]).skills
+            def render(messages):
+                text = "".join("<" + item["role"] + ">" + item["content"] + "</turn>" for item in messages)
+                return context.RenderedPrompt(text, tuple(text.encode()))
+
+            built = context.build_skill_context(
+                fields["raw_prompt"],
+                store=store,
+                snapshot_id=metadata["skill_snapshot_id"],
+                task_family=metadata["task_type"],
+                render_prompt=render,
+                encode_text=lambda text: list(text.encode()),
+                max_prompt_tokens=100000,
+                skill_token_budget=10000,
+                top_k=1 if loaded and self.cf_input_attack == "displaced" else 6,
+            )
+            (output / "agent-messages.json").write_text(json.dumps(built.messages))
+            (output / "skill-context.json").write_text(json.dumps(built.manifest))
+            prefix = "Native fixed prefix\n"
+            if self.cf_input_attack == "home":
+                prefix += "Skill root=/tmp/codex-home-" + ("a" if loaded else "b") * 32 + "/skills/.system\n"
+            if self.cf_input_attack == "path":
+                prefix += "Native cwd=/tmp/uncontrolled-" + str(loaded) + "\n"
+            native_prompt = prefix + render(built.messages).text
             group, variant = metadata["credit_probe_group"], metadata["credit_probe_variant"]
             workdir = "/tmp/alfworld-skill-episodes/credit_" + group
             home = "/tmp/codex-home-" + hashlib.sha256(session.encode()).hexdigest()[:32]
@@ -385,9 +410,13 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                 "environment_session_id": "environment_" + hashlib.sha256(session.encode()).hexdigest()[:16],
             }
             receipt = {
-                **binding, "schema_version": 1, "status": "unconfirmed" if self.unknown_backend else "drained",
-                "fenced": False, "active_requests": int(self.unknown_backend),
-                "backend_stop_confirmed": not self.unknown_backend, "expected_backend_terminal_stop": False,
+                **binding,
+                "schema_version": 1,
+                "status": "unconfirmed" if self.unknown_backend else "drained",
+                "fenced": False,
+                "active_requests": int(self.unknown_backend),
+                "backend_stop_confirmed": not self.unknown_backend,
+                "expected_backend_terminal_stop": False,
             }
             return {
                 "session_id": session,
@@ -422,15 +451,23 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                         "agent_uid": 1001,
                         "agent_gid": 1001,
                     },
-                    "skill_context": {
-                        "snapshot_id": metadata["skill_snapshot_id"],
-                        "injected_refs": [ref.to_dict() for ref in refs],
-                    },
+                    "skill_context": built.manifest,
                 },
-                "trajectories": [{"extra_fields": {}, "prompt_ids": [10], "response_ids": [20], "response_mask": [1]}],
+                "trajectories": [
+                    {
+                        "extra_fields": {},
+                        "prompt_ids": list(native_prompt.encode()),
+                        "response_ids": [20],
+                        "response_mask": [1],
+                    }
+                ],
             }
 
-        return await probes.collect_counterfactual_probe(**kwargs, run_branch=branch)
+        return await probes.collect_counterfactual_probe(
+            **kwargs,
+            run_branch=branch,
+            decode_prompt_ids=lambda ids: bytes(ids).decode(),
+        )
 
     async def update(self, controller, data, step):
         prepared = await controller.prepare_update(data, step)
@@ -451,6 +488,41 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pending)
         self.assertTrue(all(not row["observed"] for row in pending))
         self.assertTrue(any(row["unobserved"] for row in pending))
+
+    async def _assert_input_confound_never_becomes_credit(self, attack):
+        controller = await self.create()
+        if attack == "displaced":
+            artifact = store_module.SkillArtifact(
+                "zz-existing",
+                "Existing shared note",
+                "Observe before acting.",
+                "Household tasks",
+                ("pick_clean_then_place_in_recep",),
+            )
+            candidate = controller.store.stage_candidate(artifact)
+            controller.store.admit(candidate.candidate_id)
+            controller.store.publish([candidate.candidate_id], expected_parent=controller.store.head())
+        await self.update(controller, self.solver(), 1)
+        self.cf_input_attack = attack
+        prepared = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
+        self.assertTrue((prepared.data["role_id"] == 0).all())
+        self.assertEqual(prepared.acknowledgments, ())
+        self.assertEqual(controller.ledger.sample_ready(100), [])
+        self.assertEqual(self.actor.anchor_calls, [])
+        self.assertTrue(all(not row["observed"] for row in controller.state["pending"].values()))
+        reports = list((self.root / "credit_probes").glob("*/paired-input-audit.json"))
+        self.assertTrue(reports)
+        self.assertTrue(all(probes._read_payload(path)["status"] == "unobserved" for path in reports))
+        self.assertFalse(list((self.root / "credit_probes").glob("*/paired-event.json")))
+
+    async def test_actual_native_home_difference_cannot_settle_or_enter_replay(self):
+        await self._assert_input_confound_never_becomes_credit("home")
+
+    async def test_actual_native_path_difference_cannot_settle_or_enter_replay(self):
+        await self._assert_input_confound_never_becomes_credit("path")
+
+    async def test_displaced_existing_skill_cannot_settle_or_enter_replay(self):
+        await self._assert_input_confound_never_becomes_credit("displaced")
 
     async def test_first_step_solver_only_then_future_native_credit_enters_same_optimizer(self):
         controller = await self.create()

@@ -21,6 +21,7 @@ sys.modules[PACKAGE] = package
 probes = importlib.import_module(PACKAGE + ".probes")
 store_module = importlib.import_module(PACKAGE + ".store")
 credit = importlib.import_module(PACKAGE + ".credit")
+context = importlib.import_module(PACKAGE + ".context")
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
@@ -32,37 +33,68 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.base = self.store.head()
         self.store.create_branch("probe", from_snapshot=self.base)
         artifact = store_module.SkillArtifact(
-            "heat_skill", "Heat then place", "Take before heating; verify heated state before placing.",
-            "When a task requests a heated object", ("pick_heat_then_place_in_recep",),
+            "heat_skill",
+            "Heat then place",
+            "Take before heating; verify heated state before placing.",
+            "When a task requests a heated object",
+            ("pick_heat_then_place_in_recep",),
         )
         candidate = self.store.stage_candidate(artifact, branch="probe")
         self.store.admit(candidate.candidate_id)
         self.treated = self.store.publish([candidate.candidate_id], branch="probe", expected_parent=self.base)
         self.protocol = credit.CreditProtocol(
-            evaluator_version="b" * 64, probe_protocol_version="paired:v1",
-            task_distribution_version="original_train:v1", environment_version="alfworld:v1",
-            baseline_snapshot_id=self.base, required_exposures=1,
+            evaluator_version="b" * 64,
+            probe_protocol_version="paired:v1",
+            task_distribution_version="original_train:v1",
+            environment_version="alfworld:v1",
+            baseline_snapshot_id=self.base,
+            required_exposures=1,
         )
         self.request = probes.ProbeRequest(
-            "probe_1", "window_1", "curate_1", artifact.ref,
-            self.treated.snapshot_id, self.base, "b" * 64, self.protocol, 3,
+            "probe_1",
+            "window_1",
+            "curate_1",
+            artifact.ref,
+            self.treated.snapshot_id,
+            self.base,
+            "b" * 64,
+            self.protocol,
+            3,
         )
         self.sample = {
-            "uid": "source_b", "raw_prompt": [{"role": "user", "content": "Heat a potato and place it."}],
-            "tools_kwargs": {"task": {
-                "name": "alfworld_skill_training",
-                "metadata": {"split": "train", "dataset_phase": "train", "stable_game_id": "original_b",
-                             "game_sha256": "a" * 64, "task_type": "pick_heat_then_place_in_recep"},
-            }},
+            "uid": "source_b",
+            "raw_prompt": [{"role": "user", "content": "Heat a potato and place it."}],
+            "tools_kwargs": {
+                "task": {
+                    "name": "alfworld_skill_training",
+                    "metadata": {
+                        "split": "train",
+                        "dataset_phase": "train",
+                        "stable_game_id": "original_b",
+                        "game_sha256": "a" * 64,
+                        "task_type": "pick_heat_then_place_in_recep",
+                    },
+                }
+            },
         }
         self.loading = {
-            "enabled": True, "branch": "main", "top_k": 6, "skill_token_budget": 1024,
-            "max_prompt_tokens": 4096, "tokenizer_path": "/local/tokenizer", "tokenizer_revision": None,
-            "tokenizer_version": "tokenizer:v1", "render_kwargs": {"enable_thinking": False},
+            "enabled": True,
+            "branch": "main",
+            "top_k": 6,
+            "skill_token_budget": 1024,
+            "max_prompt_tokens": 4096,
+            "tokenizer_path": "/local/tokenizer",
+            "tokenizer_revision": None,
+            "tokenizer_version": "tokenizer:v1",
+            "render_kwargs": {"enable_thinking": False},
         }
         self.attestation = {
-            "schema_version": 1, "policy_kind": "frozen_evaluator", "frozen_model_version": "b" * 64,
-            "model_fingerprint": "b" * 64, "model_path": "/models/frozen", "lifecycle_id": "route_1",
+            "schema_version": 1,
+            "policy_kind": "frozen_evaluator",
+            "frozen_model_version": "b" * 64,
+            "model_fingerprint": "b" * 64,
+            "model_path": "/models/frozen",
+            "lifecycle_id": "route_1",
         }
         self.manager = types.SimpleNamespace(skill_route_attestation=copy.deepcopy(self.attestation))
         self.calls = []
@@ -74,6 +106,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.clock_by_loaded = {True: None, False: None}
         self.mixed_clock = False
         self.capture_lifecycle = None
+        self.native_prefix_by_loaded = {True: "Native fixed prefix\n", False: "Native fixed prefix\n"}
 
     def probe_root(self, request=None):
         return self.root / "credit_probes" / probes.probe_physical_id(request or self.request)
@@ -91,9 +124,33 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         if self.changed_state and loaded:
             initial["feedback"] = "Different kitchen."
         (output / "initial-state.json").write_text(json.dumps(initial))
-        (output / "engine-result.json").write_text(json.dumps({
-            "game_sha256": "a" * 64, "split": "train", "won": bool(reward),
-        }))
+        (output / "engine-result.json").write_text(
+            json.dumps(
+                {
+                    "game_sha256": "a" * 64,
+                    "split": "train",
+                    "won": bool(reward),
+                }
+            )
+        )
+
+        def render(messages):
+            text = "".join("<" + item["role"] + ">" + item["content"] + "</turn>" for item in messages)
+            return context.RenderedPrompt(text, tuple(text.encode()))
+
+        built = context.build_skill_context(
+            kwargs["sample_fields"]["raw_prompt"],
+            store=self.store,
+            snapshot_id=metadata["skill_snapshot_id"],
+            task_family=metadata["task_type"],
+            render_prompt=render,
+            encode_text=lambda text: list(text.encode()),
+            max_prompt_tokens=4096,
+            skill_token_budget=1024,
+        )
+        (output / "agent-messages.json").write_text(json.dumps(built.messages))
+        (output / "skill-context.json").write_text(json.dumps(built.manifest))
+        native_prompt = self.native_prefix_by_loaded[loaded] + render(built.messages).text
         attestation = copy.deepcopy(kwargs["frozen_attestation"])
         if self.capture_lifecycle is not None:
             attestation["lifecycle_id"] = self.capture_lifecycle
@@ -109,44 +166,92 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         for name, source in (("workspace.tar", workdir), ("codex-home.tar", home)):
             archive = output / name
             archive.write_bytes(("CPU contract fixture: " + kwargs["session_id"]).encode())
-            archives.append({"source": source, "path": str(archive), "removed": True,
-                             "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()})
+            archives.append(
+                {
+                    "source": source,
+                    "path": str(archive),
+                    "removed": True,
+                    "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                }
+            )
         binding = {
             "binding_id": "binding_" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:16],
             "binding_sha256": hashlib.sha256(kwargs["session_id"].encode()).hexdigest(),
-            "attempt_id": "attempt_" + kwargs["session_id"], "gateway_session_id": kwargs["session_id"],
+            "attempt_id": "attempt_" + kwargs["session_id"],
+            "gateway_session_id": kwargs["session_id"],
             "environment_session_id": "env_" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:16],
         }
-        receipt = {**binding, "schema_version": 1, "status": "drained", "fenced": True,
-                   "active_requests": 0, "backend_stop_confirmed": True, "expected_backend_terminal_stop": False}
+        receipt = {
+            **binding,
+            "schema_version": 1,
+            "status": "drained",
+            "fenced": True,
+            "active_requests": 0,
+            "backend_stop_confirmed": True,
+            "expected_backend_terminal_stop": False,
+        }
         return {
             "session_id": kwargs["session_id"],
-            "reward": reward, "accuracy": reward, "finished": True,
+            "reward": reward,
+            "accuracy": reward,
+            "finished": True,
             "policy_attestation": attestation,
-            "trajectories": [{"prompt_ids": [1, 2], "response_ids": [3], "extra_fields": extra}],
+            "trajectories": [
+                {
+                    "prompt_ids": list(native_prompt.encode()),
+                    "response_ids": [3],
+                    "response_mask": [1],
+                    "extra_fields": extra,
+                }
+            ],
             "extra_info": {
-                "eval_completed": True, "error": None, "episode_output_dir": str(output),
+                "eval_completed": True,
+                "error": None,
+                "episode_output_dir": str(output),
                 "agent_ok": True,
-                "role": "counterfactual_probe", "credit_probe_group": group, "credit_probe_variant": variant,
-                "attempt_id": binding["attempt_id"], "environment_session_id": binding["environment_session_id"],
-                "backend_binding": binding, "backend_terminal": receipt, "backend_stop_confirmed": True,
+                "role": "counterfactual_probe",
+                "credit_probe_group": group,
+                "credit_probe_variant": variant,
+                "attempt_id": binding["attempt_id"],
+                "environment_session_id": binding["environment_session_id"],
+                "backend_binding": binding,
+                "backend_terminal": receipt,
+                "backend_stop_confirmed": True,
                 "paired_workdir": {
-                    "schema_version": 1, "kind": "paired_empty_workdir", "credit_probe_group": group,
-                    "variant": variant, "workdir": workdir, "empty_before_run": True,
-                    "cleanup_completed": True, "codex_homes": [home], "archives": archives,
-                    "host_uid": 0, "agent_uid": 1001, "agent_gid": 1001,
+                    "schema_version": 1,
+                    "kind": "paired_empty_workdir",
+                    "credit_probe_group": group,
+                    "variant": variant,
+                    "workdir": workdir,
+                    "empty_before_run": True,
+                    "cleanup_completed": True,
+                    "codex_homes": [home],
+                    "archives": archives,
+                    "host_uid": 0,
+                    "agent_uid": 1001,
+                    "agent_gid": 1001,
                 },
-                "skill_context": {"snapshot_id": metadata["skill_snapshot_id"],
-                                  "injected_refs": [self.request.skill_ref.to_dict()]
-                                  if loaded and not self.missing_injection else []},
+                "skill_context": {
+                    **built.manifest,
+                    "injected_refs": [self.request.skill_ref.to_dict()]
+                    if loaded and not self.missing_injection
+                    else [],
+                },
             },
         }
 
     async def collect(self, **changes):
         kwargs = dict(
-            request=self.request, sample_fields=self.sample, store=self.store, loading=self.loading,
-            gateway_manager=self.manager, artifact_root=self.root, task_config_path="task_config.yaml",
-            frozen_attestation=self.attestation, run_branch=self.branch,
+            request=self.request,
+            sample_fields=self.sample,
+            store=self.store,
+            loading=self.loading,
+            gateway_manager=self.manager,
+            artifact_root=self.root,
+            task_config_path="task_config.yaml",
+            frozen_attestation=self.attestation,
+            run_branch=self.branch,
+            decode_prompt_ids=lambda ids: bytes(ids).decode(),
         )
         kwargs.update(changes)
         return await probes.collect_counterfactual_probe(**kwargs)
@@ -159,8 +264,10 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.with_skill.score - event.without_skill.score, 1.0)
         self.assertEqual(event.with_skill.environment_state_hash, event.without_skill.environment_state_hash)
         self.assertNotIn("skill_snapshot_id", self.sample["tools_kwargs"]["task"]["metadata"])
-        self.assertEqual(self.calls[0]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"],
-                         self.calls[1]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"])
+        self.assertEqual(
+            self.calls[0]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"],
+            self.calls[1]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"],
+        )
         self.assertTrue((self.probe_root() / "paired-workdirs.json").is_file())
 
     async def test_negative_and_observed_zero_utility_are_preserved(self):
@@ -171,6 +278,15 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.rewards = {True: 0.0, False: 0.0}
         event = await self.collect(request=second)
         self.assertEqual(event.with_skill.score - event.without_skill.score, 0.0)
+
+    async def test_native_prefix_confound_is_archived_without_an_event_or_zero_label(self):
+        self.native_prefix_by_loaded[True] = "Native HOME=/tmp/codex-home-" + "a" * 32 + "\n"
+        self.native_prefix_by_loaded[False] = "Native HOME=/tmp/codex-home-" + "b" * 32 + "\n"
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "native prefixes"):
+            await self.collect()
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+        report = probes._read_payload(self.probe_root() / "paired-input-audit.json")
+        self.assertEqual(report["status"], "unobserved")
 
     async def test_dev_and_test_tasks_cannot_generate_training_credit(self):
         for phase in ("dev", "test_seen", "test_unseen"):
@@ -204,7 +320,8 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_library_changes_beyond_target_are_rejected_before_model_call(self):
         self.store.create_branch("extra", from_snapshot=self.treated.snapshot_id)
         extra = self.store.stage_candidate(
-            store_module.SkillArtifact("other", "Other", "An unrelated procedure.", "Other tasks"), branch="extra",
+            store_module.SkillArtifact("other", "Other", "An unrelated procedure.", "Other tasks"),
+            branch="extra",
         )
         self.store.admit(extra.candidate_id)
         snapshot = self.store.publish([extra.candidate_id], branch="extra", expected_parent=self.treated.snapshot_id)
@@ -219,8 +336,10 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_or_misbound_attestation_fails_before_generation(self):
         for field, value in (
-            ("schema_version", True), ("model_fingerprint", "c" * 64),
-            ("model_path", "relative/model"), ("lifecycle_id", None),
+            ("schema_version", True),
+            ("model_fingerprint", "c" * 64),
+            ("model_path", "relative/model"),
+            ("lifecycle_id", None),
         ):
             bad = {**self.attestation, field: value}
             with self.subTest(field=field), self.assertRaises(ValueError):
@@ -299,14 +418,20 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         first = await self.collect()
         self.store.create_branch("candidate_two", from_snapshot=self.base)
         artifact = store_module.SkillArtifact(
-            "second_skill", "Another heat procedure", "Check the object after heating.",
-            "When a task requests a heated object", ("pick_heat_then_place_in_recep",),
+            "second_skill",
+            "Another heat procedure",
+            "Check the object after heating.",
+            "When a task requests a heated object",
+            ("pick_heat_then_place_in_recep",),
         )
         candidate = self.store.stage_candidate(artifact, branch="candidate_two")
         self.store.admit(candidate.candidate_id)
         snapshot = self.store.publish([candidate.candidate_id], branch="candidate_two", expected_parent=self.base)
         self.request = replace(
-            first_request, window_id="window_two", curate_record_id="curate_two", skill_ref=artifact.ref,
+            first_request,
+            window_id="window_two",
+            curate_record_id="curate_two",
+            skill_ref=artifact.ref,
             with_snapshot_id=snapshot.snapshot_id,
         )
         second = await self.collect()
@@ -319,11 +444,21 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_gateway_factory_binds_validated_client_and_disables_request_sampling_overrides(self):
         client = types.SimpleNamespace(frozen_version="b" * 64, attestation=copy.deepcopy(self.attestation))
         route = types.SimpleNamespace(
-            frozen_version="b" * 64, attestation=copy.deepcopy(self.attestation), get_client=lambda: client,
+            frozen_version="b" * 64,
+            attestation=copy.deepcopy(self.attestation),
+            get_client=lambda: client,
         )
-        config = {"actor_rollout_ref": {"rollout": {"custom": {"agent_framework": {
-            "allowed_request_sampling_param_keys": ["temperature", "top_p"],
-        }}}}}
+        config = {
+            "actor_rollout_ref": {
+                "rollout": {
+                    "custom": {
+                        "agent_framework": {
+                            "allowed_request_sampling_param_keys": ["temperature", "top_p"],
+                        }
+                    }
+                }
+            }
+        }
         calls = []
 
         def factory(*, config, llm_client):
@@ -333,11 +468,15 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         manager = await probes.create_frozen_probe_gateway(config, route, gateway_factory=factory)
         self.assertIs(calls[0][1], client)
         self.assertEqual(
-            calls[0][0]["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]
-            ["allowed_request_sampling_param_keys"], [],
+            calls[0][0]["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"][
+                "allowed_request_sampling_param_keys"
+            ],
+            [],
         )
-        self.assertEqual(config["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]
-                         ["allowed_request_sampling_param_keys"], ["temperature", "top_p"])
+        self.assertEqual(
+            config["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]["allowed_request_sampling_param_keys"],
+            ["temperature", "top_p"],
+        )
         self.assertEqual(manager.skill_route_attestation, self.attestation)
         client.attestation["lifecycle_id"] = "wrong_client_lifecycle"
         with self.assertRaises(ValueError):
@@ -347,18 +486,28 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_branch_refuses_unbound_manager_before_loading_task_runtime(self):
         with self.assertRaises(ValueError):
             await probes.native_probe_branch(
-                gateway_manager=types.SimpleNamespace(), session_id="bad", sample_fields=self.sample,
-                artifact_dir=self.root / "bad", task_config_path="unused.yaml", frozen_attestation=self.attestation,
+                gateway_manager=types.SimpleNamespace(),
+                session_id="bad",
+                sample_fields=self.sample,
+                artifact_dir=self.root / "bad",
+                task_config_path="unused.yaml",
+                frozen_attestation=self.attestation,
             )
 
     async def test_proven_host_terminal_stop_preserves_native_error_and_authoritative_reward(self):
         async def stopped(**kwargs):
             capture = await self.branch(**kwargs)
             state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
-            proof = {"status": "terminal_stop", "termination_requested": True, "termination_completed": True,
-                     "alive_after_termination": False, "terminal_state": state,
-                     "terminal_state_hash": hashlib.sha256(
-                         json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+            proof = {
+                "status": "terminal_stop",
+                "termination_requested": True,
+                "termination_completed": True,
+                "alive_after_termination": False,
+                "terminal_state": state,
+                "terminal_state_hash": hashlib.sha256(
+                    json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
             capture["extra_info"].update(
                 error="actual CLI exited -15", expected_host_terminal_stop=True, terminal_stop=proof
             )
@@ -382,12 +531,22 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             async def invalid(variant=variant, **kwargs):
                 capture = await self.branch(**kwargs)
                 state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
-                capture["extra_info"].update(error="CLI stopped", expected_host_terminal_stop=True, terminal_stop={
-                    "status": "terminal_stop", "termination_requested": True, "termination_completed": True,
-                    "alive_after_termination": False, "terminal_state": state,
-                    "terminal_state_hash": "invalid" if variant == "hash" else hashlib.sha256(
-                        json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-                })
+                capture["extra_info"].update(
+                    error="CLI stopped",
+                    expected_host_terminal_stop=True,
+                    terminal_stop={
+                        "status": "terminal_stop",
+                        "termination_requested": True,
+                        "termination_completed": True,
+                        "alive_after_termination": False,
+                        "terminal_state": state,
+                        "terminal_state_hash": "invalid"
+                        if variant == "hash"
+                        else hashlib.sha256(
+                            json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+                        ).hexdigest(),
+                    },
+                )
                 capture["trajectories"][0]["response_mask"] = [] if variant == "tokens" else [1]
                 path = Path(capture["extra_info"]["episode_output_dir"]) / "engine-result.json"
                 engine = json.loads(path.read_text())
@@ -404,11 +563,17 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
             capture["trajectories"][0]["response_mask"] = [1]
             receipt = capture["extra_info"]["backend_terminal"]
-            receipt.update(status="terminal_refused", expected_backend_terminal_stop=True, terminal_state=state,
-                           terminal_state_hash=hashlib.sha256(json.dumps(state, sort_keys=True,
-                                                                        separators=(",", ":")).encode()).hexdigest())
-            capture["extra_info"].update(error="actual terminal refusal CLI diagnostic",
-                                         expected_backend_terminal_stop=True)
+            receipt.update(
+                status="terminal_refused",
+                expected_backend_terminal_stop=True,
+                terminal_state=state,
+                terminal_state_hash=hashlib.sha256(
+                    json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            )
+            capture["extra_info"].update(
+                error="actual terminal refusal CLI diagnostic", expected_backend_terminal_stop=True
+            )
             path = Path(capture["extra_info"]["episode_output_dir"]) / "engine-result.json"
             engine = json.loads(path.read_text())
             engine.update(steps=50, max_steps=50, step_limit=not state["won"])

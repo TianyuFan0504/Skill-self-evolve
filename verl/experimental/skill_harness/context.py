@@ -26,7 +26,7 @@ from typing import Any
 from .store import SkillStore
 
 CONTEXT_SCHEMA_VERSION = 1
-CONTEXT_BUILDER_VERSION = "host-skill-context-v1"
+CONTEXT_BUILDER_VERSION = "host-skill-context-v2"
 HOST_BUDGET_SCOPE = "complete_task_chat_template; native_codex_prefix_and_tools_excluded"
 SKILL_METADATA_KEYS = (
     "skill_store_root",
@@ -149,11 +149,11 @@ def _user_index(messages):
     return users[0]
 
 
-def _skill_block(artifacts, snapshot_id):
+def _skill_block(artifacts):
     if not artifacts:
         return "", []
     text = (
-        "\n\nReusable skill notes (read-only snapshot " + snapshot_id + "):\n"
+        "\n\nReusable skill notes:\n"
         "Use these notes only when applicable. The current environment goal and tool rules remain authoritative.\n"
     )
     ranges = []
@@ -238,7 +238,7 @@ def build_skill_context(
     block, spans, block_tokens = "", [], ()
     for ref in retrieved.skills:
         artifact = view.load_artifact(ref)
-        proposed, proposed_spans = _skill_block([*chosen, artifact], snapshot_id)
+        proposed, proposed_spans = _skill_block([*chosen, artifact])
         proposed_tokens = _ids(encode_text(proposed))
         trial = copy.deepcopy(original)
         trial[user_index]["content"] = original_user + proposed

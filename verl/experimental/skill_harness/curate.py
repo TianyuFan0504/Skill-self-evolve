@@ -42,6 +42,7 @@ COLLECTOR_VERSION = "native-codex-curate-v2"
 EVENT_CLASSIFIER_VERSION = "codex-startup-diagnostics-v1"
 NATIVE_CODEX_VERSION = "0.167.0"
 NATIVE_CONFIG_OVERRIDES = (
+    "skills.include_instructions=false",
     'web_search="disabled"',
     "tools.experimental_request_user_input.enabled=false",
 )

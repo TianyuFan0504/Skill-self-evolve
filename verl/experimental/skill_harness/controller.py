@@ -525,7 +525,7 @@ class SkillJointController:
     def _protocol(self, baseline):
         return CreditProtocol(
             evaluator_version=self.frozen_version,
-            probe_protocol_version="native-paired-greedy:v1",
+            probe_protocol_version="native-paired-greedy:v2",
             task_distribution_version=self.distribution_version,
             environment_version=self.environment_version,
             baseline_snapshot_id=baseline,
