@@ -228,7 +228,7 @@ def build_route_config(config: Any, spec: PolicyRouteSpec):
         pipeline_model_parallel_size=1,
         calculate_log_probs=spec.kind == "ema",
         load_format="dummy" if spec.kind == "ema" else "auto",
-        full_determinism=True,
+        full_determinism=spec.kind == "frozen",
     )
     rollout.setdefault("prometheus", {})["served_model_name"] = f"skill-{spec.name}"
     checkpoint = rollout.setdefault("checkpoint_engine", {})

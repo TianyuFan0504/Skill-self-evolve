@@ -200,6 +200,8 @@ class PolicyRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original, saved)
         self.assertEqual(ema["actor_rollout_ref"]["rollout"]["checkpoint_engine"]["backend"], "nccl")
         self.assertEqual(frozen["actor_rollout_ref"]["rollout"]["load_format"], "auto")
+        self.assertFalse(ema["actor_rollout_ref"]["rollout"]["full_determinism"])
+        self.assertTrue(frozen["actor_rollout_ref"]["rollout"]["full_determinism"])
         self.assertEqual(frozen["actor_rollout_ref"]["model"]["path"], "/models/frozen")
         self.assertIsNone(frozen["actor_rollout_ref"]["model"]["local_path"])
         created = await self.create()

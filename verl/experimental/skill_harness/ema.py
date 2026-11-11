@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import inspect
+import json
 import math
 import threading
 from collections.abc import Callable, Iterable, Mapping
@@ -204,6 +206,12 @@ class ParameterEMA:
             "shadow_device": str(self.shadow_device),
             "parameter_count": len(self.parameters),
             "local_parameter_elements": sum(v.numel() for v in self.parameters.values()),
+            "layout_fingerprint": hashlib.sha256(
+                json.dumps(
+                    {"parameters": self.parameter_layouts, "buffers": self.buffer_layouts},
+                    sort_keys=True, separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
         }
 
     def state_dict(self) -> dict[str, Any]:

@@ -80,6 +80,15 @@ class ParameterEMATest(unittest.TestCase):
             self.assertEqual(self.buffers["counter"].item(), 1)
         self.assertEqual(tracker.buffers, {})
 
+    def test_layout_fingerprint_is_stable_across_values_and_distinguishes_shape(self):
+        initial = self.ema.metadata()["layout_fingerprint"]
+        self.parameters["weight"].data.add_(2)
+        self.ema.update(self.parameters, self.buffers, optimizer_step=8)
+        self.assertEqual(self.ema.metadata()["layout_fingerprint"], initial)
+        other = ParameterEMA()
+        other.initialize({"weight": torch.zeros(1, 2)}, self.buffers)
+        self.assertNotEqual(other.metadata()["layout_fingerprint"], initial)
+
     def test_invalid_clock_layout_and_nonfinite_updates_are_atomic(self):
         original = self.ema.state_dict()
         for step in (7, 6, 9, True, -1):
