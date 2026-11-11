@@ -79,3 +79,27 @@ host load and available disk every 15 seconds in `resources.jsonl`, and copies
 owned Ray logs back to the durable NAS run after training exits. Failed attempts
 and the append-only training log remain preserved.
 
+## Frozen Qwen3.5 evaluation
+
+The actual first joint launch showed that vLLM 0.24 rejects batch-invariant
+execution for Qwen3.5's `GDN_ATTN` backend. Both auxiliary routes therefore keep
+`full_determinism=false`. The frozen evaluator still uses immutable verified
+weights, temperature zero, and a declared per-request reference seed. Its
+protocol and route attestation record these settings. This does not promise
+bitwise invariance across different runtime batches.
+
+## Offline plotting dependencies
+
+The base training interpreter originally lacked plotting support. Only six
+missing packages were added from workstation-downloaded Linux cp311 wheels:
+Matplotlib 3.11.2, contourpy 1.3.3, cycler 0.12.1, fonttools 4.68.0,
+kiwisolver 1.5.1, and pyparsing 3.3.3. Installation used offline/no-index/no-deps
+mode. All 371 preexisting package versions and metadata hashes were unchanged,
+including Torch, vLLM, Transformers and NumPy.
+
+CPU Agg rendering and the unchanged metric exporter passed. PNG/SVG curves use
+the exact recorded observations; the failed baseline contains only one initial
+development score and therefore supplies no training-improvement evidence.
+Wheel, package and rendering evidence is retained at
+`/root/nas_chaohuang/skill_training/env/plotting_1794422702454`.
+

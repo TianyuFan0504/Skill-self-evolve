@@ -338,6 +338,7 @@ class SkillJointController:
                 self.frozen_version,
                 model_path=str(frozen_path),
                 tensor_parallel_size=settings.route_tensor_parallel_size,
+                reference_seed=settings.seed,
             ),
         ]
         self.routes = await _resolve(
@@ -412,6 +413,9 @@ class SkillJointController:
                 "native_runtime": self.runtime.manifest(),
                 "curate_admission_policy": "complete-cohort-semantic-gates-v1",
                 "curate_source_policy": "whole-redacted-source-or-censor-v1",
+                "frozen_generation_policy": {
+                    "temperature": 0.0, "seed": self.settings.seed, "batch_invariant": False,
+                },
             }
         )
 

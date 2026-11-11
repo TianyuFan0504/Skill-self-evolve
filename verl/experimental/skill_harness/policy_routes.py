@@ -147,6 +147,7 @@ class PolicyRouteSpec:
     tensor_parallel_size: int = 1
     transport_group: str | None = None
     bucket_size_mb: int = 256
+    reference_seed: int = 42
 
     def __post_init__(self):
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", self.name):
@@ -160,6 +161,8 @@ class PolicyRouteSpec:
             raise ValueError("start_rank must be a nonnegative integer")
         if self.num_gpus % self.tensor_parallel_size:
             raise ValueError("Route GPU count must be divisible by tensor parallel size")
+        if type(self.reference_seed) is not int or not 0 <= self.reference_seed < 2**32:
+            raise ValueError("reference_seed must be an unsigned 32-bit integer")
         if not isinstance(self.model_version, str) or not self.model_version:
             raise ValueError("An immutable model/checkpoint provenance identifier is required")
         if self.kind == "frozen" and not self.model_path:
@@ -228,7 +231,10 @@ def build_route_config(config: Any, spec: PolicyRouteSpec):
         pipeline_model_parallel_size=1,
         calculate_log_probs=spec.kind == "ema",
         load_format="dummy" if spec.kind == "ema" else "auto",
-        full_determinism=spec.kind == "frozen",
+        # vLLM 0.24's batch-invariant mode rejects Qwen3.5 GDN_ATTN. Reference
+        # reproducibility uses frozen weights, greedy decoding and an explicit
+        # per-request seed instead; this is not a bitwise batch-invariance claim.
+        full_determinism=False,
     )
     rollout.setdefault("prometheus", {})["served_model_name"] = f"skill-{spec.name}"
     checkpoint = rollout.setdefault("checkpoint_engine", {})
@@ -319,6 +325,14 @@ class PolicyRouteClient:
             or not self._attestation.get("lifecycle_id")
         ):
             raise RuntimeError("The frozen client has invalid model or server-lifecycle provenance")
+        if self.spec.kind == "frozen":
+            sampling = dict(kwargs.get("sampling_params") or {})
+            if sampling.get("temperature", 0.0) != 0.0:
+                raise ValueError("The reference evaluator requires greedy temperature-zero decoding")
+            if sampling.get("seed", self.spec.reference_seed) != self.spec.reference_seed:
+                raise ValueError("Reference sampling seed differs from the declared evaluation protocol")
+            sampling.update(temperature=0.0, seed=self.spec.reference_seed)
+            kwargs["sampling_params"] = sampling
         output = await self.delegate.generate(request_id=request_id, **kwargs)
         if output.stop_reason in ("abort", "aborted"):
             raise RuntimeError("Policy route generation was interrupted; retry with the current pinned client")
@@ -375,6 +389,8 @@ class PolicyRoute:
             "model_path": model_manifest["model_path"] if model_manifest is not None else spec.model_path,
             "model_fingerprint": model_manifest["fingerprint"] if model_manifest is not None else None,
             "lifecycle_id": uuid4().hex,
+            "reference_seed": spec.reference_seed if spec.kind == "frozen" else None,
+            "batch_invariant": False,
         }
 
     @property

@@ -201,7 +201,7 @@ class PolicyRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ema["actor_rollout_ref"]["rollout"]["checkpoint_engine"]["backend"], "nccl")
         self.assertEqual(frozen["actor_rollout_ref"]["rollout"]["load_format"], "auto")
         self.assertFalse(ema["actor_rollout_ref"]["rollout"]["full_determinism"])
-        self.assertTrue(frozen["actor_rollout_ref"]["rollout"]["full_determinism"])
+        self.assertFalse(frozen["actor_rollout_ref"]["rollout"]["full_determinism"])
         self.assertEqual(frozen["actor_rollout_ref"]["model"]["path"], "/models/frozen")
         self.assertIsNone(frozen["actor_rollout_ref"]["model"]["local_path"])
         created = await self.create()
@@ -266,13 +266,18 @@ class PolicyRoutesTest(unittest.IsolatedAsyncioTestCase):
         route = (await self.create())["credit"]
         client = route.get_client()
         client.delegate.log_probs = None
-        output = await client.generate("paired-B", prompt_ids=[1], sampling_params={"seed": 44})
+        output = await client.generate("paired-B", prompt_ids=[1], sampling_params={"seed": 42})
         self.assertEqual(route.frozen_version, "canonical-model-digest")
         self.assertEqual(client.frozen_version, route.frozen_version)
         self.assertEqual(output.extra_fields["policy_kind"], "frozen_evaluator")
         self.assertEqual(output.extra_fields["frozen_model_version"], route.frozen_version)
         self.assertIsNone(output.extra_fields["global_steps"])
         self.assertIsNone(output.extra_fields["observed_global_steps"])
+        self.assertEqual(client.delegate.calls[-1][1]["sampling_params"], {"seed": 42, "temperature": 0.0})
+        with self.assertRaisesRegex(ValueError, "sampling seed"):
+            await client.generate("wrong-seed", sampling_params={"seed": 44, "temperature": 0.0})
+        with self.assertRaisesRegex(ValueError, "greedy"):
+            await client.generate("wrong-temperature", sampling_params={"temperature": 1.0})
         with self.assertRaises(RuntimeError):
             await route.sync_ema(1)
 
