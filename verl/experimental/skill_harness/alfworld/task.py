@@ -198,6 +198,9 @@ class AlfworldSkillTrainingTask(Task):
                     raise ValueError("The environment response has a different catalog digest")
                 work_root = Path("/tmp/alfworld-skill-episodes")
                 work_root.mkdir(mode=0o711, exist_ok=True)
+                if work_root.is_symlink() or work_root.stat().st_uid != os.geteuid():
+                    raise ValueError("The shared episode parent must be a host-owned directory")
+                os.chmod(work_root, 0o711)
                 workdir = work_root / uuid.uuid4().hex
                 workdir.mkdir(mode=0o700)
                 os.chown(workdir, account.pw_uid, account.pw_gid)

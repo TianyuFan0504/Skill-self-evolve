@@ -13,6 +13,7 @@ import os
 import pwd
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -97,15 +98,24 @@ def main() -> int:
     report["agent_user"] = {"name": account.pw_name, "uid": account.pw_uid}
     check(os.access("/opt/alfworld-tools/alfworld-step", os.X_OK), "The game tool is missing")
     task_config = json.loads(Path(os.environ["ALFWORLD_TASK_CONFIG"]).read_text())
-    native_check = subprocess.run(
-        ["/usr/sbin/runuser", "-u", account.pw_name, "--", task_config[0]["agent"]["codex_bin"], "--version"],
-        env={
-            "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
-            "CODEX_NATIVE_BIN": os.environ["CODEX_NATIVE_BIN"],
-            "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"],
-        },
-        text=True, capture_output=True, timeout=15,
-    )
+    work_root = Path("/tmp/alfworld-skill-episodes")
+    work_root.mkdir(mode=0o711, exist_ok=True)
+    check(not work_root.is_symlink() and work_root.stat().st_uid == os.geteuid(), "Unsafe episode work parent")
+    work_root.chmod(0o711)
+    with tempfile.TemporaryDirectory(prefix="preflight-", dir=work_root) as directory:
+        os.chown(directory, account.pw_uid, account.pw_gid)
+        os.chmod(directory, 0o700)
+        native_check = subprocess.run(
+            ["/usr/sbin/runuser", "-u", account.pw_name, "--", "/bin/sh", "-c",
+             'cd "$1" && shift && exec "$@"', "native-check", directory,
+             task_config[0]["agent"]["codex_bin"], "--version"],
+            env={
+                "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
+                "CODEX_NATIVE_BIN": os.environ["CODEX_NATIVE_BIN"],
+                "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"],
+            },
+            text=True, capture_output=True, timeout=15,
+        )
     check(native_check.returncode == 0, f"Restricted native Codex launch failed: {native_check.stderr.strip()}")
     report["restricted_native_codex_version"] = native_check.stdout.strip()
 
