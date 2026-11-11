@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -75,7 +76,12 @@ def archive_previous_attempt(run: Path) -> None:
 
 def install_codex_runtime(run: Path, benchmark: Path, capacity: int) -> tuple[Path, Path]:
     """Install only public instructions/launcher outside the private NAS tree."""
-    public = Path("/opt/alfworld-tools/skill_self_evolve") / hashlib.sha256(str(run).encode()).hexdigest()[:16]
+    public_root = Path("/opt/alfworld-tools/skill_self_evolve")
+    public_root.mkdir(parents=True, exist_ok=True, mode=0o755)
+    # mkdir(parents=True) respects a private umask for intermediate ancestors.
+    # This directory contains only public launcher/instruction files.
+    public_root.chmod(0o755)
+    public = public_root / hashlib.sha256(str(run).encode()).hexdigest()[:16]
     public.mkdir(parents=True, exist_ok=True, mode=0o755)
     public.chmod(0o755)
     instructions = public / "solver_system.md"
@@ -228,7 +234,45 @@ def supervise(run: Path, argv: list[str], service_pid: int | None) -> int:
 
         signal.signal(signal.SIGTERM, forward_signal)
         signal.signal(signal.SIGINT, forward_signal)
-        code = process.wait()
+        stop_sampling = threading.Event()
+
+        def sample_resources():
+            with (run / "resources.jsonl").open("a", buffering=1) as resource_log:
+                while not stop_sampling.is_set():
+                    row = {"timestamp": time.time(), "training_pid": process.pid}
+                    try:
+                        sample = subprocess.run(
+                            ["nvidia-smi", "--query-gpu=index,memory.used,utilization.gpu,power.draw",
+                             "--format=csv,noheader,nounits"],
+                            text=True, capture_output=True, check=True, timeout=8,
+                        )
+                        row["gpu_fields"] = ["index", "memory_mib", "utilization_percent", "power_watts"]
+                        row["gpus"] = [line.split(", ") for line in sample.stdout.strip().splitlines()]
+                        row["load_average"] = os.getloadavg()
+                        row["root_available_bytes"] = shutil.disk_usage("/").free
+                        row["scratch_available_bytes"] = shutil.disk_usage(os.environ.get("TMPDIR", "/tmp")).free
+                    except Exception as error:
+                        row["sampling_error"] = f"{type(error).__name__}: {error}"
+                    resource_log.write(json.dumps(row, allow_nan=False) + "\n")
+                    resource_log.flush()
+                    os.fsync(resource_log.fileno())
+                    stop_sampling.wait(15)
+
+        sampler = threading.Thread(target=sample_resources, name="skill-resource-sampler", daemon=True)
+        sampler.start()
+        try:
+            code = process.wait()
+        finally:
+            stop_sampling.set()
+            sampler.join(timeout=10)
+    ray_root = Path(os.environ.get("RAY_TMPDIR", "/tmp")) / "ray"
+    for session in ray_root.glob(f"session_*_{process.pid}"):
+        if (session / "logs").is_dir():
+            destination = run / "runtime_logs" / (session.name + "_" + str(time.time_ns()))
+            try:
+                shutil.copytree(session / "logs", destination, symlinks=True)
+            except OSError as error:
+                write_json(run / "runtime-log-copy-error.json", {"error": str(error), "source": str(session)})
     (run / "exit-code.txt").write_text(str(code) + "\n")
     write_json(
         status,
@@ -309,6 +353,14 @@ def main() -> int:
     data.mkdir(exist_ok=True)
     runtime = run / "runtime"
     runtime.mkdir(exist_ok=True)
+    # Concurrent first-use kernel compilation exhausted the small root disk in
+    # the real eight-GPU smoke. Use the large shared-memory filesystem for
+    # transient files; durable trajectories and logs still go to this NAS run.
+    scratch = Path("/dev/shm") / ("skill-tmp-" + hashlib.sha256(str(run).encode()).hexdigest()[:8])
+    scratch.mkdir(mode=0o700, exist_ok=True)
+    os.environ.setdefault("TMPDIR", str(scratch))
+    # Keep Ray socket paths short even when the run directory has a long name.
+    os.environ.setdefault("RAY_TMPDIR", "/dev/shm")
     prompt_length = int(os.environ.setdefault("MAX_PROMPT_LENGTH", "4096"))
     response_length = int(os.environ.setdefault("MAX_RESPONSE_LENGTH", "32768"))
     capacity = prompt_length + response_length
@@ -399,6 +451,9 @@ def main() -> int:
         "DEV_MAX_SAMPLES",
         "TRAINER_MODE",
         "RESUME_MODE",
+        "TMPDIR",
+        "RAY_TMPDIR",
+        "EVALUATE_OFFICIAL_TESTS",
     }
     safe_env = {name: os.environ[name] for name in public_settings if name in os.environ}
     write_json(

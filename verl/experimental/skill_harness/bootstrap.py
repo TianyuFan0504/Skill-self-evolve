@@ -151,6 +151,7 @@ def runtime_env_config() -> dict[str, Any]:
         "SKILL_RUN_DIR",
         "SKILL_DATA_DIR",
         "ALFWORLD_TASK_CONFIG",
+        "ALFWORLD_ENV_PYTHON",
         "ALFWORLD_DATA_DIR",
         "MODEL_PATH",
         "HF_HUB_OFFLINE",
@@ -163,6 +164,8 @@ def runtime_env_config() -> dict[str, Any]:
         "DO_NOT_TRACK",
         "TOKENIZERS_PARALLELISM",
         "VLLM_WORKER_MULTIPROC_METHOD",
+        "TMPDIR",
+        "RAY_TMPDIR",
     )
     env_vars.update({key: os.environ[key] for key in passthrough if key in os.environ})
     return {

@@ -96,6 +96,18 @@ def main() -> int:
     account = pwd.getpwnam("alfworld_eval")
     report["agent_user"] = {"name": account.pw_name, "uid": account.pw_uid}
     check(os.access("/opt/alfworld-tools/alfworld-step", os.X_OK), "The game tool is missing")
+    task_config = json.loads(Path(os.environ["ALFWORLD_TASK_CONFIG"]).read_text())
+    native_check = subprocess.run(
+        ["/usr/sbin/runuser", "-u", account.pw_name, "--", task_config[0]["agent"]["codex_bin"], "--version"],
+        env={
+            "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
+            "CODEX_NATIVE_BIN": os.environ["CODEX_NATIVE_BIN"],
+            "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"],
+        },
+        text=True, capture_output=True, timeout=15,
+    )
+    check(native_check.returncode == 0, f"Restricted native Codex launch failed: {native_check.stderr.strip()}")
+    report["restricted_native_codex_version"] = native_check.stdout.strip()
 
     from hydra import compose, initialize_config_dir
     from omegaconf import OmegaConf

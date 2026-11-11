@@ -66,3 +66,16 @@ rollout when CuPy is absent. The CPU preflight now validates the selected
 backend before launching model workers. Dedicated EMA curator transport uses
 its own separately configured checkpoint engine and must not reuse this route.
 
+The first native rollout exposed an intermediate public-runtime directory with
+mode 0700 under the host's restrictive umask. Runtime installation now makes
+only that public launcher directory traversable, and CPU preflight executes
+the actual wrapper as `alfworld_eval` to verify access before any model loads.
+It does not relax private benchmark, run or administration directories.
+
+Concurrent first-use GPU kernel compilation briefly filled the 49 GiB root
+filesystem. New runs put transient compiler files and Ray scratch in the large
+`/dev/shm` filesystem. The supervisor records GPU memory, utilization, power,
+host load and available disk every 15 seconds in `resources.jsonl`, and copies
+owned Ray logs back to the durable NAS run after training exits. Failed attempts
+and the append-only training log remain preserved.
+
