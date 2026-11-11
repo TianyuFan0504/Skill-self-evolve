@@ -254,6 +254,12 @@ skill_harness:
 
   split_manifest: ${oc.env:ALFWORLD_DATA_DIR}/split_manifest.json
 
+  terminal:
+
+    enabled: true
+
+    binding_root: ${skill_harness.artifact_root}/terminal_bindings
+
   evaluation:
 
     initial: ${oc.decode:${oc.env:EVALUATE_OFFICIAL_TESTS,false}}

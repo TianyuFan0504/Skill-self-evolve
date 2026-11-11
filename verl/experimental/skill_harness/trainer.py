@@ -62,6 +62,17 @@ class SkillSyncTrainer(PPOTrainerSync):
                 raise FloatingPointError(f"Nonfinite optimizer metric: {key}={value}")
         append_metrics(self.artifact_root, step=global_steps, phase="train", metrics=metrics)
 
+    def get_llm_client(self):
+        terminal = self.config.skill_harness.get("terminal", {})
+        if not terminal.get("enabled", False):
+            return super().get_llm_client()
+        from .alfworld.backend_terminal import TerminalAwareLLMServerClient
+
+        return self.llm_server_manager.get_client(
+            client_cls=TerminalAwareLLMServerClient,
+            binding_root=terminal.get("binding_root", str(self.artifact_root / "terminal_bindings")),
+        )
+
     def _validate(self):
         metrics = super()._validate()
         append_metrics(

@@ -405,7 +405,16 @@ class PolicyRoute:
     def get_client(self) -> PolicyRouteClient:
         if not self.ready or self.failed or self._syncing:
             raise RuntimeError("The policy route has no completely published policy available")
-        return PolicyRouteClient(self.manager.get_client(), self.spec, self.optimizer_step, self.attestation)
+        terminal = self.config.get("skill_harness", {}).get("terminal", {})
+        if self.spec.kind == "frozen" and terminal.get("enabled", False):
+            from .alfworld.backend_terminal import TerminalAwareLLMServerClient
+
+            delegate = self.manager.get_client(
+                client_cls=TerminalAwareLLMServerClient, binding_root=terminal["binding_root"],
+            )
+        else:
+            delegate = self.manager.get_client()
+        return PolicyRouteClient(delegate, self.spec, self.optimizer_step, self.attestation)
 
     async def sync_ema(self, optimizer_step: int):
         """Publish one observed EMA version, then reopen replica submission gates."""
