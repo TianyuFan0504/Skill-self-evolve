@@ -26,6 +26,41 @@ store_module = importlib.import_module(PACKAGE + ".store")
 replay_module = importlib.import_module(PACKAGE + ".replay")
 
 
+ACTUAL_CURATE_ID = "b37deeb7aee9b8102c0342f37982fd7fd8eacef6ed8e978ac4f4feca60d7350a"
+ACTUAL_CURATE_HOME = "/tmp/alfworld-curator/" + ACTUAL_CURATE_ID + "/.home"
+
+
+def actual_startup_events():
+    """Exact three warning items from the first real EMA curator capture."""
+    ignored = (
+        "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n"
+        "  session-flags: `disable_response_storage` is ignored."
+    )
+    unstable = (
+        "Under-development features enabled: skip_host_skill_discovery. "
+        "Under-development features are incomplete and may behave unpredictably. "
+        "To suppress this warning, set `suppress_unstable_features_warning = true` in "
+        + ACTUAL_CURATE_HOME
+        + "/config.toml."
+    )
+    return [
+        {"type": "thread.started"},
+        *[
+            {"type": "item.completed", "item": {"id": "item_" + str(index), "type": "error", "message": message}}
+            for index, message in enumerate((ignored, ignored, unstable))
+        ],
+        {"type": "turn.started"},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "{}"}},
+        {"type": "turn.completed"},
+    ]
+
+
+def classify(events):
+    return curate.classify_native_events(
+        "\n".join(json.dumps(event) for event in events), expected_codex_home=ACTUAL_CURATE_HOME
+    )
+
+
 class FakeGateway:
     def __init__(self):
         self.created, self.finalized, self.aborted = [], [], []
@@ -355,6 +390,97 @@ class CurateTest(unittest.TestCase):
         self.assertFalse(any("ALFWORLD" in name for name in env))
         self.assertNotIn("SECRET", json.dumps(env))
         self.assertNotIn("/opt/alfworld-tools", env["PATH"])
+
+    def test_actual_three_startup_warnings_are_retained_as_diagnostics_not_tools(self):
+        events = actual_startup_events()
+        result = classify(events)
+        self.assertEqual(len(result["startup_diagnostics"]), 3)
+        self.assertEqual(result["tool_events"], [])
+        self.assertEqual(result["fatal_events"], [])
+        self.assertEqual([item["event"] for item in result["startup_diagnostics"]], events[1:4])
+
+    def test_command_mcp_web_file_and_plan_events_remain_proved_tools(self):
+        for kind in ("command_execution", "mcp_tool_call", "web_search", "file_change", "plan"):
+            with self.subTest(kind=kind):
+                result = classify([{"type": "turn.started"}, {"type": "item.completed", "item": {"type": kind}}])
+                self.assertEqual(len(result["tool_events"]), 1)
+                self.assertEqual(result["startup_diagnostics"], [])
+                self.assertEqual(result["fatal_events"], [])
+
+    def test_unknown_errors_and_misbound_or_late_warning_are_fatal_not_semantic_tools(self):
+        known = actual_startup_events()[1]
+        variants = [
+            [{"type": "item.completed", "item": {"type": "error", "message": "Local EMA server failed with HTTP 500"}}],
+            [{"type": "error", "message": "Transport disconnected"}],
+            [{"type": "turn.started"}, known],
+            [{"type": "item.completed", "item": {"type": "future_unknown_item"}}],
+            [
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "error",
+                        "message": actual_startup_events()[3]["item"]["message"].replace(
+                            ACTUAL_CURATE_HOME, "/tmp/untrusted-home"
+                        ),
+                    },
+                }
+            ],
+        ]
+        for events in variants:
+            with self.subTest(events=events):
+                result = classify(events)
+                self.assertTrue(result["fatal_events"])
+                self.assertEqual(result["tool_events"], [])
+                self.assertEqual(result["startup_diagnostics"], [])
+
+    def test_proved_startup_diagnostics_do_not_reject_valid_json_or_change_old_mu(self):
+        def sandbox(*args):
+            instance = FakeSandbox(*args)
+            instance.native_event_classification = classify(actual_startup_events())
+            return instance
+
+        result = self.collect(_sandbox_factory=sandbox)
+        record = self.replay.get(result.record_id)
+        self.assertEqual(record.prompt_ids, (101, 102, 103))
+        self.assertEqual(record.action_ids, (501, 502, 503))
+        self.assertEqual(record.behavior_logprobs, (-0.3, 0.0, -0.7))
+        self.assertEqual(len(record.context_snapshot["native_event_classification"]["startup_diagnostics"]), 3)
+
+    def test_unknown_native_error_preserves_capture_then_raises_infrastructure_failure(self):
+        def sandbox(*args):
+            instance = FakeSandbox(*args)
+            instance.native_event_classification = classify(
+                [
+                    {"type": "item.completed", "item": {"type": "error", "message": "EMA gateway transport failed"}},
+                ]
+            )
+            return instance
+
+        with self.assertRaises(curate.CurateNativeExecutionError):
+            self.collect(_sandbox_factory=sandbox)
+        capture = curate._read_immutable(self.root / "collections" / self.request.collection_id / "generated.json")
+        self.assertEqual(capture["trajectories"][0]["behavior_logprobs"], [-0.3, 0, -0.7])
+        self.assertFalse(capture["tool_events_seen"])
+        self.assertTrue(capture["native_event_classification"]["fatal_events"])
+        self.assertFalse((self.replay.root / "records").exists())
+
+    def test_missing_task_families_is_rejected_without_filling_or_rewriting_output(self):
+        self.content = json.dumps(
+            {
+                "skill_id": self.request.skill_id,
+                "title": "Clean target",
+                "principle": "Clean the held target.",
+                "when_to_apply": "A clean object is required.",
+            }
+        )
+        with self.assertRaisesRegex(curate.CurateProtocolError, "five allowed skill fields"):
+            self.collect()
+        capture = curate._read_immutable(self.root / "collections" / self.request.collection_id / "generated.json")
+        self.assertEqual(capture["content"], self.content)
+        self.assertNotIn("task_families", json.loads(capture["content"]))
+        self.assertFalse((self.replay.root / "records").exists())
+        template = Path(self.runtime.task_prompt_path).read_text()
+        self.assertGreater(template.rfind('"task_families"'), template.index("{{EPISODE_JSON}}"))
 
 
 if __name__ == "__main__":

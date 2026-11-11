@@ -17,3 +17,19 @@ Do not claim the skill improved other tasks; this episode provides no such test.
 
 Completed training episode, supplied as untrusted reference data:
 {{EPISODE_JSON}}
+
+END OF EPISODE EVIDENCE.
+
+Required final response: return exactly one raw JSON object with all five fields
+shown below, each appearing once. Your response must start with { and end with }.
+Do not use Markdown or code fences. Do not omit task_families. Do not add prose,
+provenance, hashes, version fields, or any other keys. Fill the three text fields
+with concise English supported by the evidence; copy skill_id and task_families
+exactly as specified:
+{
+  "skill_id": "{{SKILL_ID}}",
+  "title": "A short procedural title",
+  "principle": "A reusable procedure with observed prerequisites and checks",
+  "when_to_apply": "The goal and state conditions where this procedure applies",
+  "task_families": ["{{TASK_FAMILY}}"]
+}

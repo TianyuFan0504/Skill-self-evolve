@@ -38,7 +38,8 @@ from .alfworld.data import TASK_TYPES, validate_relative_game_path
 from .replay import CurateReplay, CurateReplayRecord, ReplayRef
 from .store import SkillArtifact, SkillCandidate, SkillStore
 
-COLLECTOR_VERSION = "native-codex-curate-v1"
+COLLECTOR_VERSION = "native-codex-curate-v2"
+EVENT_CLASSIFIER_VERSION = "codex-startup-diagnostics-v1"
 NATIVE_CODEX_VERSION = "0.167.0"
 SAMPLING = {
     "temperature": 1.0,
@@ -91,6 +92,102 @@ class CurateProtocolError(ValueError):
 
 class CurateRecoveryRequired(RuntimeError):
     """An earlier launch lacks a durable capture; do not silently resample it."""
+
+
+class CurateNativeExecutionError(RuntimeError):
+    """An unknown native error is infrastructure failure, never a tool reward."""
+
+
+def classify_native_events(stdout, *, expected_codex_home=None):
+    """Classify native JSON events without changing the raw event/token stream.
+
+    Only two exact, observed Codex 0.167 startup warning forms are diagnostic.
+    The feature warning must name this transport's isolated home. They cease to
+    be startup diagnostics after the first turn/model item. Unknown error/item
+    types fail closed as execution failures instead of fabricated tool calls.
+    """
+    ignored_config = (
+        "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n"
+        "  session-flags: `disable_response_storage` is ignored."
+    )
+    feature_warning = None
+    if expected_codex_home is not None:
+        feature_warning = (
+            "Under-development features enabled: skip_host_skill_discovery. "
+            "Under-development features are incomplete and may behave unpredictably. "
+            "To suppress this warning, set `suppress_unstable_features_warning = true` in "
+            + str(Path(expected_codex_home) / "config.toml")
+            + "."
+        )
+    tool_types = {
+        "command_execution",
+        "mcp_tool_call",
+        "web_search",
+        "web_search_call",
+        "file_change",
+        "plan",
+        "tool_call",
+        "function_call",
+        "custom_tool_call",
+        "computer_call",
+        "collab_agent_tool_call",
+        "shell_command",
+        "exec_command",
+        "apply_patch",
+        "image_generation",
+    }
+    content_types = {"agent_message", "message", "reasoning"}
+    controls = {"thread.started", "turn.started", "turn.completed", "response.completed", "process.completed"}
+    result = {
+        "schema_version": 1,
+        "classifier_version": EVENT_CLASSIFIER_VERSION,
+        "startup_diagnostics": [],
+        "tool_events": [],
+        "fatal_events": [],
+    }
+    started = False
+    for number, line in enumerate(stdout.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            result["fatal_events"].append({"line": number, "kind": "non_json_stdout", "text": line})
+            continue
+        if not isinstance(event, dict):
+            result["fatal_events"].append({"line": number, "kind": "invalid_event", "event": event})
+            continue
+        event_type, item = event.get("type"), event.get("item")
+        entry = {"line": number, "event": event}
+        if event_type in {"error", "turn.failed"}:
+            result["fatal_events"].append({**entry, "kind": "native_execution_error"})
+            continue
+        if isinstance(item, dict) and event_type not in {"item.started", "item.updated", "item.completed"}:
+            result["fatal_events"].append({**entry, "kind": "unknown_event_type"})
+            continue
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type in content_types:
+                started = True
+            elif item_type in tool_types:
+                started = True
+                result["tool_events"].append({**entry, "kind": "native_tool_invocation"})
+            elif item_type == "error":
+                message = item.get("message")
+                known = message == ignored_config or (feature_warning is not None and message == feature_warning)
+                if not started and event_type == "item.completed" and known:
+                    result["startup_diagnostics"].append({**entry, "kind": "known_startup_warning"})
+                else:
+                    result["fatal_events"].append({**entry, "kind": "unrecognized_native_error"})
+            else:
+                result["fatal_events"].append({**entry, "kind": "unknown_item_type"})
+        elif event_type not in controls:
+            result["fatal_events"].append({**entry, "kind": "unknown_event_type"})
+        if event_type == "turn.started":
+            started = True
+        if event_type == "process.completed" and event.get("exit_code", 0) != 0:
+            result["fatal_events"].append({**entry, "kind": "native_process_failed"})
+    return result
 
 
 def _canonical(value):
@@ -563,6 +660,7 @@ class CuratorSandbox:
         os.chown(self.home, runtime.uid, runtime.gid)
         self.created_files = []
         self.tool_events_seen = False
+        self.native_event_classification = None
         self.process = None
 
     async def write_file(self, path, content):
@@ -649,11 +747,12 @@ class CuratorSandbox:
             await asyncio.gather(*readers)
             raise
         stdout, stderr = await asyncio.wait_for(asyncio.gather(*readers), timeout=10)
-        for line in stdout.decode(errors="replace").splitlines():
-            with contextlib.suppress(ValueError):
-                item = json.loads(line).get("item")
-                if isinstance(item, dict) and item.get("type") not in {"agent_message", "message", "reasoning"}:
-                    self.tool_events_seen = True
+        self.native_event_classification = classify_native_events(
+            stdout.decode(errors="replace"),
+            expected_codex_home=self.home,
+        )
+        self.tool_events_seen = bool(self.native_event_classification["tool_events"])
+        _write_immutable(self.output_dir / "native-events-classified.json", self.native_event_classification)
         return ExecResult(
             -1 if timed_out else self.process.returncode,
             stdout.decode(errors="replace"),
@@ -886,6 +985,7 @@ async def collect_curate_candidate(
                         "agent_ok": (agent_result.info or {}).get("ok") is True,
                         "agent_finished": agent_result.finished is True,
                         "tool_events_seen": sandbox.tool_events_seen,
+                        "native_event_classification": getattr(sandbox, "native_event_classification", None),
                     },
                 )
             except BaseException as error:
@@ -902,6 +1002,11 @@ async def collect_curate_candidate(
         captured = _read_immutable(captured_path)
         if captured["input_hash"] != input_hash:
             raise CurateProtocolError("Captured curate behavior/source differs from this retry")
+        event_classification = captured.get("native_event_classification") or {}
+        if event_classification.get("fatal_events"):
+            raise CurateNativeExecutionError(
+                "Native Codex emitted an unknown execution error; see retained event classification"
+            )
         if captured["agent_ok"] is not True or captured["agent_finished"] is not True or captured["tool_events_seen"]:
             raise CurateProtocolError("Curator must complete successfully without any native tool invocation")
         if len(captured["trajectories"]) != 1:
@@ -940,6 +1045,7 @@ async def collect_curate_candidate(
             "observed_min_weight_version": tokens["observed_min_weight_version"],
             "observed_max_weight_version": tokens["observed_max_weight_version"],
             "actual_logprobs_source": "EMA_gateway_TITO; never_recomputed",
+            "native_event_classification": event_classification,
             "task_metadata": {
                 "official_split": "train",
                 "dataset_phase": "train",
