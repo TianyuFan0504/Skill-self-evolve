@@ -66,6 +66,23 @@ binary. A per-run model catalog declares the same model name, context capacity
 and parallel-tool capability. Per-run paths prevent an instruction edit in a
 new run from changing an active experiment.
 
+The wrapper enables `skip_host_skill_discovery` and sets
+`-c skills.include_instructions=false`. The second setting removes Codex's
+automatic Skills catalog and Skill roots from the model input, including the
+per-attempt `CODEX_HOME` path. The discovery flag alone does not remove that
+block. This does not remove the harness's explicit SkillStore content from the
+Task user message. Native tokenization and the declared tools remain unchanged.
+A CPU-only request capture on Codex 0.167.0 checked two distinct homes: the
+automatic block and home paths disappeared, while all nine tool declarations
+were identical. Every capture endpoint response was HTTP 400; no model or
+generated response was involved. The evidence manifest is
+`/root/nas_chaohuang/skill_training/diagnostics/native_solver_skill_instructions_1794433121134095868/evidence-manifest.json`.
+
+The joint checkpoint fingerprint includes the solver wrapper, launcher,
+`solver_system.md` and `solver_task.txt` bytes. Changing these input assets
+requires a compatible new source cut; it cannot silently resume an old joint
+checkpoint.
+
 Codex runs under the `alfworld_eval` account and interacts using only
 `alfworld-step 'EXACT ACTION'`. Private server capabilities, game files, expert
 plans and other episode artifacts are not supplied to that account. The Task

@@ -11,4 +11,4 @@ if [[ ! -x "$native_bin" || ! -r "$instructions_file" ]]; then
 fi
 
 override=$(/usr/bin/python3 -c 'import json,sys; print("model_instructions_file=" + json.dumps(sys.argv[1]))' "$instructions_file")
-exec "$native_bin" -c "$override" -c allow_login_shell=false "$@"
+exec "$native_bin" -c "$override" -c allow_login_shell=false --enable skip_host_skill_discovery -c skills.include_instructions=false "$@"

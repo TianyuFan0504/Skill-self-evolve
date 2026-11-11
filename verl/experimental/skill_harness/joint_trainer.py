@@ -79,6 +79,10 @@ def _source_fingerprint():
         "verl/workers/engine/base.py", "verl/workers/engine/fsdp/transformer_impl.py",
         "verl/utils/checkpoint/fsdp_checkpoint_manager.py", "verl/trainer/ppo/v1/trainer_base.py",
         "verl/trainer/ppo/v1/trainer_sync.py", "verl/trainer/ppo/core_algos.py",
+        "examples/skill_self_evolve/scripts/codex_entrypoint.sh",
+        "examples/skill_self_evolve/scripts/launch.py",
+        "examples/skill_self_evolve/prompts/solver_system.md",
+        "examples/skill_self_evolve/prompts/solver_task.txt",
     ))
     payload = [(path.relative_to(root).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
                for path in sorted(set(paths))]

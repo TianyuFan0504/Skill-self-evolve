@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -110,7 +112,48 @@ class RuntimeContractsTest(unittest.TestCase):
         self.assertEqual(lines[0], "-c")
         self.assertEqual(json.loads(lines[1].split("=", 1)[1]), str(instructions))
         self.assertEqual(lines[2:4], ["-c", "allow_login_shell=false"])
-        self.assertEqual(lines[4:], ["exec", "--model", "Qwen3.5-4B-nothink"])
+        self.assertEqual(lines[4:6], ["--enable", "skip_host_skill_discovery"])
+        self.assertEqual(lines[6:8], ["-c", "skills.include_instructions=false"])
+        self.assertEqual(lines[8:], ["exec", "--model", "Qwen3.5-4B-nothink"])
+
+    def test_checkpoint_fingerprint_binds_solver_input_assets(self):
+        tree = ast.parse((ROOT / "verl/experimental/skill_harness/joint_trainer.py").read_text())
+        function = next(
+            node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_source_fingerprint"
+        )
+        namespace = {
+            "Path": Path,
+            "verl": self.verl,
+            "hashlib": hashlib,
+            "actual_adapter_sha256": lambda: "verified-adapter",
+            "_digest": lambda value: hashlib.sha256(repr(value).encode()).hexdigest(),
+        }
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "actual_source_fingerprint", "exec"), namespace)
+        for node in ast.walk(function):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                value = node.value
+                if value.startswith(("verl/", "examples/")) and value.endswith((".py", ".sh", ".md", ".txt")):
+                    path = self.source / value
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("original bytes\n")
+        initial = namespace["_source_fingerprint"]()
+        for relative in (
+            "examples/skill_self_evolve/scripts/codex_entrypoint.sh",
+            "examples/skill_self_evolve/scripts/launch.py",
+            "examples/skill_self_evolve/prompts/solver_system.md",
+            "examples/skill_self_evolve/prompts/solver_task.txt",
+        ):
+            with self.subTest(asset=relative):
+                path = self.source / relative
+                original = path.read_bytes()
+                path.write_bytes(original + b"changed\n")
+                self.assertNotEqual(namespace["_source_fingerprint"](), initial)
+                path.write_bytes(original)
+                self.assertEqual(namespace["_source_fingerprint"](), initial)
+                path.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    namespace["_source_fingerprint"]()
+                path.write_bytes(original)
 
 
 if __name__ == "__main__":
