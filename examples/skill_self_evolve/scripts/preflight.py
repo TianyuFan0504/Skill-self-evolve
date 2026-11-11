@@ -104,6 +104,11 @@ def main() -> int:
     with initialize_config_dir(config_dir=str(RECIPE / "config"), version_base=None):
         cfg = compose(config_name="alfworld_train", overrides=overrides)
     OmegaConf.resolve(cfg)
+    from verl.checkpoint_engine import CheckpointEngineRegistry
+
+    backend = cfg.actor_rollout_ref.rollout.checkpoint_engine.backend
+    CheckpointEngineRegistry.get(backend)
+    report["solver_checkpoint_backend"] = backend
     check(cfg.actor_rollout_ref.rollout.n >= 2, "GRPO requires stochastic response groups")
     check(cfg.data.train_files.endswith("/train.parquet"), "The training recipe must consume train.parquet")
     check(cfg.data.val_files.endswith("/dev.parquet"), "Scheduled validation must use train-derived dev.parquet")

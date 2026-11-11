@@ -169,7 +169,9 @@ actor_rollout_ref:
 
     checkpoint_engine:
 
-      backend: nccl
+      # The pinned sync trainer uses colocated solver synchronization. EMA
+      # curator transport is configured separately and never reuses this route.
+      backend: naive
 
     val_kwargs:
 

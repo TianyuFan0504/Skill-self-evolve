@@ -56,3 +56,13 @@ All public downloads and GitHub operations run on the local workstation.
 Source archives, wheels and offline server commit bundles move over SSH.
 No GitHub credential is copied to the server. Internal loopback services
 and Ray/Gateway traffic remain inside the training instance.
+# Colocated solver weight synchronization
+
+The pinned synchronous V1 trainer explicitly uses the `naive` checkpoint
+manager for its colocated online solver replicas. Keep the recipe's solver
+checkpoint backend consistent with that manager. An `nccl` setting here eagerly
+initializes an unused optional transport in actor workers and can fail before
+rollout when CuPy is absent. The CPU preflight now validates the selected
+backend before launching model workers. Dedicated EMA curator transport uses
+its own separately configured checkpoint engine and must not reuse this route.
+
