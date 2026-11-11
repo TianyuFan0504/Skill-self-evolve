@@ -61,5 +61,41 @@ class SkillSyncTrainer(PPOTrainerSync):
 
     def _validate(self):
         metrics = super()._validate()
-        append_metrics(self.artifact_root, step=self.global_steps, phase="dev", metrics=metrics)
+        append_metrics(
+            self.artifact_root,
+            step=self.global_steps,
+            phase=getattr(self, "_evaluation_phase", "dev"),
+            stage=getattr(self, "_evaluation_stage", None),
+            metrics=metrics,
+        )
         return metrics
+
+    def on_train_begin(self):
+        super().on_train_begin()
+        evaluation = self.config.skill_harness.get("evaluation", {})
+        if evaluation.get("initial", False):
+            from .evaluation import evaluate_official_splits
+
+            if (self.artifact_root / "evaluation/initial/summary.json").exists():
+                if self.global_steps <= 1:
+                    raise FileExistsError("A fresh optimizer run cannot replace a completed initial test baseline")
+                return
+            if self.global_steps > 1:
+                raise RuntimeError("A resumed trained policy cannot be labeled as an initial baseline")
+            evaluate_official_splits(self, phase_prefix="initial")
+
+    def fit(self, agent_loop_manager):
+        evaluation = self.config.skill_harness.get("evaluation", {})
+        if self.config.trainer.get("val_only", False) and any(evaluation.values()):
+            raise ValueError("Initial/final training comparisons require a training run, not val_only")
+        result = super().fit(agent_loop_manager)
+        if evaluation.get("final", False):
+            from .evaluation import evaluate_official_splits
+
+            # The stock fit drains and closes its writer before returning.
+            self._init_dump_executor()
+            try:
+                evaluate_official_splits(self, phase_prefix="final")
+            finally:
+                self._shutdown_dump_executor()
+        return result

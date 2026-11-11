@@ -28,10 +28,19 @@ def json_value(value: Any) -> Any:
     raise TypeError(f"Unsupported telemetry value: {type(value).__name__}")
 
 
-def append_metrics(root: str | Path, *, step: int, phase: str, metrics: Mapping[str, Any]) -> None:
+def append_metrics(
+    root: str | Path,
+    *,
+    step: int,
+    phase: str,
+    metrics: Mapping[str, Any],
+    stage: str | None = None,
+) -> None:
     """Persist one complete row; metrics are evidence, not acceptance decisions."""
     if phase not in {"train", "dev", "test_seen", "test_unseen", "system"}:
         raise ValueError(f"Unknown metric phase: {phase}")
+    if stage is not None and (stage not in {"initial", "final"} or not phase.startswith("test_")):
+        raise ValueError("Evaluation stage is only valid for initial/final official test metrics")
     path = Path(root) / "metrics.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
@@ -41,6 +50,8 @@ def append_metrics(root: str | Path, *, step: int, phase: str, metrics: Mapping[
         "timestamp": time.time(),
         "metrics": json_value(metrics),
     }
+    if stage is not None:
+        row["evaluation_stage"] = stage
     encoded = json.dumps(row, allow_nan=False, sort_keys=True) + "\n"
     with path.open("a", encoding="utf-8") as output:
         fcntl.flock(output, fcntl.LOCK_EX)

@@ -179,3 +179,16 @@ into an improvement. A successful exit only proves execution, not learning.
 This recipe uses the official `AgentFrameworkRolloutAdapter`, Task registry,
 native CodexAgent, Gateway token-in/token-out protocol, TransferQueue and FSDP2.
 It does not replace those components with an inference-only agent loop.
+# Initial and final official tests
+
+Set `EVALUATE_OFFICIAL_TESTS=true` for a full training experiment. The same
+initialized native Uni-Agent/Codex manager evaluates all 140 official seen and
+134 unseen games before optimization and after successful training. Greedy
+sampling, model context limits, prompt hashes and complete task identities
+must match between stages. Scheduled intermediate validation still uses only
+the train-derived development partition. Official tests never generate curate
+actions or optimizer updates. Their trajectories, protocols and metrics are
+saved under `evaluation/initial` and `evaluation/final`; append-only telemetry
+also records the stage explicitly. The default is false for integration smoke
+runs, which do not establish improved test performance.
+

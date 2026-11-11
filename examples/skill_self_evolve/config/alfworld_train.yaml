@@ -252,6 +252,12 @@ skill_harness:
 
   split_manifest: ${oc.env:ALFWORLD_DATA_DIR}/split_manifest.json
 
+  evaluation:
+
+    initial: ${oc.decode:${oc.env:EVALUATE_OFFICIAL_TESTS,false}}
+
+    final: ${oc.decode:${oc.env:EVALUATE_OFFICIAL_TESTS,false}}
+
   ema:
 
     enabled: false

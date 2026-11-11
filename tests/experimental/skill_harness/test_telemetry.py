@@ -43,6 +43,15 @@ class TelemetryTest(unittest.TestCase):
             self.assertIsNone(rows[0]["metrics"]["loss"])
             self.assertEqual([r["phase"] for r in rows], ["train", "dev"])
 
+    def test_official_comparisons_keep_initial_and_final_stages(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for stage in ("initial", "final"):
+                telemetry.append_metrics(folder, step=2, phase="test_unseen", stage=stage, metrics={"acc": 0.5})
+            rows = [json.loads(line) for line in (Path(folder) / "metrics.jsonl").read_text().splitlines()]
+            self.assertEqual([row["evaluation_stage"] for row in rows], ["initial", "final"])
+            with self.assertRaises(ValueError):
+                telemetry.append_metrics(folder, step=2, phase="train", stage="initial", metrics={})
+
 
 if __name__ == "__main__":
     unittest.main()
