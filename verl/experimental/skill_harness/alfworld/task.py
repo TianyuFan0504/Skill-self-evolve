@@ -30,6 +30,9 @@ from .protocol import (
 class AlfworldUserSandbox(LocalSandbox):
     """Use the existing non-root benchmark account and retain partial Codex logs."""
 
+    CAPTURE_DRAIN_TIMEOUT_SECONDS = 10.0
+    TERMINATION_TIMEOUT_SECONDS = 10.0
+
     def __init__(self, session_url: str, output: Path):
         self.session_url = session_url
         self.output = output
@@ -76,59 +79,100 @@ class AlfworldUserSandbox(LocalSandbox):
             start_new_session=True,
         )
 
-        async def capture(reader, filename):
-            chunks = []
+        started = time.time()
+        buffers = {"stdout": bytearray(), "stderr": bytearray()}
+        termination_signals = []
+
+        async def capture(reader, channel, filename):
             with (self.output / filename).open("ab") as stream:
                 while True:
                     chunk = await reader.read(65536)
                     if not chunk:
                         break
+                    buffers[channel].extend(chunk)
                     stream.write(chunk)
                     stream.flush()
-                    chunks.append(chunk)
-            return b"".join(chunks)
 
         pumps = [
-            asyncio.create_task(capture(proc.stdout, "codex-events.jsonl")),
-            asyncio.create_task(capture(proc.stderr, "codex-stderr.log")),
+            asyncio.create_task(capture(proc.stdout, "stdout", "codex-events.jsonl")),
+            asyncio.create_task(capture(proc.stderr, "stderr", "codex-stderr.log")),
         ]
 
-        async def terminate():
+        async def wait_for_parent_exit():
+            # asyncio Process.wait may wait for inherited pipes as well as the
+            # direct child. Its returncode is set by the child watcher at exit;
+            # observe that fact independently, then bound pipe draining below.
+            while proc.returncode is None:
+                await asyncio.sleep(0.01)
+
+        def signal_group(value):
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
+                os.killpg(proc.pid, value)
+                termination_signals.append(signal.Signals(value).name)
             except ProcessLookupError:
                 pass
+
+        async def terminate():
+            signal_group(signal.SIGTERM)
             try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
+                await asyncio.wait_for(wait_for_parent_exit(), timeout=self.TERMINATION_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                await proc.wait()
+                signal_group(signal.SIGKILL)
+                await wait_for_parent_exit()
+            # The parent may already have exited while a descendant retains
+            # the pipes. Do not leave an owned background process alive merely
+            # because waiting for the direct child returned immediately.
+            await asyncio.sleep(0.01)
+            if not proc.stdout.at_eof() or not proc.stderr.at_eof():
+                signal_group(signal.SIGKILL)
 
         timed_out = False
         cancelled = False
+        drain_timed_out = False
         try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout)
+            await asyncio.wait_for(wait_for_parent_exit(), timeout=timeout)
         except asyncio.TimeoutError:
             timed_out = True
             await terminate()
         except asyncio.CancelledError:
             cancelled = True
             await terminate()
+        draining = asyncio.gather(*pumps)
         try:
-            captured = await asyncio.wait_for(asyncio.gather(*pumps), timeout=10)
+            await asyncio.wait_for(draining, timeout=self.CAPTURE_DRAIN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             # A descendant holding an inherited pipe cannot stall the runner.
+            drain_timed_out = True
             await terminate()
-            captured = [b"", b"Log drain exceeded its timeout; partial logs are retained on disk."]
+        except asyncio.CancelledError:
+            cancelled = True
+            await terminate()
+        # Cancellation may finish the gathering future after wait_for raises.
+        # Retrieve its result so no orphaned CancelledError reaches the loop.
+        await asyncio.gather(draining, return_exceptions=True)
+        diagnostics = {
+            "schema_version": 1,
+            "pid": proc.pid,
+            "started_at_epoch": started,
+            "finished_at_epoch": time.time(),
+            "native_exit_code": proc.returncode,
+            "returned_exit_code": None if cancelled else -1 if timed_out else proc.returncode,
+            "timed_out": timed_out,
+            "cancelled": cancelled,
+            "drain_timed_out": drain_timed_out,
+            "stdout_bytes": len(buffers["stdout"]),
+            "stderr_bytes": len(buffers["stderr"]),
+            "termination_signals": termination_signals,
+        }
+        # Capture failures are host diagnostics, never invented native stderr.
+        with (self.output / "native-capture-diagnostics.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(diagnostics, sort_keys=True) + "\n")
         if cancelled:
             raise asyncio.CancelledError
         return ExecResult(
             exit_code=-1 if timed_out else proc.returncode,
-            stdout=captured[0].decode(errors="replace"),
-            stderr=captured[1].decode(errors="replace"),
+            stdout=bytes(buffers["stdout"]).decode(errors="replace"),
+            stderr=bytes(buffers["stderr"]).decode(errors="replace"),
         )
 
 
