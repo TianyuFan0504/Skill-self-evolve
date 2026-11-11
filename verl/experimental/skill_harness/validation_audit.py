@@ -200,6 +200,10 @@ class ValidationCaseAudit:
                         native_error=task.get("agent_error")
                         or (None if task.get("agent_ok") is True else "native_not_ok"),
                         attempt_id=task.get("attempt_id"),
+                        expected_host_terminal_stop=task.get("expected_host_terminal_stop") is True,
+                        expected_backend_terminal_stop=task.get("expected_backend_terminal_stop") is True,
+                        backend_stop_confirmed=task.get("backend_stop_confirmed"),
+                        terminal_stop=task.get("terminal_stop"),
                     )
                     if task.get("reward") != float(won) or task.get("accuracy") != float(won):
                         case["reasons"].append("Task reward/accuracy differs from authoritative engine won")
@@ -276,6 +280,15 @@ class ValidationCaseAudit:
             "parent_observed_reward_denominator": len(observed_scores),
             "expected_case_denominator": len(cases),
             "native_error_cases": sum(bool(case["native_error"]) for case in cases),
+            "expected_host_terminal_stop_cases": sum(case.get("expected_host_terminal_stop", False) for case in cases),
+            "expected_backend_terminal_stop_cases": sum(
+                case.get("expected_backend_terminal_stop", False) for case in cases
+            ),
+            "backend_unconfirmed_cases": sum(case.get("backend_stop_confirmed") is not True for case in raw_cases),
+            "unexpected_native_error_cases": sum(
+                bool(case["native_error"]) and not case.get("expected_host_terminal_stop", False)
+                and not case.get("expected_backend_terminal_stop", False) for case in cases
+            ),
             "complete": complete,
             "reasons": reasons,
             "cases": cases,

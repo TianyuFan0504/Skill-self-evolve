@@ -9,6 +9,7 @@ import ast
 import asyncio
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -44,10 +45,15 @@ Workspace = load_workspace_class()
 def load_sandbox_class():
     path = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/task.py"
     tree = ast.parse(path.read_text())
+    spec = importlib.util.spec_from_file_location("_paired_capture_guard", path.with_name("terminal_guard.py"))
+    guard = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = guard
+    spec.loader.exec_module(guard)
     node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "AlfworldUserSandbox")
     scope = {
         "asyncio": asyncio, "json": json, "os": os, "signal": __import__("signal"), "time": time, "Path": Path,
         "LocalSandbox": object, "ExecResult": types.SimpleNamespace,
+        "monitor_terminal_process": guard.monitor_terminal_process,
     }
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
     return scope["AlfworldUserSandbox"]
@@ -221,6 +227,12 @@ class NativeHomeTrackingTest(unittest.IsolatedAsyncioTestCase):
             with tempfile.TemporaryDirectory() as directory:
                 sandbox.output = Path(directory)
                 sandbox.session_url = "http://127.0.0.1/unused"
+
+                async def nonterminal():
+                    return {"done": False, "won": False}
+
+                sandbox._observe_terminal_state = nonterminal
+                sandbox.TERMINAL_POLL_SECONDS = .005
                 command = f"mkdir -p {home} && env CODEX_HOME={home} /usr/bin/printf 'native-output\\n'"
                 with patch.object(asyncio, "create_subprocess_exec", side_effect=direct_exec):
                     result = await sandbox._exec(["bash", "-c", command], timeout=2, workdir=directory)

@@ -213,6 +213,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         )
         self.actor, self.gateways, self.probe_calls, self.curate_calls = FakeActor(), [], [], []
         self.negative_probe = False
+        self.unknown_backend = False
         self.curate_bad_content = {}
         self.curate_bad_fields = {}
         self.curate_tool_indices = set()
@@ -373,14 +374,37 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                         "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                     }
                 )
+            # This replaces the native/backend boundary, not the real CF
+            # verifier. A normal completed session must still attest its exact
+            # private attempt and every owned backend RPC having drained.
+            binding = {
+                "binding_id": "binding_" + hashlib.sha256(session.encode()).hexdigest()[:16],
+                "binding_sha256": hashlib.sha256(session.encode()).hexdigest(),
+                "attempt_id": "attempt_" + session,
+                "gateway_session_id": session,
+                "environment_session_id": "environment_" + hashlib.sha256(session.encode()).hexdigest()[:16],
+            }
+            receipt = {
+                **binding, "schema_version": 1, "status": "unconfirmed" if self.unknown_backend else "drained",
+                "fenced": False, "active_requests": int(self.unknown_backend),
+                "backend_stop_confirmed": not self.unknown_backend, "expected_backend_terminal_stop": False,
+            }
             return {
+                "session_id": session,
                 "finished": True,
                 "reward": reward,
                 "accuracy": reward,
                 "policy_attestation": arguments["frozen_attestation"],
                 "extra_info": {
                     "eval_completed": True,
+                    "agent_ok": True,
+                    "error": None,
                     "episode_output_dir": str(output),
+                    "attempt_id": binding["attempt_id"],
+                    "environment_session_id": binding["environment_session_id"],
+                    "backend_binding": binding,
+                    "backend_terminal": receipt,
+                    "backend_stop_confirmed": not self.unknown_backend,
                     "role": "counterfactual_probe",
                     "credit_probe_group": group,
                     "credit_probe_variant": variant,
@@ -403,7 +427,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                         "injected_refs": [ref.to_dict() for ref in refs],
                     },
                 },
-                "trajectories": [{"extra_fields": {}, "prompt_ids": [10], "response_ids": [20]}],
+                "trajectories": [{"extra_fields": {}, "prompt_ids": [10], "response_ids": [20], "response_mask": [1]}],
             }
 
         return await probes.collect_counterfactual_probe(**kwargs, run_branch=branch)
@@ -413,6 +437,20 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.actor.update_actor(prepared.data)
         await controller.after_update_and_sync(data, step, prepared=prepared, optimizer_step=self.actor.clock)
         return prepared
+
+    async def test_unconfirmed_backend_exposure_never_settles_or_enters_replay(self):
+        controller = await self.create()
+        await self.update(controller, self.solver(), 1)
+        self.unknown_backend = True
+        prepared = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
+        self.assertTrue((prepared.data["role_id"] == 0).all())
+        self.assertEqual(prepared.acknowledgments, ())
+        self.assertEqual(controller.ledger.sample_ready(100), [])
+        self.assertEqual(self.actor.anchor_calls, [])
+        pending = list(controller.state["pending"].values())
+        self.assertTrue(pending)
+        self.assertTrue(all(not row["observed"] for row in pending))
+        self.assertTrue(any(row["unobserved"] for row in pending))
 
     async def test_first_step_solver_only_then_future_native_credit_enters_same_optimizer(self):
         controller = await self.create()

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .alfworld.terminal_guard import _validated_state
 from .context import pin_prompt_group
 from .credit import CreditProtocol, EvaluationOutcome, UsageEvent
 from .replay import _identifier, _plain, _publish_immutable, _read_payload
@@ -30,6 +31,69 @@ from .store import SkillRef, SkillStore
 
 class ProbeNotObserved(RuntimeError):
     """No valid paired exposure was observed; this is not a zero utility label."""
+
+
+def _backend_drained(capture):
+    info = capture.get("extra_info", {})
+    proof, bound = info.get("backend_terminal", {}), info.get("backend_binding", {})
+    return bool(
+        isinstance(proof, dict) and isinstance(bound, dict) and info.get("backend_stop_confirmed") is True
+        and proof.get("schema_version") == 1 and proof.get("backend_stop_confirmed") is True
+        and proof.get("active_requests") == 0
+        and (proof.get("fenced") is True or (
+            proof.get("status") == "drained" and info.get("agent_ok") is True and not info.get("error")
+            and info.get("expected_host_terminal_stop") is not True
+            and info.get("expected_backend_terminal_stop") is not True
+        ))
+        and proof.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+        and proof.get("attempt_id") == info.get("attempt_id")
+        and proof.get("gateway_session_id") == capture.get("session_id")
+        and proof.get("environment_session_id") == info.get("environment_session_id")
+        and isinstance(proof.get("binding_sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", proof["binding_sha256"])
+        and all(bound.get(key) is not None and proof.get(key) == bound[key] for key in (
+            "binding_id", "binding_sha256", "attempt_id", "gateway_session_id", "environment_session_id"
+        ))
+    )
+
+
+def _proven_terminal_stop(info, engine, output, rows, *, backend=False):
+    proof = info.get("backend_terminal" if backend else "terminal_stop", {})
+    if not isinstance(proof, dict):
+        return False
+    observed = _validated_state(proof.get("terminal_state"))
+    requested = (
+        info.get("expected_backend_terminal_stop") is True and proof.get("expected_backend_terminal_stop") is True
+        and proof.get("fenced") is True
+        and proof.get("status") in ("terminal_refused", "terminal_aborted")
+    ) if backend else (
+        info.get("expected_host_terminal_stop") is True and proof.get("status") == "terminal_stop"
+        and proof.get("termination_requested") is True and proof.get("termination_completed") is True
+        and proof.get("alive_after_termination") is False
+    )
+    if not (
+        requested and observed
+        and (observed[0]["done"] or observed[0]["won"])
+        and proof.get("terminal_state_hash") == observed[1] and observed[0]["won"] == engine.get("won")
+        and all(observed[0].get(key) == engine.get(key) for key in ("steps", "max_steps"))
+    ):
+        return False
+    private_done = engine.get("won") is True or engine.get("step_limit") is True
+    trace = output / "environment-trace.jsonl"
+    if not private_done and trace.is_file():
+        history = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()]
+        private_done = bool(history and history[-1].get("after", {}).get("done") is True)
+    if not private_done:
+        return False
+    for row in rows:
+        prompt, response, mask = row.get("prompt_ids"), row.get("response_ids"), row.get("response_mask")
+        if (
+            not isinstance(prompt, list) or not prompt or not isinstance(response, list) or not response
+            or not isinstance(mask, list) or len(response) != len(mask) or not any(mask)
+            or any(type(token) is not int or token < 0 for token in [*prompt, *response])
+            or any(type(value) is not int or value not in (0, 1) for value in mask)
+        ):
+            return False
+    return bool(rows)
 
 
 def validate_frozen_attestation(value, *, evaluator_version=None):
@@ -281,7 +345,12 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     if capture.get("finished") is not True or capture.get("reward") not in (0.0, 1.0):
         raise ProbeNotObserved("Probe did not finish with an authoritative binary environment result")
     info = capture.get("extra_info", {})
-    if info.get("error") or info.get("eval_completed") is not True:
+    if (
+        (info.get("error") and not (
+            info.get("expected_host_terminal_stop") is True or info.get("expected_backend_terminal_stop") is True
+        ))
+        or info.get("eval_completed") is not True
+    ):
         raise ProbeNotObserved("A failed native agent branch cannot become a counterfactual label")
     if capture.get("accuracy") != capture["reward"]:
         raise ValueError("Probe reward and authoritative engine accuracy differ")
@@ -296,6 +365,8 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     rows = capture.get("trajectories", [])
     if not rows:
         raise ProbeNotObserved("Native Gateway returned no token trajectory")
+    if not _backend_drained(capture):
+        raise ProbeNotObserved("Counterfactual backend drain is unknown, pending, or not bound to this exact attempt")
     attestation = validate_frozen_attestation(
         capture.get("policy_attestation"), evaluator_version=request.evaluator_version
     )
@@ -313,6 +384,14 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
         or bool(engine["won"]) != bool(capture["reward"])
     ):
         raise ValueError("Probe outcome differs from the private environment result")
+    if info.get("expected_backend_terminal_stop") is True:
+        if not _proven_terminal_stop(info, engine, output, rows, backend=True):
+            raise ProbeNotObserved("Backend terminal stop lacks matching private environment proof or numeric TITO")
+    elif info.get("expected_host_terminal_stop") is True:
+        if not _proven_terminal_stop(info, engine, output, rows):
+            raise ProbeNotObserved("Host terminal stop lacks matching private environment proof or numeric TITO")
+    elif info.get("error"):
+        raise ProbeNotObserved("A native bookkeeping error without proven terminal stop cannot become a credit label")
     initial = json.loads((output / "initial-state.json").read_text())
     state_hash = hashlib.sha256(
         json.dumps(initial, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()

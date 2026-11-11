@@ -31,6 +31,7 @@ from .protocol import (
     validate_game_reference,
     validate_loopback_url,
 )
+from .terminal_guard import _validated_state, monitor_terminal_process
 
 
 class PairedWorkspace:
@@ -216,12 +217,24 @@ class AlfworldUserSandbox(LocalSandbox):
 
     CAPTURE_DRAIN_TIMEOUT_SECONDS = 10.0
     TERMINATION_TIMEOUT_SECONDS = 10.0
+    TERMINAL_GRACE_SECONDS = 5.0
+    TERMINAL_POLL_SECONDS = 0.25
+    TERMINAL_OBSERVATION_TIMEOUT_SECONDS = 2.0
 
     def __init__(self, session_url: str, output: Path):
         self.session_url = session_url
         self.output = output
         self.account = pwd.getpwnam("alfworld_eval")
         self.native_codex_homes = []
+        self.terminal_stop_evidence = []
+
+    async def _observe_terminal_state(self):
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.TERMINAL_OBSERVATION_TIMEOUT_SECONDS)
+        ) as client:
+            async with client.get(self.session_url + "/observe") as response:
+                response.raise_for_status()
+                return await response.json()
 
     async def write_file(self, path, content):
         await super().write_file(path, content)
@@ -279,6 +292,8 @@ class AlfworldUserSandbox(LocalSandbox):
         started = time.time()
         buffers = {"stdout": bytearray(), "stderr": bytearray()}
         termination_signals = []
+        termination_lock = asyncio.Lock()
+        termination_finished = False
 
         async def capture(reader, channel, filename):
             with (self.output / filename).open("ab") as stream:
@@ -310,18 +325,37 @@ class AlfworldUserSandbox(LocalSandbox):
                 pass
 
         async def terminate():
-            signal_group(signal.SIGTERM)
-            try:
-                await asyncio.wait_for(wait_for_parent_exit(), timeout=self.TERMINATION_TIMEOUT_SECONDS)
-            except asyncio.TimeoutError:
-                signal_group(signal.SIGKILL)
-                await wait_for_parent_exit()
-            # The parent may already have exited while a descendant retains
-            # the pipes. Do not leave an owned background process alive merely
-            # because waiting for the direct child returned immediately.
-            await asyncio.sleep(0.01)
-            if not proc.stdout.at_eof() or not proc.stderr.at_eof():
-                signal_group(signal.SIGKILL)
+            nonlocal termination_finished
+            async with termination_lock:
+                if termination_finished:
+                    return
+                signal_group(signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(wait_for_parent_exit(), timeout=self.TERMINATION_TIMEOUT_SECONDS)
+                except asyncio.TimeoutError:
+                    signal_group(signal.SIGKILL)
+                    await wait_for_parent_exit()
+                await asyncio.sleep(0.01)
+                if not proc.stdout.at_eof() or not proc.stderr.at_eof():
+                    signal_group(signal.SIGKILL)
+                termination_finished = True
+
+        def preserve_terminal_evidence(evidence):
+            value = evidence.to_dict()
+            value["backend_stop_confirmed"] = None  # CLI ownership does not attest backend GPU cancellation.
+            if not hasattr(self, "terminal_stop_evidence"):
+                self.terminal_stop_evidence = []
+            self.terminal_stop_evidence.append(value)
+            with (self.output / "terminal-stop-evidence.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(value, sort_keys=True) + "\n")
+                stream.flush()
+
+        monitor = asyncio.create_task(monitor_terminal_process(
+            self._observe_terminal_state, lambda: proc.returncode is None, terminate, process_id=proc.pid,
+            grace_seconds=self.TERMINAL_GRACE_SECONDS, poll_seconds=self.TERMINAL_POLL_SECONDS,
+            observation_timeout_seconds=self.TERMINAL_OBSERVATION_TIMEOUT_SECONDS,
+            on_evidence=preserve_terminal_evidence,
+        ))
 
         timed_out = False
         cancelled = False
@@ -347,6 +381,13 @@ class AlfworldUserSandbox(LocalSandbox):
         # Cancellation may finish the gathering future after wait_for raises.
         # Retrieve its result so no orphaned CancelledError reaches the loop.
         await asyncio.gather(draining, return_exceptions=True)
+        if cancelled or timed_out:
+            monitor.cancel()
+        monitor_result = (await asyncio.gather(monitor, return_exceptions=True))[0]
+        terminal_monitor_error = (
+            type(monitor_result).__name__ if isinstance(monitor_result, BaseException)
+            and not isinstance(monitor_result, asyncio.CancelledError) else None
+        )
         diagnostics = {
             "schema_version": 1,
             "pid": proc.pid,
@@ -360,6 +401,8 @@ class AlfworldUserSandbox(LocalSandbox):
             "stdout_bytes": len(buffers["stdout"]),
             "stderr_bytes": len(buffers["stderr"]),
             "termination_signals": termination_signals,
+            "terminal_monitor_error": terminal_monitor_error,
+            "backend_stop_confirmed": None,
         }
         # Capture failures are host diagnostics, never invented native stderr.
         with (self.output / "native-capture-diagnostics.jsonl").open("a", encoding="utf-8") as stream:
@@ -443,6 +486,9 @@ class AlfworldSkillTrainingTask(Task):
             paired_workspace = None
             workspace_provenance = None
             sandbox = None
+            backend_binding = backend_receipt = None
+            backend_error = None
+            gateway_session_id = None
             try:
                 if created.get("catalog_digest") != metadata["catalog_digest"]:
                     raise ValueError("The environment response has a different catalog digest")
@@ -478,15 +524,39 @@ class AlfworldSkillTrainingTask(Task):
                 (output / "agent-messages.json").write_text(json.dumps(messages, indent=2) + "\n")
                 (output / "agent-prompt.txt").write_text("\n\n".join(m["content"] for m in messages) + "\n")
                 sandbox = AlfworldUserSandbox(base + "/session/" + session_id, output)
-                agent_result = await self.build_agent().run(sandbox=sandbox, messages=messages, workdir=str(workdir))
+                agent = self.build_agent()
+                from urllib.parse import urlsplit
+
+                from .backend_terminal import bind_episode
+
+                gateway_url = agent.config.model.base_url
+                parts = urlsplit(gateway_url).path.split("/")
+                gateway_session_id = parts[parts.index("sessions") + 1]
+                backend_binding = bind_episode(
+                    Path(metadata["run_dir"]) / "terminal_bindings", gateway_base_url=gateway_url,
+                    environment_session_url=base + "/session/" + session_id, attempt_id=attempt_id,
+                )
+                agent_result = await agent.run(sandbox=sandbox, messages=messages, workdir=str(workdir))
                 agent_info = agent_result.info or {}
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
             finally:
                 try:
-                    async with client.post(base + "/admin/close/" + session_id, headers=headers) as response:
-                        response.raise_for_status()
-                        engine = await response.json()
+                    try:
+                        if backend_binding is not None:
+                            from .backend_terminal import wait_for_terminal_drain
+
+                            try:
+                                backend_receipt = await wait_for_terminal_drain(backend_binding, timeout_seconds=15)
+                                (output / "backend-terminal-drain.json").write_text(
+                                    json.dumps(backend_receipt, sort_keys=True) + "\n"
+                                )
+                            except Exception as exc:
+                                backend_error = f"{type(exc).__name__}: {exc}"
+                    finally:
+                        async with client.post(base + "/admin/close/" + session_id, headers=headers) as response:
+                            response.raise_for_status()
+                            engine = await response.json()
                 finally:
                     # Completed workspaces must not become memory for later runs.
                     if paired_workspace is not None and paired_workspace.active:
@@ -502,6 +572,63 @@ class AlfworldSkillTrainingTask(Task):
                         os.chmod(workdir, 0o700)
             validate_game_reference(engine, metadata, metadata["catalog_digest"])
             reward = authoritative_reward(engine)
+            terminal_stop = (getattr(sandbox, "terminal_stop_evidence", []) or [None])[-1]
+            expected_terminal_stop = False
+            private_done = engine["won"] or engine.get("step_limit") is True
+            trace = output / "environment-trace.jsonl"
+            if not private_done and trace.is_file():
+                entries = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()]
+                private_done = bool(entries and entries[-1].get("after", {}).get("done") is True)
+            if terminal_stop:
+                observed = _validated_state(terminal_stop.get("terminal_state"))
+                expected_terminal_stop = bool(
+                    observed and (observed[0]["done"] or observed[0]["won"]) and private_done
+                    and terminal_stop.get("status") == "terminal_stop"
+                    and terminal_stop.get("termination_requested") is True
+                    and terminal_stop.get("termination_completed") is True
+                    and terminal_stop.get("alive_after_termination") is False
+                    and terminal_stop.get("terminal_state_hash") == observed[1]
+                    and observed[0]["won"] == engine["won"]
+                    and all(observed[0].get(key) == engine.get(key) for key in ("steps", "max_steps"))
+                )
+            def bound_field(key):
+                if isinstance(backend_binding, dict):
+                    return backend_binding.get(key)
+                return getattr(backend_binding, key, None)
+
+            backend_confirmed = None
+            expected_backend_stop = False
+            if isinstance(backend_receipt, dict):
+                bound = bool(
+                    backend_receipt.get("schema_version") == 1
+                    and backend_receipt.get("attempt_id") == attempt_id
+                    and backend_receipt.get("gateway_session_id") == gateway_session_id
+                    and backend_receipt.get("environment_session_id") == session_id
+                    and bound_field("binding_id") is not None
+                    and bound_field("binding_sha256") is not None
+                    and all(backend_receipt.get(key) == bound_field(key) for key in ("binding_id", "binding_sha256"))
+                    and backend_receipt.get("active_requests") == 0
+                    and (backend_receipt.get("fenced") is True or (
+                        backend_receipt.get("status") == "drained" and agent_info.get("ok") is True
+                        and agent_info.get("error") is None and agent_info.get("exit_code") == 0
+                        and not expected_terminal_stop
+                    ))
+                )
+                if (
+                    bound and backend_receipt.get("backend_stop_confirmed") is True
+                    and backend_receipt.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+                ):
+                    backend_confirmed = True
+                    observed = _validated_state(backend_receipt.get("terminal_state"))
+                    expected_backend_stop = bool(
+                        observed and private_done and (observed[0]["done"] or observed[0]["won"])
+                        and backend_receipt.get("expected_backend_terminal_stop") is True
+                        and backend_receipt.get("fenced") is True
+                        and backend_receipt.get("status") in ("terminal_refused", "terminal_aborted")
+                        and backend_receipt.get("terminal_state_hash") == observed[1]
+                        and observed[0]["won"] == engine["won"]
+                        and all(observed[0].get(key) == engine.get(key) for key in ("steps", "max_steps"))
+                    )
             result = {
                 **manifest,
                 **engine,
@@ -514,6 +641,13 @@ class AlfworldSkillTrainingTask(Task):
                 "agent_exit_status": agent_info.get("exit_status"),
                 "wall_seconds_total": time.time() - started,
                 "workdir": str(workdir) if workdir is not None else None,
+                "terminal_stop": terminal_stop, "expected_host_terminal_stop": expected_terminal_stop,
+                "backend_terminal": backend_receipt, "backend_terminal_error": backend_error,
+                "backend_stop_confirmed": backend_confirmed, "expected_backend_terminal_stop": expected_backend_stop,
+                "backend_binding": {key: bound_field(key) for key in (
+                    "binding_id", "binding_sha256", "attempt_id", "gateway_session_id", "environment_session_id"
+                )} if backend_binding is not None else None,
+                "environment_session_id": session_id,
                 **({"skill_context": skill_context} if skill_context is not None else {}),
                 **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
             }
@@ -531,9 +665,15 @@ class AlfworldSkillTrainingTask(Task):
                     "steps": engine["steps"],
                     "invalid_actions": engine["invalid_actions"],
                     "agent_ok": result["agent_ok"],
-                    "error": result["agent_error"],
+                    "agent_exit_code": result["agent_exit_code"],
+                    "error": result["agent_error"] or backend_error,
                     "eval_completed": error is None,
                     "eval_execution_time": result["wall_seconds_total"],
+                    "terminal_stop": terminal_stop, "expected_host_terminal_stop": expected_terminal_stop,
+                    "backend_terminal": backend_receipt, "backend_terminal_error": backend_error,
+                    "backend_stop_confirmed": backend_confirmed,
+                    "expected_backend_terminal_stop": expected_backend_stop,
+                    "backend_binding": result["backend_binding"], "environment_session_id": session_id,
                     **({"skill_context": skill_context} if skill_context is not None else {}),
                     **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                 },

@@ -111,13 +111,25 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             archive.write_bytes(("CPU contract fixture: " + kwargs["session_id"]).encode())
             archives.append({"source": source, "path": str(archive), "removed": True,
                              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()})
+        binding = {
+            "binding_id": "binding_" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:16],
+            "binding_sha256": hashlib.sha256(kwargs["session_id"].encode()).hexdigest(),
+            "attempt_id": "attempt_" + kwargs["session_id"], "gateway_session_id": kwargs["session_id"],
+            "environment_session_id": "env_" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:16],
+        }
+        receipt = {**binding, "schema_version": 1, "status": "drained", "fenced": True,
+                   "active_requests": 0, "backend_stop_confirmed": True, "expected_backend_terminal_stop": False}
         return {
+            "session_id": kwargs["session_id"],
             "reward": reward, "accuracy": reward, "finished": True,
             "policy_attestation": attestation,
             "trajectories": [{"prompt_ids": [1, 2], "response_ids": [3], "extra_fields": extra}],
             "extra_info": {
                 "eval_completed": True, "error": None, "episode_output_dir": str(output),
+                "agent_ok": True,
                 "role": "counterfactual_probe", "credit_probe_group": group, "credit_probe_variant": variant,
+                "attempt_id": binding["attempt_id"], "environment_session_id": binding["environment_session_id"],
+                "backend_binding": binding, "backend_terminal": receipt, "backend_stop_confirmed": True,
                 "paired_workdir": {
                     "schema_version": 1, "kind": "paired_empty_workdir", "credit_probe_group": group,
                     "variant": variant, "workdir": workdir, "empty_before_run": True,
@@ -338,6 +350,83 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 gateway_manager=types.SimpleNamespace(), session_id="bad", sample_fields=self.sample,
                 artifact_dir=self.root / "bad", task_config_path="unused.yaml", frozen_attestation=self.attestation,
             )
+
+    async def test_proven_host_terminal_stop_preserves_native_error_and_authoritative_reward(self):
+        async def stopped(**kwargs):
+            capture = await self.branch(**kwargs)
+            state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
+            proof = {"status": "terminal_stop", "termination_requested": True, "termination_completed": True,
+                     "alive_after_termination": False, "terminal_state": state,
+                     "terminal_state_hash": hashlib.sha256(
+                         json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+            capture["extra_info"].update(
+                error="actual CLI exited -15", expected_host_terminal_stop=True, terminal_stop=proof
+            )
+            capture["trajectories"][0]["response_mask"] = [1]
+            path = Path(capture["extra_info"]["episode_output_dir"]) / "engine-result.json"
+            engine = json.loads(path.read_text())
+            engine.update(steps=50, max_steps=50, step_limit=not state["won"])
+            path.write_text(json.dumps(engine))
+            return capture
+
+        event = await self.collect(run_branch=stopped)
+        self.assertEqual(event.with_skill.score, 1)
+        self.assertEqual(event.without_skill.score, 0)
+        raw = probes._read_payload(self.probe_root() / "with_skill/native-capture.json")
+        self.assertEqual(raw["extra_info"]["error"], "actual CLI exited -15")
+
+    async def test_forged_host_terminal_stop_or_missing_numeric_tito_is_not_a_label(self):
+        for variant in ("hash", "tokens"):
+            self.request = replace(self.request, probe_id="invalid_terminal_" + variant)
+
+            async def invalid(variant=variant, **kwargs):
+                capture = await self.branch(**kwargs)
+                state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
+                capture["extra_info"].update(error="CLI stopped", expected_host_terminal_stop=True, terminal_stop={
+                    "status": "terminal_stop", "termination_requested": True, "termination_completed": True,
+                    "alive_after_termination": False, "terminal_state": state,
+                    "terminal_state_hash": "invalid" if variant == "hash" else hashlib.sha256(
+                        json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                })
+                capture["trajectories"][0]["response_mask"] = [] if variant == "tokens" else [1]
+                path = Path(capture["extra_info"]["episode_output_dir"]) / "engine-result.json"
+                engine = json.loads(path.read_text())
+                engine.update(steps=50, max_steps=50, step_limit=not state["won"])
+                path.write_text(json.dumps(engine))
+                return capture
+
+            with self.subTest(variant=variant), self.assertRaises(probes.ProbeNotObserved):
+                await self.collect(run_branch=invalid)
+
+    async def test_backend_terminal_refusal_is_expected_only_with_bound_drained_private_proof(self):
+        async def stopped(**kwargs):
+            capture = await self.branch(**kwargs)
+            state = {"done": True, "won": bool(capture["reward"]), "steps": 50, "max_steps": 50}
+            capture["trajectories"][0]["response_mask"] = [1]
+            receipt = capture["extra_info"]["backend_terminal"]
+            receipt.update(status="terminal_refused", expected_backend_terminal_stop=True, terminal_state=state,
+                           terminal_state_hash=hashlib.sha256(json.dumps(state, sort_keys=True,
+                                                                        separators=(",", ":")).encode()).hexdigest())
+            capture["extra_info"].update(error="actual terminal refusal CLI diagnostic",
+                                         expected_backend_terminal_stop=True)
+            path = Path(capture["extra_info"]["episode_output_dir"]) / "engine-result.json"
+            engine = json.loads(path.read_text())
+            engine.update(steps=50, max_steps=50, step_limit=not state["won"])
+            path.write_text(json.dumps(engine))
+            return capture
+
+        event = await self.collect(run_branch=stopped)
+        self.assertEqual(event.with_skill.score, 1)
+        self.assertEqual(event.without_skill.score, 0)
+
+    async def test_pending_or_unbound_backend_receipt_does_not_complete_counterfactual(self):
+        async def pending(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture["extra_info"]["backend_terminal"].update(status="unconfirmed", active_requests=1)
+            return capture
+
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "backend drain"):
+            await self.collect(run_branch=pending)
 
 
 if __name__ == "__main__":
