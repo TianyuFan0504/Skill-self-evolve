@@ -405,6 +405,10 @@ class AlfworldSkillTrainingTask(Task):
         }
         for key in (
             "sample_index",
+            "rollout_uid",
+            "session_index",
+            "evaluation_audit_id",
+            "evaluation_stage",
             "role",
             "chain_id",
             "skill_snapshot_id",

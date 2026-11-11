@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 import stat
@@ -273,8 +274,81 @@ def _dataset_components():
     return create_rl_dataset, StatefulDataLoader, collate_fn
 
 
+def _audit_module():
+    if __package__:
+        from . import validation_audit
+
+        return validation_audit
+    # Existing CPU-only source tests intentionally avoid importing verl/Ray.
+    spec = importlib.util.spec_from_file_location(
+        "_validation_audit_source", Path(__file__).with_name("validation_audit.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _validation_columns(batch, key, default=None):
+    from verl.utils import tensordict_utils as tu
+
+    value = _audit_module().plain(tu.get(batch, key, default))
+    return value
+
+
+def _prepare_validation_batch(batch, audit):
+    """Use public TensorDict unwrapping; LinkedList has no required .tolist()."""
+    from verl.utils import tensordict_utils as tu
+
+    uids = list(_validation_columns(batch, "uid"))
+    tools = _validation_columns(batch, "tools_kwargs")
+    extras = _validation_columns(batch, "extra_info")
+    if tools is None:
+        tools = [row.get("tools_kwargs", {}) for row in extras or []]
+    if isinstance(tools, dict):
+        tools = [tools] * len(uids)
+    rollout_ns = _validation_columns(batch, "__rollout_n__")
+    if rollout_ns is not None and not isinstance(rollout_ns, list | tuple):
+        rollout_ns = [rollout_ns] * len(uids)
+    stamped = audit.submit(uids, list(tools), rollout_ns)
+    tu.assign_non_tensor_stack(batch, "tools_kwargs", stamped)
+    if extras is not None:
+        values = [dict(row or {}) for row in extras]
+        for row, kwargs in zip(values, stamped, strict=True):
+            row["tools_kwargs"] = kwargs
+        tu.assign_non_tensor_stack(batch, "extra_info", values)
+
+
+def _validation_tq_rows(batch):
+    from verl.utils import tensordict_utils as tu
+    from verl.utils.transferqueue_utils import tq
+
+    fields = tq.kv_batch_get(
+        keys=batch.keys, partition_id=batch.partition_id,
+        select_fields=["uid", "session_id", "extra_fields", "rm_scores", "response_mask"],
+    )
+    plain = _audit_module().plain
+    uids, sessions, extras = (list(plain(tu.get(fields, key))) for key in ("uid", "session_id", "extra_fields"))
+
+    def sums(value):
+        if getattr(value, "is_nested", False):
+            value = value.to_padded_tensor(0)
+        return list(plain(value.sum(dim=-1)))
+
+    scores, counts = sums(fields["rm_scores"]), sums(fields["response_mask"])
+    return [
+        {"trajectory_key": key, "rollout_uid": str(uid), "session_index": int(session), "score": float(score),
+         "sampled_action_tokens": int(count),
+         "reward_context": extra.get("runner_reward_info", {}).get("reward_context", {}),
+         "min_global_steps": extra.get("min_global_steps"), "max_global_steps": extra.get("max_global_steps")}
+        for key, uid, session, score, count, extra in zip(
+            batch.keys, uids, sessions, scores, counts, extras, strict=True
+        )
+    ]
+
+
 @contextmanager
-def _validation_inputs(trainer, *, path, expected_games, phase, stage, output_dir):
+def _validation_inputs(trainer, *, path, expected_games, phase, stage, output_dir, expected_ids=None,
+                       catalog_digest=None, run_root=None):
     create_rl_dataset, loader_class, collate_fn = _dataset_components()
     config = trainer.config
     originals = {
@@ -284,6 +358,8 @@ def _validation_inputs(trainer, *, path, expected_games, phase, stage, output_di
             "val_dataloader",
             "_evaluation_phase",
             "_evaluation_stage",
+            "agent_loop_manager",
+            "replay_buffer",
         )
     }
     original_data, original_trainer_config = config.data, config.trainer
@@ -323,7 +399,20 @@ def _validation_inputs(trainer, *, path, expected_games, phase, stage, output_di
             collate_fn=collate_fn,
         )
         trainer._evaluation_phase, trainer._evaluation_stage = phase, stage
-        yield
+        if expected_ids is None:
+            manifest, _, files = _read_protocol(config.skill_harness.split_manifest)
+            expected_ids = files[phase]["ids"]
+            catalog_digest, run_root = manifest["catalog_digest"], manifest["run_dir"]
+        module = _audit_module()
+        audit = module.ValidationCaseAudit(
+            run_root=run_root, output_dir=output_dir, stage=stage, phase=phase, split=TEST_SPLITS[phase],
+            global_step=trainer.global_steps, expected_ids=expected_ids, catalog_digest=catalog_digest,
+        )
+        trainer.agent_loop_manager = module.SubmissionAuditProxy(
+            originals["agent_loop_manager"], audit, _prepare_validation_batch,
+        )
+        trainer.replay_buffer = module.SamplerAuditProxy(originals["replay_buffer"], audit, _validation_tq_rows)
+        yield audit
     finally:
         config.data, config.trainer = original_data, original_trainer_config
         for name, value in originals.items():
@@ -411,7 +500,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
             "budgets": budgets,
         },
     )
-    results = {}
+    results, case_audits, authoritative = {}, {}, {}
     try:
         with official_test_service(
             config_path=os.environ["ALFWORLD_SERVER_CONFIG"],
@@ -436,19 +525,36 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
                     phase=phase,
                     stage=phase_prefix,
                     output_dir=output_dir,
-                ):
+                    expected_ids=spec["ids"], catalog_digest=manifest["catalog_digest"], run_root=run_root,
+                ) as audit:
                     trainer.on_validate_begin()
                     try:
-                        metrics = trainer._validate()
-                        # The base trainer writes full trajectories asynchronously.
-                        # A completed evaluation must mean these files reached disk.
-                        for future in list(getattr(trainer, "_dump_futures", [])):
-                            future.result()
+                        try:
+                            metrics = trainer._validate()
+                            # Score reconciliation reads the completed real dump.
+                            for future in list(getattr(trainer, "_dump_futures", [])):
+                                future.result()
+                        except BaseException as error:
+                            audit.finish(
+                                dump_path=output_dir / f"{trainer.global_steps}.jsonl",
+                                parent_error=type(error).__name__, require_complete=False,
+                            )
+                            raise
+                        case_report = audit.finish(
+                            dump_path=output_dir / f"{trainer.global_steps}.jsonl", parent_metrics=metrics,
+                        )
                     finally:
                         trainer.on_validate_end()
                 if not metrics:
                     raise RuntimeError(f"{phase} did not produce official evaluation metrics")
                 results[phase] = metrics
+                case_audits[phase] = str(audit.report_path)
+                authoritative[phase] = {
+                    key: case_report[key] for key in (
+                        "expected_cases", "authoritative_wins", "authoritative_reward_mean", "authoritative_accuracy",
+                        "native_error_cases", "observed_weight_versions",
+                    )
+                }
                 _write_report(
                     output_dir / "metrics.json",
                     {
@@ -458,6 +564,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
                         "global_step": trainer.global_steps,
                         "expected_games": spec["games"],
                         "metrics": metrics,
+                        "case_audit_path": str(audit.report_path), "authoritative": authoritative[phase],
                     },
                 )
     except BaseException as error:
@@ -479,6 +586,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
             "global_step": trainer.global_steps,
             "completed": True,
             "metrics": results,
+            "case_audits": case_audits, "authoritative": authoritative,
         },
     )
     return results

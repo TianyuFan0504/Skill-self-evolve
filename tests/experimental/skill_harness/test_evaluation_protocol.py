@@ -270,13 +270,13 @@ class EvaluationProtocolTest(unittest.TestCase):
         self.assertEqual(trainer._evaluation_phase, "dev")
         self.assertFalse(hasattr(trainer, "_evaluation_stage"))
 
-    def test_official_evaluation_uses_same_manager_and_full_splits(self):
+    def test_truthy_metrics_without_raw_cases_do_not_complete_and_restore_same_manager(self):
         trainer = self.trainer()
         original_manager, original_loader = trainer.agent_loop_manager, trainer.val_dataloader
         phases = []
 
         def validate():
-            self.assertIs(trainer.agent_loop_manager, original_manager)
+            self.assertIs(trainer.agent_loop_manager.delegate, original_manager)
             self.assertEqual(trainer.config.data.val_max_samples, -1)
             phases.append((trainer._evaluation_phase, trainer._evaluation_stage, len(trainer.val_dataset)))
             return {"val-core/alfworld/acc/mean@1": 0.5}
@@ -293,16 +293,18 @@ class EvaluationProtocolTest(unittest.TestCase):
             patch.object(evaluation, "_verify_parquet_rows") as verify,
             patch.object(evaluation, "official_test_service", side_effect=service),
         ):
-            metrics = evaluation.evaluate_official_splits(trainer, phase_prefix="initial")
-        self.assertEqual(phases, [("test_seen", "initial", 2), ("test_unseen", "initial", 1)])
-        self.assertEqual(set(metrics), set(evaluation.TEST_SPLITS))
+            with self.assertRaisesRegex(RuntimeError, "Official cases/scores are incomplete"):
+                evaluation.evaluate_official_splits(trainer, phase_prefix="initial")
+        self.assertEqual(phases, [("test_seen", "initial", 2)])
         self.assertEqual(verify.call_count, 2)
-        self.assertEqual(trainer.on_validate_begin.call_count, 2)
-        self.assertEqual(trainer.on_validate_end.call_count, 2)
-        self.assertEqual(trainer._dump_futures[0].result.call_count, 2)
+        self.assertEqual(trainer.on_validate_begin.call_count, 1)
+        self.assertEqual(trainer.on_validate_end.call_count, 1)
+        self.assertEqual(trainer._dump_futures[0].result.call_count, 1)
         self.assertIs(trainer.val_dataloader, original_loader)
-        summary = json.loads((self.run / "evaluation/initial/summary.json").read_bytes())
-        self.assertTrue(summary["completed"])
+        self.assertIs(trainer.agent_loop_manager, original_manager)
+        self.assertFalse((self.run / "evaluation/initial/summary.json").exists())
+        audit = next((self.run / "evaluation/initial/test_seen").glob("case-session-audit-*.json"))
+        self.assertFalse(json.loads(audit.read_text())["complete"])
         reports = "".join(path.read_text() for path in (self.run / "evaluation").rglob("*.json"))
         self.assertNotIn("TRAINING-SECRET", reports)
 

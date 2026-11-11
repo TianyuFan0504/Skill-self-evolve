@@ -19,6 +19,7 @@ from uni_agent.framework.entry import AgentFrameworkRolloutAdapter
 from uni_agent.framework.framework import GatewayAgentFramework
 
 from .context import CONTEXT_BUILDER_VERSION, pin_prompt_group, token_ids_hash
+from .validation_audit import stamp_task_identity
 
 FRAMEWORK_FQN = "verl.experimental.skill_harness.framework.SkillAwareAgentFramework"
 
@@ -155,6 +156,22 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
             global_steps=global_steps,
             partition_id=partition_id,
             num_sessions=num_sessions,
+        )
+
+    async def _run_agent_episode(
+        self, *, sample_fields, sample_index, session_index, global_steps, runner_name, runner_config, sampling_params,
+    ):
+        # This supported host hook runs after fanout. No model message or token
+        # is changed, and each session gets its real identity rather than n=0.
+        fields = dict(sample_fields)
+        fields["tools_kwargs"] = stamp_task_identity(
+            sample_fields.get("tools_kwargs"), rollout_uid=str(sample_fields.get("uid", "")),
+            session_index=session_index, global_step=global_steps,
+        )
+        return await super()._run_agent_episode(
+            sample_fields=fields, sample_index=sample_index, session_index=session_index,
+            global_steps=global_steps, runner_name=runner_name, runner_config=runner_config,
+            sampling_params=sampling_params,
         )
 
     def _trajectory_to_tq_field_and_tag(
