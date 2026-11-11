@@ -226,6 +226,7 @@ class AlfworldUserSandbox(LocalSandbox):
         self.output = output
         self.account = pwd.getpwnam("alfworld_eval")
         self.native_codex_homes = []
+        self.native_model_catalogs = []
         self.terminal_stop_evidence = []
 
     async def _observe_terminal_state(self):
@@ -237,6 +238,11 @@ class AlfworldUserSandbox(LocalSandbox):
                 return await response.json()
 
     async def write_file(self, path, content):
+        if re.fullmatch(r"/tmp/codex-model-catalog-[0-9a-f]{32}\.json", str(path)):
+            if not hasattr(self, "native_model_catalogs"):
+                self.native_model_catalogs = []
+            if str(path) not in self.native_model_catalogs:
+                self.native_model_catalogs.append(str(path))
         await super().write_file(path, content)
         os.chown(path, self.account.pw_uid, self.account.pw_gid)
         os.chmod(path, 0o600)
@@ -485,6 +491,7 @@ class AlfworldSkillTrainingTask(Task):
             skill_context = None
             paired_workspace = None
             workspace_provenance = None
+            native_files = None
             sandbox = None
             backend_binding = backend_receipt = None
             backend_error = None
@@ -559,6 +566,7 @@ class AlfworldSkillTrainingTask(Task):
                             engine = await response.json()
                 finally:
                     # Completed workspaces must not become memory for later runs.
+                    normal_workspace = None
                     if paired_workspace is not None and paired_workspace.active:
                         try:
                             workspace_provenance = paired_workspace.finish(
@@ -567,9 +575,25 @@ class AlfworldSkillTrainingTask(Task):
                         except Exception as exc:
                             error = (error + "; " if error else "") + f"Paired workspace cleanup failed: {exc}"
                             workspace_provenance = paired_workspace.provenance
-                    elif workdir is not None:
-                        os.chown(workdir, 0, 0)
-                        os.chmod(workdir, 0o700)
+                    elif paired_workspace is None and workdir is not None:
+                        if workdir.is_dir() and not workdir.is_symlink():
+                            normal_workspace = workdir
+                        else:
+                            error = (error + "; " if error else "") + "Native workspace missing during cleanup"
+                    try:
+                        from .native_files import archive_native_files
+
+                        native_files = archive_native_files(
+                            output,
+                            codex_homes=(getattr(sandbox, "native_codex_homes", ())
+                                         if sandbox is not None and paired_workspace is None else ()),
+                            model_catalogs=getattr(sandbox, "native_model_catalogs", ()) if sandbox is not None else (),
+                            workspace=normal_workspace, agent_uid=account.pw_uid,
+                        )
+                    except Exception as exc:
+                        # Preserve the primary execution/ENOSPC error and every
+                        # unarchived source; cleanup never invents a task reward.
+                        error = (error + "; " if error else "") + f"Native file archival failed: {exc}"
             validate_game_reference(engine, metadata, metadata["catalog_digest"])
             reward = authoritative_reward(engine)
             terminal_stop = (getattr(sandbox, "terminal_stop_evidence", []) or [None])[-1]
@@ -650,6 +674,7 @@ class AlfworldSkillTrainingTask(Task):
                 "environment_session_id": session_id,
                 **({"skill_context": skill_context} if skill_context is not None else {}),
                 **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
+                **({"native_files": native_files} if native_files is not None else {}),
             }
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print("ALFWORLD_EPISODE_RESULT " + json.dumps(result), flush=True)
@@ -676,5 +701,6 @@ class AlfworldSkillTrainingTask(Task):
                     "backend_binding": result["backend_binding"], "environment_session_id": session_id,
                     **({"skill_context": skill_context} if skill_context is not None else {}),
                     **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
+                    **({"native_files": native_files} if native_files is not None else {}),
                 },
             )

@@ -29,6 +29,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -662,6 +663,7 @@ class CuratorSandbox:
         except KeyError:
             pass
         self.runtime, self.output_dir = runtime, Path(output_dir)
+        self.collection_id = collection_id
         self.workdir = Path(runtime.work_root) / collection_id
         self.workdir.mkdir(mode=0o700)
         os.chown(self.workdir, runtime.uid, runtime.gid)
@@ -669,19 +671,20 @@ class CuratorSandbox:
         self.home.mkdir(mode=0o700)
         os.chown(self.home, runtime.uid, runtime.gid)
         self.created_files = []
+        self.native_bootstrap_homes = []
         self.tool_events_seen = False
         self.native_event_classification = None
         self.process = None
 
     async def write_file(self, path, content):
         path = Path(path)
-        if path.parent != Path("/tmp") or not path.name.startswith("codex-model-catalog-"):
+        if path.parent != Path("/tmp") or not re.fullmatch(r"codex-model-catalog-[0-9a-f]{32}\.json", path.name):
             raise CurateProtocolError("Native curator may stage only its isolated temporary model catalog")
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        self.created_files.append(path)  # Retain ownership even if the following write fails partway through.
         with os.fdopen(fd, "wb") as stream:
             stream.write(content.encode() if isinstance(content, str) else content)
         os.chown(path, self.runtime.uid, self.runtime.gid)
-        self.created_files.append(path)
 
     def process_environment(self):
         return {
@@ -714,6 +717,12 @@ class CuratorSandbox:
 
         if env or Path(workdir).resolve() != self.workdir:
             raise CurateProtocolError("Native curator transport cannot inherit caller environment or other workspaces")
+        for token in shlex.split(script):
+            if re.fullmatch(r"CODEX_HOME=/tmp/codex-home-[0-9a-f]{32}", token):
+                home = token.split("=", 1)[1]
+                if Path(home).exists() or Path(home).is_symlink():
+                    raise CurateProtocolError("Native curator must start with a fresh bootstrap Codex home")
+                self.native_bootstrap_homes.append(home)
         self.process = await asyncio.create_subprocess_exec(
             "/usr/sbin/runuser",
             "-u",
@@ -773,9 +782,13 @@ class CuratorSandbox:
         await self._terminate()
         # Preserve logs/workspaces, but prevent later curator sessions reusing
         # another episode's files as external memory.
-        for path in [self.workdir, *self.created_files]:
-            os.chown(path, os.getuid(), os.getgid())
-            path.chmod(0o700 if path.is_dir() else 0o600)
+        from .alfworld.native_files import archive_native_files
+
+        archive_native_files(
+            self.output_dir, codex_homes=getattr(self, "native_bootstrap_homes", ()),
+            model_catalogs=self.created_files, agent_uid=self.runtime.uid,
+            curator_workdir=self.workdir, curator_root=self.runtime.work_root, curator_collection_id=self.collection_id,
+        )
 
 
 def _native_agent(runtime, handle):
@@ -1005,10 +1018,19 @@ async def collect_curate_candidate(
                 )
                 raise
             finally:
+                primary_error = sys.exc_info()[0] is not None
                 if session_created:
                     with contextlib.suppress(Exception):
                         await asyncio.shield(gateway_manager.abort_session(request.session_id))
-                await sandbox.close()
+                try:
+                    await sandbox.close()
+                except Exception as cleanup_error:
+                    with contextlib.suppress(Exception):
+                        _write_immutable(directory / "cleanup-failure.json", {
+                            "error_type": type(cleanup_error).__name__, "primary_error_retained": primary_error,
+                        })
+                    if not primary_error:
+                        raise
         captured = _read_immutable(captured_path)
         if captured["input_hash"] != input_hash:
             raise CurateProtocolError("Captured curate behavior/source differs from this retry")

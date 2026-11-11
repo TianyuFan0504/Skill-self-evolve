@@ -11,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+import uuid
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -317,6 +318,26 @@ class CurateTest(unittest.TestCase):
             self.collect()
         self.assertEqual(len(self.gateway.created), 1)
 
+    def test_cleanup_failure_preserves_primary_native_error_and_captured_tokens(self):
+        class BrokenClose(FakeSandbox):
+            async def close(self):
+                self.closed = True
+                raise OSError("CPU injected archive failure")
+
+        self.agent_error = TimeoutError("primary native timeout")
+        with self.assertRaisesRegex(TimeoutError, "primary native timeout"):
+            self.collect(_sandbox_factory=BrokenClose)
+        directory = self.root / "collections" / self.request.collection_id
+        self.assertTrue(curate._read_immutable(directory / "cleanup-failure.json")["primary_error_retained"])
+        self.request = replace(self.request, candidate_group_id="close-failure-with-capture")
+        self.agent_error = None
+        with self.assertRaisesRegex(OSError, "archive failure"):
+            self.collect(_sandbox_factory=BrokenClose)
+        directory = self.root / "collections" / self.request.collection_id
+        self.assertTrue((directory / "generated.json").exists())
+        self.assertFalse((directory / "complete.json").exists())
+        self.assertFalse((self.replay.root / "records").exists())
+
     def test_bad_format_and_fabricated_provenance_are_not_staged(self):
         for index, content in enumerate(("```json\n{}\n```", json.dumps({"provenance": "invented"}))):
             with self.subTest(content=content):
@@ -483,6 +504,39 @@ class CurateTest(unittest.TestCase):
         self.assertFalse((self.replay.root / "records").exists())
         template = Path(self.runtime.task_prompt_path).read_text()
         self.assertGreater(template.rfind('"task_families"'), template.index("{{EPISODE_JSON}}"))
+
+
+class CuratorCatalogCleanupTest(unittest.IsolatedAsyncioTestCase):
+    async def test_real_catalog_and_owned_home_are_archived_then_removed(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
+            root = Path(temporary)
+            sandbox = object.__new__(curate.CuratorSandbox)
+            sandbox.collection_id = "a" * 64
+            sandbox.workdir, sandbox.output_dir = root / sandbox.collection_id, root / "output"
+            sandbox.workdir.mkdir()
+            sandbox.output_dir.mkdir()
+            sandbox.home = sandbox.workdir / ".home"
+            sandbox.home.mkdir()
+            state = sandbox.home / "native-state.json"
+            state.write_bytes(b"original curator native home state")
+            sandbox.runtime = SimpleNamespace(uid=os.geteuid(), gid=os.getegid(), work_root=str(root))
+            sandbox.process, sandbox.created_files = None, []
+            catalog = Path("/tmp") / ("codex-model-catalog-" + uuid.uuid4().hex + ".json")
+            try:
+                await sandbox.write_file(str(catalog), '{"model":"original curator config"}')
+                self.assertEqual(sandbox.created_files, [catalog])
+                await sandbox.close()
+                receipt = json.loads((sandbox.output_dir / "native-files.json").read_text())
+                self.assertEqual(receipt["status"], "archived_and_removed")
+                self.assertFalse(catalog.exists())
+                self.assertFalse(sandbox.workdir.exists())
+                import tarfile
+
+                with tarfile.open(receipt["archive_path"]) as archive:
+                    self.assertEqual(archive.extractfile("curator_workspace-1/.home/native-state.json").read(),
+                                     b"original curator native home state")
+            finally:
+                catalog.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
