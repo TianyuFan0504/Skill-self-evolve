@@ -203,6 +203,18 @@ def start_environment(run: Path, benchmark: Path, source: Path) -> tuple[int, bo
     raise RuntimeError(f"ALFWorld service did not publish {config} within 30 seconds")
 
 
+def storage_resource_fields():
+    """Keep legacy byte telemetry and observe /tmp even on another filesystem."""
+    root, native_tmp = os.statvfs("/"), os.statvfs("/tmp")
+    return {
+        "root_available_bytes": shutil.disk_usage("/").free,
+        "scratch_available_bytes": shutil.disk_usage(os.environ.get("TMPDIR", "/tmp")).free,
+        "root_available_inodes": root.f_favail,
+        "tmp_available_bytes": native_tmp.f_bavail * native_tmp.f_frsize,
+        "tmp_available_inodes": native_tmp.f_favail,
+    }
+
+
 def supervise(run: Path, argv: list[str], service_pid: int | None) -> int:
     started = time.time()
     status = run / "status.json"
@@ -242,17 +254,25 @@ def supervise(run: Path, argv: list[str], service_pid: int | None) -> int:
                     row = {"timestamp": time.time(), "training_pid": process.pid}
                     try:
                         sample = subprocess.run(
-                            ["nvidia-smi", "--query-gpu=index,memory.used,utilization.gpu,power.draw",
-                             "--format=csv,noheader,nounits"],
-                            text=True, capture_output=True, check=True, timeout=8,
+                            [
+                                "nvidia-smi",
+                                "--query-gpu=index,memory.used,utilization.gpu,power.draw",
+                                "--format=csv,noheader,nounits",
+                            ],
+                            text=True,
+                            capture_output=True,
+                            check=True,
+                            timeout=8,
                         )
                         row["gpu_fields"] = ["index", "memory_mib", "utilization_percent", "power_watts"]
                         row["gpus"] = [line.split(", ") for line in sample.stdout.strip().splitlines()]
                         row["load_average"] = os.getloadavg()
-                        row["root_available_bytes"] = shutil.disk_usage("/").free
-                        row["scratch_available_bytes"] = shutil.disk_usage(os.environ.get("TMPDIR", "/tmp")).free
                     except Exception as error:
                         row["sampling_error"] = f"{type(error).__name__}: {error}"
+                    try:
+                        row.update(storage_resource_fields())
+                    except Exception as error:
+                        row["storage_sampling_error"] = f"{type(error).__name__}: {error}"
                     resource_log.write(json.dumps(row, allow_nan=False) + "\n")
                     resource_log.flush()
                     os.fsync(resource_log.fileno())

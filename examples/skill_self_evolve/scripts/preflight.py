@@ -18,6 +18,66 @@ import urllib.request
 from pathlib import Path
 
 RECIPE = Path(__file__).resolve().parents[1]
+MIN_NATIVE_TMP_FREE_BYTES = 10 * 1024**3
+MIN_NATIVE_TMP_FREE_INODES = 650_000
+
+
+class NativeTmpStorageError(RuntimeError):
+    """The filesystem used by upstream native launch files lacks headroom."""
+
+    def __init__(self, report):
+        self.report = report
+        super().__init__(
+            "Native Codex /tmp storage preflight failed: "
+            f"available_bytes={report['available_bytes']}, available_inodes={report['available_inodes']}; "
+            f"required_bytes={report['minimum_free_bytes']}, required_inodes={report['minimum_free_inodes']}. "
+            "Configure MIN_NATIVE_TMP_FREE_BYTES/MIN_NATIVE_TMP_FREE_INODES explicitly if needed. "
+            "The upstream launch uses /tmp; TMPDIR, /dev/shm, and NAS capacity cannot substitute."
+        )
+
+
+def native_tmp_storage_preflight(*, environ=None):
+    """Check actual /tmp bytes AND inodes before imports, native startup or GPUs.
+
+    Defaults budget 64 concurrent homes at an observed maximum of approximately
+    100 MiB/7,900 entries each, plus byte/inode reserves. Limits are explicit
+    positive integer environment overrides, independent of TMPDIR placement.
+    """
+    environ = os.environ if environ is None else environ
+    limits = {}
+    for name, default in (
+        ("MIN_NATIVE_TMP_FREE_BYTES", MIN_NATIVE_TMP_FREE_BYTES),
+        ("MIN_NATIVE_TMP_FREE_INODES", MIN_NATIVE_TMP_FREE_INODES),
+    ):
+        raw = environ.get(name, str(default))
+        try:
+            value = int(raw) if not isinstance(raw, bool) else 0
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{name} must be a positive integer") from error
+        if value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+        limits[name] = value
+    state = os.statvfs("/tmp")
+    report = {
+        "path": "/tmp",
+        "available_bytes": state.f_bavail * state.f_frsize,
+        "available_inodes": state.f_favail,
+        "minimum_free_bytes": limits["MIN_NATIVE_TMP_FREE_BYTES"],
+        "minimum_free_inodes": limits["MIN_NATIVE_TMP_FREE_INODES"],
+        "shares_root_filesystem": os.stat("/tmp").st_dev == os.stat("/").st_dev,
+        "default_budget_basis": {
+            "concurrent_native_homes": 64,
+            "observed_max_home_bytes_approx": 100 * 1024**2,
+            "observed_max_home_entries_approx": 7900,
+        },
+    }
+    report["passed"] = (
+        report["available_bytes"] >= report["minimum_free_bytes"]
+        and report["available_inodes"] >= report["minimum_free_inodes"]
+    )
+    if not report["passed"]:
+        raise NativeTmpStorageError(report)
+    return report
 
 
 def check(condition: bool, message: str) -> None:
@@ -35,6 +95,7 @@ def main() -> int:
     args = parser.parse_args()
     run = args.run_dir.resolve()
     report: dict[str, object] = {"cpu_only_import_checks": True, "run_dir": str(run)}
+    report["native_tmp_storage"] = native_tmp_storage_preflight()
     gpu_csv = subprocess.check_output(
         ["nvidia-smi", "--query-gpu=index,name,memory.total", "--format=csv,noheader"], text=True
     ).strip()
@@ -107,15 +168,28 @@ def main() -> int:
         os.chown(directory, account.pw_uid, account.pw_gid)
         os.chmod(directory, 0o700)
         native_check = subprocess.run(
-            ["/usr/sbin/runuser", "-u", account.pw_name, "--", "/bin/sh", "-c",
-             'cd "$1" && shift && exec "$@"', "native-check", directory,
-             task_config[0]["agent"]["codex_bin"], "--version"],
+            [
+                "/usr/sbin/runuser",
+                "-u",
+                account.pw_name,
+                "--",
+                "/bin/sh",
+                "-c",
+                'cd "$1" && shift && exec "$@"',
+                "native-check",
+                directory,
+                task_config[0]["agent"]["codex_bin"],
+                "--version",
+            ],
             env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "LANG": "C.UTF-8",
                 "CODEX_NATIVE_BIN": os.environ["CODEX_NATIVE_BIN"],
                 "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"],
             },
-            text=True, capture_output=True, timeout=15,
+            text=True,
+            capture_output=True,
+            timeout=15,
         )
     check(native_check.returncode == 0, f"Restricted native Codex launch failed: {native_check.stderr.strip()}")
     report["restricted_native_codex_version"] = native_check.stdout.strip()
@@ -141,8 +215,10 @@ def main() -> int:
         if cfg.skill_harness.mode == "skill_joint"
         else "uni_agent.framework.entry.AgentFrameworkRolloutAdapter"
     )
-    check(cfg.actor_rollout_ref.rollout.agent.agent_loop_manager_class == expected_adapter,
-          "The recipe must use the configured official Uni-Agent extension path")
+    check(
+        cfg.actor_rollout_ref.rollout.agent.agent_loop_manager_class == expected_adapter,
+        "The recipe must use the configured official Uni-Agent extension path",
+    )
     if cfg.skill_harness.mode == "skill_joint":
         from verl.experimental.skill_harness.curate import provision_native_curator_runtime
 
@@ -154,8 +230,15 @@ def main() -> int:
             curator_account = pwd.getpwnam("alfworld_curator")
         except KeyError:
             subprocess.run(
-                ["/usr/sbin/useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin",
-                 "alfworld_curator"], check=True,
+                [
+                    "/usr/sbin/useradd",
+                    "--system",
+                    "--no-create-home",
+                    "--shell",
+                    "/usr/sbin/nologin",
+                    "alfworld_curator",
+                ],
+                check=True,
             )
             curator_account = pwd.getpwnam("alfworld_curator")
         check(curator_account.pw_uid != 0, "The curator must use a separate restricted account")
@@ -169,7 +252,8 @@ def main() -> int:
         )
         report["curator_runtime"] = native_runtime.manifest()
         report["joint_gpu_allocation"] = {
-            "solver": int(cfg.trainer.n_gpus_per_node), "curator": int(joint.curator_gpus),
+            "solver": int(cfg.trainer.n_gpus_per_node),
+            "curator": int(joint.curator_gpus),
             "credit": int(joint.credit_gpus),
         }
     (run / "resolved-config.preflight.yaml").write_text(OmegaConf.to_yaml(cfg, resolve=True))
