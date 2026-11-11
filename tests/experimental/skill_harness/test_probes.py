@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 import sys
@@ -100,12 +101,29 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         extra = {} if clock is None else {"min_global_steps": clock, "max_global_steps": clock}
         if self.mixed_clock:
             extra = {"min_global_steps": 3, "max_global_steps": 4}
+        group = metadata["credit_probe_group"]
+        variant = metadata["credit_probe_variant"]
+        workdir = "/tmp/alfworld-skill-episodes/credit_" + group
+        home = "/tmp/codex-home-" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:32]
+        archives = []
+        for name, source in (("workspace.tar", workdir), ("codex-home.tar", home)):
+            archive = output / name
+            archive.write_bytes(("CPU contract fixture: " + kwargs["session_id"]).encode())
+            archives.append({"source": source, "path": str(archive), "removed": True,
+                             "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()})
         return {
             "reward": reward, "accuracy": reward, "finished": True,
             "policy_attestation": attestation,
             "trajectories": [{"prompt_ids": [1, 2], "response_ids": [3], "extra_fields": extra}],
             "extra_info": {
                 "eval_completed": True, "error": None, "episode_output_dir": str(output),
+                "role": "counterfactual_probe", "credit_probe_group": group, "credit_probe_variant": variant,
+                "paired_workdir": {
+                    "schema_version": 1, "kind": "paired_empty_workdir", "credit_probe_group": group,
+                    "variant": variant, "workdir": workdir, "empty_before_run": True,
+                    "cleanup_completed": True, "codex_homes": [home], "archives": archives,
+                    "host_uid": 0, "agent_uid": 1001, "agent_gid": 1001,
+                },
                 "skill_context": {"snapshot_id": metadata["skill_snapshot_id"],
                                   "injected_refs": [self.request.skill_ref.to_dict()]
                                   if loaded and not self.missing_injection else []},
@@ -129,6 +147,9 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.with_skill.score - event.without_skill.score, 1.0)
         self.assertEqual(event.with_skill.environment_state_hash, event.without_skill.environment_state_hash)
         self.assertNotIn("skill_snapshot_id", self.sample["tools_kwargs"]["task"]["metadata"])
+        self.assertEqual(self.calls[0]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"],
+                         self.calls[1]["sample_fields"]["tools_kwargs"]["task"]["metadata"]["credit_probe_group"])
+        self.assertTrue((self.probe_root() / "paired-workdirs.json").is_file())
 
     async def test_negative_and_observed_zero_utility_are_preserved(self):
         self.rewards = {True: 0.0, False: 1.0}
@@ -222,6 +243,25 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.clock_by_loaded = {True: None, False: 8}
         with self.assertRaises(ValueError):
             await self.collect()
+
+    async def test_cleanup_failure_or_changed_cwd_cannot_become_training_credit(self):
+        async def cleanup_failed(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture["extra_info"]["paired_workdir"]["cleanup_completed"] = False
+            return capture
+
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "cleanup provenance"):
+            await self.collect(run_branch=cleanup_failed)
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+        self.request = replace(self.request, probe_id="changed_cwd")
+
+        async def different_cwd(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture["extra_info"]["paired_workdir"]["workdir"] += "_random"
+            return capture
+
+        with self.assertRaises(probes.ProbeNotObserved):
+            await self.collect(run_branch=different_cwd)
 
     async def test_partial_pair_cannot_be_finished_under_new_server_lifecycle(self):
         self.fail_after = 1

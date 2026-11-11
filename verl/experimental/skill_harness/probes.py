@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -108,6 +109,52 @@ def probe_physical_id(request):
     return "probe_" + hashlib.sha256(identity.encode()).hexdigest()
 
 
+def probe_group_id(request):
+    return probe_physical_id(request).removeprefix("probe_")
+
+
+def _verify_paired_workdir(capture, request, *, loaded, output):
+    info = capture.get("extra_info", {})
+    manifest = info.get("paired_workdir", {})
+    group = probe_group_id(request)
+    variant = "with_skill" if loaded else "without_skill"
+    workdir = str(Path("/tmp/alfworld-skill-episodes") / ("credit_" + group))
+    if (
+        type(manifest.get("schema_version")) is not int or manifest["schema_version"] != 1
+        or manifest.get("kind") != "paired_empty_workdir"
+        or manifest.get("credit_probe_group") != group or manifest.get("variant") != variant
+        or manifest.get("workdir") != workdir or manifest.get("empty_before_run") is not True
+        or manifest.get("cleanup_completed") is not True
+        or info.get("role") != "counterfactual_probe" or info.get("credit_probe_group") != group
+        or info.get("credit_probe_variant") != variant
+        or any(
+            type(manifest.get(key)) is not int or manifest[key] < 0 for key in ("host_uid", "agent_uid", "agent_gid")
+        )
+    ):
+        raise ProbeNotObserved("Native branch lacks controlled empty-workdir and completed-cleanup provenance")
+    homes = manifest.get("codex_homes", [])
+    if not isinstance(homes, list) or len(homes) != 1 or not isinstance(homes[0], str):
+        raise ProbeNotObserved("Native paired branch lacks its separate per-episode Codex home")
+    if Path(homes[0]).parent != Path("/tmp") or not re.fullmatch(r"codex-home-[0-9a-f]{32}", Path(homes[0]).name):
+        raise ProbeNotObserved("The paired branch has an invalid native Codex home namespace")
+    archives = manifest.get("archives", [])
+    if len(archives) != 2 or {row.get("source") for row in archives} != {workdir, homes[0]}:
+        raise ProbeNotObserved("Paired workspace and native home were not both archived")
+    for row in archives:
+        path = Path(row["path"]).resolve()
+        if not path.is_relative_to(output) or row.get("removed") is not True:
+            raise ProbeNotObserved("Paired branch archive escaped its attempt or cleanup is incomplete")
+        hasher = hashlib.sha256()
+        if not path.is_file():
+            raise ValueError("A retained paired archive is missing")
+        with path.open("rb") as stream:
+            while chunk := stream.read(1 << 20):
+                hasher.update(chunk)
+        if hasher.hexdigest() != row.get("sha256"):
+            raise ValueError("The retained paired workspace archive differs from its host manifest")
+    return manifest
+
+
 def _observed_frozen_clock(capture):
     clocks = []
     for row in capture.get("trajectories", []):
@@ -192,7 +239,11 @@ async def native_probe_branch(
     artifact_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     session = await gateway_manager.create_session(
         session_id,
-        metadata={"role": "counterfactual_probe", "_log_dir": str(artifact_dir)},
+        metadata={
+            "role": "counterfactual_probe", "_log_dir": str(artifact_dir),
+            **{key: sample_fields["tools_kwargs"]["task"]["metadata"][key]
+               for key in ("credit_probe_group", "credit_probe_variant")},
+        },
         sampling_params={"temperature": 0.0, "top_p": 1.0, "top_k": -1},
     )
     finalized = False
@@ -254,6 +305,7 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     output = Path(info["episode_output_dir"]).resolve()
     if not output.is_relative_to(Path(artifact_root).resolve()):
         raise ValueError("Probe episode artifacts escaped this experiment")
+    _verify_paired_workdir(capture, request, loaded=loaded, output=output)
     engine = json.loads((output / "engine-result.json").read_text())
     if (
         engine["game_sha256"] != metadata["game_sha256"]
@@ -306,6 +358,7 @@ async def collect_counterfactual_probe(
         "global_step": request.global_step, "task_id": task_id,
         "task_game_sha256": metadata["game_sha256"],
         "physical_probe_id": physical_id, "policy_attestation": frozen_attestation,
+        "paired_workdir_protocol": "paired_empty_workdir_v1", "credit_probe_group": probe_group_id(request),
     }
     # The lock is acquired nonblocking: a duplicated orchestrator must not hang
     # its event loop behind another in-flight copy of the same native session.
@@ -332,6 +385,7 @@ async def collect_counterfactual_probe(
         _publish_immutable(intent_path, intent)
         outcomes = {}
         observed_clocks = {}
+        workspace_provenance = {}
         order = [True, False]
         if int(hashlib.sha256(request.probe_id.encode()).hexdigest()[:2], 16) % 2:
             order.reverse()
@@ -348,6 +402,9 @@ async def collect_counterfactual_probe(
                     raise ProbeNotObserved("An uncaptured native branch requires explicit reconciliation")
                 fields = copy.deepcopy(sample_fields)
                 fields["uid"] = physical_id + "_" + name
+                fields["tools_kwargs"]["task"]["metadata"].update(
+                    role="counterfactual_probe", credit_probe_group=probe_group_id(request), credit_probe_variant=name,
+                )
                 settings = dict(loading, enabled=True)
                 settings["snapshot_id"] = request.with_snapshot_id if loaded else request.without_snapshot_id
                 fields = pin_prompt_group(
@@ -367,8 +424,20 @@ async def collect_counterfactual_probe(
                 loaded=loaded, artifact_root=artifact_root, frozen_attestation=pair_attestation,
             )
             observed_clocks[name] = _observed_frozen_clock(capture)
+            workspace_provenance[name] = capture["extra_info"]["paired_workdir"]
         if observed_clocks["with_skill"] != observed_clocks["without_skill"]:
             raise ValueError("Paired branches changed the frozen evaluator's observed weight clock")
+        with_workdir, without_workdir = (workspace_provenance[name] for name in ("with_skill", "without_skill"))
+        if (
+            with_workdir["workdir"] != without_workdir["workdir"]
+            or with_workdir["codex_homes"] == without_workdir["codex_homes"]
+            or any(with_workdir[key] != without_workdir[key] for key in ("host_uid", "agent_uid", "agent_gid"))
+        ):
+            raise ValueError("Counterfactual branches must share an empty cwd and use distinct native Codex homes")
+        _publish_immutable(root / "paired-workdirs.json", {
+            "schema_version": 1, "credit_probe_group": probe_group_id(request),
+            "physical_probe_id": physical_id, "branches": workspace_provenance,
+        })
         completed = root / "paired-event.json"
         previous = _read_payload(completed) if completed.exists() else None
         event = UsageEvent(
