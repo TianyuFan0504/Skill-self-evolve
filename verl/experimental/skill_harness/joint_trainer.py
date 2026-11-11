@@ -77,6 +77,7 @@ def _source_fingerprint():
     paths.extend(root / relative for relative in (
         "verl/workers/engine_workers.py", "verl/workers/utils/losses.py", "verl/workers/utils/padding.py",
         "verl/workers/engine/base.py", "verl/workers/engine/fsdp/transformer_impl.py",
+        "verl/workers/rollout/vllm_rollout/vllm_async_server.py",
         "verl/utils/checkpoint/fsdp_checkpoint_manager.py", "verl/trainer/ppo/v1/trainer_base.py",
         "verl/trainer/ppo/v1/trainer_sync.py", "verl/trainer/ppo/core_algos.py",
         "examples/skill_self_evolve/scripts/codex_entrypoint.sh",

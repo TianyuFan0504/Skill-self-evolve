@@ -1043,48 +1043,59 @@ class vLLMHttpServer:
         self._admitting += 1
         return None
 
-    async def abort_request(self, request_id: str, reset_prefix_cache: bool = True) -> dict[str, Any]:
-        """Abort a specific generation request.
+    async def abort_request(self, request_id: str, reset_prefix_cache: bool = False) -> dict[str, Any]:
+        """Submit an abort for one live external request, without resetting shared cache.
 
-        Args:
-            request_id: The ID of the request to abort.
-
-        Returns:
-            dict[str, Any]: Dictionary containing abort result.
+        vLLM 0.24 randomizes its internal IDs. Only the public AsyncLLM.abort
+        method owns that mapping, final ABORT output and EngineCore submission.
+        A successful return acknowledges submission, not GPU/kernel drainage.
         """
+        result = {
+            "aborted": False,
+            "request_id": request_id,
+            "ack_scope": "not_submitted",
+            "prefix_cache_reset": False,
+        }
         if self.node_rank != 0:
-            return {"aborted": False, "request_id": request_id}
+            return {**result, "reason": "not_primary_node"}
+        if reset_prefix_cache is not False:
+            return {**result, "reason": "targeted_abort_cannot_reset_shared_prefix_cache"}
 
         try:
-            request_states = self.engine.output_processor.request_states
-            req_state = request_states.get(request_id)
-
-            if req_state is None:
-                return {"aborted": False, "error": f"Request {request_id} not found"}
-
-            # Create abort output and put it to the queue
-            from vllm.v1.engine import FinishReason
-
-            request_output = req_state.make_request_output(
-                [], pooling_output=None, finish_reason=FinishReason.ABORT, stop_reason=None
-            )
-            req_state.queue.put(request_output)
-
-            # Abort in output processor and engine core
-            self.engine.output_processor.abort_requests([request_id])
-            await self.engine.engine_core.abort_requests_async([request_id])
-
-            # Try to reset prefix cache to ensure clean state
-            if reset_prefix_cache:
-                await self.clear_kv_cache()
-                logger.info(f"Prefix cache reset after abort request {request_id}")
-
-            logger.info(f"Aborted request: {request_id}")
-            return {"aborted": True, "request_id": request_id}
+            processor = self.engine.output_processor
+            # .get avoids creating an absent key in vLLM's defaultdict. This
+            # harness submits n=1 with a unique external ID for every turn.
+            internal_ids = tuple(processor.external_req_ids.get(request_id, ()))
+            if not internal_ids:
+                return {**result, "reason": "not_found_or_already_finished"}
+            if len(internal_ids) != 1 or not isinstance(internal_ids[0], str):
+                return {**result, "reason": "ambiguous_external_request_mapping"}
+            state = processor.request_states.get(internal_ids[0])
+            if state is None:
+                return {**result, "reason": "stale_external_request_mapping"}
+            if state.external_req_id != request_id or state.request_id != internal_ids[0]:
+                return {**result, "reason": "request_identity_mismatch"}
+            # No await separates the live/identity checks from the public
+            # method's synchronous mapping removal on this actor event loop.
+            await self.engine.abort(request_id, internal=False)
+            logger.info("Submitted targeted abort for external request %s", request_id)
+            return {
+                **result,
+                "aborted": True,
+                "reason": "abort_submitted",
+                "ack_scope": "submitted_not_gpu_drained",
+                "accepted_internal_request_ids": list(internal_ids),
+            }
 
         except Exception as e:
             logger.error(f"Error aborting request {request_id}: {e}")
-            return {"aborted": False, "request_id": request_id, "error": str(e)}
+            return {
+                **result,
+                "reason": "abort_submission_failed",
+                "ack_scope": "submission_unconfirmed",
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
 
     # -----------------------------------------------------------------------
     # Hook methods for subclass overrides
