@@ -109,7 +109,8 @@ class RuntimeContractsTest(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], "-c")
         self.assertEqual(json.loads(lines[1].split("=", 1)[1]), str(instructions))
-        self.assertEqual(lines[2:], ["exec", "--model", "Qwen3.5-4B-nothink"])
+        self.assertEqual(lines[2:4], ["-c", "allow_login_shell=false"])
+        self.assertEqual(lines[4:], ["exec", "--model", "Qwen3.5-4B-nothink"])
 
 
 if __name__ == "__main__":

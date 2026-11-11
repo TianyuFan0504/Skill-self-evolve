@@ -65,7 +65,7 @@ def public_state(state: dict[str, Any], *, steps: int, max_steps: int, won: bool
     """Explicit allowlist: expert plans, filenames and internal state stay private."""
     observation = state.get("feedback", state.get("observation", ""))
     raw_commands = state.get("admissible_commands", [])
-    if not isinstance(observation, str) or not isinstance(raw_commands, (list, tuple)):
+    if not isinstance(observation, str) or not isinstance(raw_commands, list | tuple):
         raise ValueError("ALFWorld public observations and command lists must be text-only")
     if not all(isinstance(command, str) for command in raw_commands):
         raise ValueError("ALFWorld admissible commands must contain strings only")

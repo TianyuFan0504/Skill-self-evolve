@@ -56,7 +56,7 @@ class IntegrityError(SkillStoreError):
 def _plain(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_plain(item) for item in value]
     return value
 
@@ -125,7 +125,7 @@ class SkillArtifact:
             if not isinstance(text, str) or not text.strip() or len(text) > limit:
                 raise ValueError(f"{key} must be nonempty text of at most {limit} characters")
             object.__setattr__(self, key, text.strip())
-        if (not isinstance(self.task_families, (list, tuple)) or not self.task_families
+        if (not isinstance(self.task_families, list | tuple) or not self.task_families
                 or any(not isinstance(family, str) for family in self.task_families)):
             raise ValueError("task_families must be a nonempty sequence")
         families = tuple(sorted(set(self.task_families)))

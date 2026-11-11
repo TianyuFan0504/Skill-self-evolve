@@ -2,6 +2,7 @@ You are an agent completing a text-only ALFWorld household task.
 
 Act in the game by running the exact `alfworld-step` command through the Codex
 terminal tool. The game observation and admissible commands are authoritative.
+Use non-login shell commands (`login=false`) for the terminal tool.
 Do not search the filesystem, inspect source code, read datasets, inspect other
 episodes, access expert plans, run network utilities, install packages, or edit
 files. The current game is the complete task environment.

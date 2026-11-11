@@ -192,3 +192,39 @@ saved under `evaluation/initial` and `evaluation/final`; append-only telemetry
 also records the stage explicitly. The default is false for integration smoke
 runs, which do not establish improved test performance.
 
+## Joint native skill training
+
+On the eight-H100 host, start the full solver/curate harness with:
+
+```bash
+EVALUATE_OFFICIAL_TESTS=true TOTAL_TRAINING_STEPS=64 \
+  bash examples/skill_self_evolve/run.sh --joint \
+  --run-dir /root/nas_chaohuang/skill_training/runs/alfworld_joint_001
+```
+
+The joint recipe reserves four solver/FSDP GPUs, two EMA-curator GPUs and two
+frozen-credit GPUs. Use `--joint --preflight-only` to check imports, restricted
+native execution, the real GPU budget and data isolation without allocating a
+model. `TRAIN_BATCH_SIZE`, `ROLLOUT_CONCURRENCY` and standard Hydra overrides
+control throughput. The joint actor makes exactly one optimizer step over its
+actual mixed solver/curate batch, then advances EMA from the observed step.
+
+Skill candidates become eligible for delayed credit on later original training
+tasks from the same family. The fixed evaluator runs native paired probes;
+unobserved windows remain pending. Settled signed credit enters retained curate
+actions through replay and positive utility admits skills into the main store.
+Curate actions never enter the solver's GRPO groups. Recovery requires the
+separate COMPLETE joint manifest, including online optimizer, EMA, skill store,
+replay, credit ledger, controller and dataloader state.
+
+The common model configuration enables the official fused Torch output head.
+It was checked on a saved 33,322-token native trajectory: finite likelihood,
+entropy and masked backward, about 24.24 GiB peak allocation on one H100. The
+unfused full-vocabulary entropy path exhausted an 80 GiB GPU on that batch.
+These kernel checks are separate from actual distributed training results.
+
+The solver wrapper sets `allow_login_shell=false`; environment observations
+therefore exclude the host's login banner. This is a supported native Codex
+configuration verified on the installed version. Initial and final comparisons
+must use the same wrapper, prompts, generation budgets and full task identities.
+

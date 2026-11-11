@@ -312,6 +312,9 @@ def main() -> int:
     )
     parser.add_argument("--resume", action="store_true", help="Resume an existing prepared/checkpointed run directory")
     parser.add_argument("--allow-busy-gpus", action="store_true")
+    parser.add_argument(
+        "--joint", action="store_true", help="Enable solver/curate training with EMA and delayed credit"
+    )
     parser.add_argument("--supervise", type=Path, help=argparse.SUPPRESS)
     args, overrides = parser.parse_known_args()
     if overrides[:1] == ["--"]:
@@ -326,6 +329,7 @@ def main() -> int:
     from verl.experimental.skill_harness.bootstrap import configure_runtime
 
     provenance = configure_runtime(register_tasks=False)
+    config_name = "alfworld_joint" if args.joint else "alfworld_train"
     benchmark = Path(os.environ["ALFWORLD_BENCHMARK_ROOT"]).resolve()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run = (args.run_dir or benchmark / "training_runs" / f"codex_qwen35_4b_{stamp}").resolve()
@@ -369,7 +373,8 @@ def main() -> int:
         raise RuntimeError("MAX_MODEL_LENGTH must equal MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH in this recipe")
     os.environ.setdefault("TRAIN_MAX_TOKENS_PER_GPU", str(capacity))
     os.environ.setdefault("RAY_NUM_CPUS", str(cpu_quota()))
-    os.environ.setdefault("TRAINING_GPUS", str(gpu_count()))
+    os.environ["PHYSICAL_GPU_COUNT"] = str(gpu_count())
+    os.environ.setdefault("TRAINING_GPUS", str(min(4, gpu_count()) if args.joint else gpu_count()))
     if int(os.environ["TRAINING_GPUS"]) < 1:
         raise RuntimeError("Training requires at least one visible GPU")
     if int(os.environ.get("ROLLOUT_N", "4")) < 2:
@@ -416,7 +421,7 @@ def main() -> int:
         "-m",
         "verl.experimental.skill_harness.train",
         "--config-path=" + str(RECIPE / "config"),
-        "--config-name=alfworld_train",
+        "--config-name=" + config_name,
         *overrides,
     ]
     write_json(run / "hydra_overrides.json", overrides)
@@ -454,6 +459,7 @@ def main() -> int:
         "TMPDIR",
         "RAY_TMPDIR",
         "EVALUATE_OFFICIAL_TESTS",
+        "PHYSICAL_GPU_COUNT",
     }
     safe_env = {name: os.environ[name] for name in public_settings if name in os.environ}
     write_json(
@@ -466,7 +472,8 @@ def main() -> int:
             "environment_paths": safe_env,
             "solver_system_sha256": hashlib.sha256(instructions.read_bytes()).hexdigest(),
             "solver_task_sha256": hashlib.sha256((RECIPE / "prompts/solver_task.txt").read_bytes()).hexdigest(),
-            "config_sha256": hashlib.sha256((RECIPE / "config/alfworld_train.yaml").read_bytes()).hexdigest(),
+            "config_name": config_name,
+            "config_sha256": hashlib.sha256((RECIPE / "config" / (config_name + ".yaml")).read_bytes()).hexdigest(),
         },
     )
     if args.prepare_only:
@@ -480,13 +487,19 @@ def main() -> int:
         "--run-dir",
         str(run),
         "--require-service",
+        "--config-name",
+        config_name,
         "--overrides-file",
         str(run / "hydra_overrides.json"),
     ]
     if args.allow_busy_gpus:
         preflight.append("--allow-busy-gpus")
     try:
-        subprocess.run(preflight, check=True)
+        preflight_log = run / ("preflight-" + str(time.time_ns()) + ".log")
+        with preflight_log.open("w") as output:
+            checked = subprocess.run(preflight, stdout=output, stderr=subprocess.STDOUT, check=False)
+        print(preflight_log.read_text(), end="", flush=True)
+        checked.check_returncode()
     except BaseException:
         if started_service:
             os.kill(service_pid, signal.SIGTERM)

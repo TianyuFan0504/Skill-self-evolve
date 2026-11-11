@@ -11,6 +11,7 @@ IMPORT_PROVENANCE = configure_runtime()
 import hashlib
 import json
 import subprocess
+import time
 from pathlib import Path
 
 import hydra
@@ -71,6 +72,35 @@ def save_run_manifest(config):
     (root / "resolved-config.yaml").write_text(OmegaConf.to_yaml(OmegaConf.create(resolved)), encoding="utf-8")
 
 
+def preserve_failed_queue(config, trainer, queue, error):
+    """Retain failed-run tensors for audit; this is never a resumable model cut."""
+    root = Path(config.skill_harness.artifact_root) / "failure_audit" / str(time.time_ns())
+    root.mkdir(parents=True, exist_ok=False)
+    report = {
+        "schema_version": 1,
+        "kind": "failure_audit_only",
+        "resumable_joint_checkpoint": False,
+        "error_type": type(error).__name__,
+        "global_step": getattr(trainer, "global_steps", None),
+        "queue_snapshot_saved": False,
+        "dataloader_state_saved": False,
+    }
+    try:
+        save_queue = getattr(queue, "save_checkpoint", None)
+        if callable(save_queue):
+            save_queue(str(root / "transfer_queue"), metadata={"global_steps": report["global_step"]})
+            report["queue_snapshot_saved"] = True
+        if trainer is not None and hasattr(trainer, "train_dataloader"):
+            import torch
+
+            torch.save(trainer.train_dataloader.state_dict(), root / "data.pt")
+            report["dataloader_state_saved"] = True
+    except Exception as capture_error:
+        # The original training error must remain the cause reported by Ray.
+        report["capture_error"] = f"{type(capture_error).__name__}: {capture_error}"
+    (root / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
 @ray.remote
 class SkillTaskRunner:
     """Use the documented custom TaskRunner contract without replacing factories."""
@@ -88,7 +118,14 @@ class SkillTaskRunner:
         succeeded = False
         tq.init(config.transfer_queue)
         try:
-            trainer = SkillSyncTrainer(config)
+            if config.skill_harness.mode == "solver_baseline":
+                trainer = SkillSyncTrainer(config)
+            elif config.skill_harness.mode == "skill_joint":
+                from .joint_trainer import SkillJointSyncTrainer
+
+                trainer = SkillJointSyncTrainer(config)
+            else:
+                raise ValueError(f"Unknown skill training mode: {config.skill_harness.mode}")
             trainer.init()
             manager_class = load_class_from_fqn(
                 config.actor_rollout_ref.rollout.agent.agent_loop_manager_class,
@@ -102,6 +139,12 @@ class SkillTaskRunner:
             )
             trainer.fit(manager)
             succeeded = True
+        except BaseException as error:
+            try:
+                preserve_failed_queue(config, trainer, tq, error)
+            except Exception as capture_error:
+                print(f"Failure-audit capture also failed: {type(capture_error).__name__}: {capture_error}", flush=True)
+            raise
         finally:
             try:
                 tracking = getattr(trainer, "logger", None)

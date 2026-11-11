@@ -31,6 +31,7 @@ def main() -> int:
     parser.add_argument("--require-service", action="store_true")
     parser.add_argument("--allow-busy-gpus", action="store_true")
     parser.add_argument("--overrides-file", type=Path)
+    parser.add_argument("--config-name", choices=("alfworld_train", "alfworld_joint"), default="alfworld_train")
     args = parser.parse_args()
     run = args.run_dir.resolve()
     report: dict[str, object] = {"cpu_only_import_checks": True, "run_dir": str(run)}
@@ -124,7 +125,7 @@ def main() -> int:
 
     overrides = json.loads(args.overrides_file.read_text()) if args.overrides_file else []
     with initialize_config_dir(config_dir=str(RECIPE / "config"), version_base=None):
-        cfg = compose(config_name="alfworld_train", overrides=overrides)
+        cfg = compose(config_name=args.config_name, overrides=overrides)
     OmegaConf.resolve(cfg)
     from verl.checkpoint_engine import CheckpointEngineRegistry
 
@@ -135,11 +136,42 @@ def main() -> int:
     check(cfg.data.train_files.endswith("/train.parquet"), "The training recipe must consume train.parquet")
     check(cfg.data.val_files.endswith("/dev.parquet"), "Scheduled validation must use train-derived dev.parquet")
     check(cfg.actor_rollout_ref.rollout.calculate_log_probs, "Behavior log probabilities must be retained")
-    check(
-        cfg.actor_rollout_ref.rollout.agent.agent_loop_manager_class
-        == "uni_agent.framework.entry.AgentFrameworkRolloutAdapter",
-        "The recipe must use the official Uni-Agent adapter",
+    expected_adapter = (
+        "verl.experimental.skill_harness.framework.SkillAwareRolloutAdapter"
+        if cfg.skill_harness.mode == "skill_joint"
+        else "uni_agent.framework.entry.AgentFrameworkRolloutAdapter"
     )
+    check(cfg.actor_rollout_ref.rollout.agent.agent_loop_manager_class == expected_adapter,
+          "The recipe must use the configured official Uni-Agent extension path")
+    if cfg.skill_harness.mode == "skill_joint":
+        from verl.experimental.skill_harness.curate import provision_native_curator_runtime
+
+        joint = cfg.skill_harness.joint
+        needed = int(cfg.trainer.n_gpus_per_node) + int(joint.curator_gpus) + int(joint.credit_gpus)
+        check(needed <= len(report["gpu_inventory"]), "Joint policy routes exceed the actual visible GPU inventory")
+        check(int(joint.solver_gpus) == int(cfg.trainer.n_gpus_per_node), "Joint solver GPU counts disagree")
+        try:
+            curator_account = pwd.getpwnam("alfworld_curator")
+        except KeyError:
+            subprocess.run(
+                ["/usr/sbin/useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin",
+                 "alfworld_curator"], check=True,
+            )
+            curator_account = pwd.getpwnam("alfworld_curator")
+        check(curator_account.pw_uid != 0, "The curator must use a separate restricted account")
+        native_runtime = provision_native_curator_runtime(
+            public_root=joint.get("curator_public_root", "/opt/alfworld-tools/skill_self_evolve/curator"),
+            work_root=joint.get("curator_work_root", "/tmp/alfworld-curator"),
+            native_bin=os.environ["CODEX_NATIVE_BIN"],
+            package_root=os.environ["ALFWORLD_CODEX_PACKAGE_ROOT"],
+            model_catalog_path=run / "model_catalog.json",
+            model_name=joint.get("model_name", "Qwen3.5-4B-nothink"),
+        )
+        report["curator_runtime"] = native_runtime.manifest()
+        report["joint_gpu_allocation"] = {
+            "solver": int(cfg.trainer.n_gpus_per_node), "curator": int(joint.curator_gpus),
+            "credit": int(joint.credit_gpus),
+        }
     (run / "resolved-config.preflight.yaml").write_text(OmegaConf.to_yaml(cfg, resolve=True))
     report["ray_worker_setup_hook"] = runtime_env_config()["worker_process_setup_hook"]
     if args.require_service:

@@ -18,9 +18,11 @@ class SkillSyncTrainer(PPOTrainerSync):
     installed. A requested joint run must never silently become a solver-only run.
     """
 
+    supported_modes = ("solver_baseline",)
+
     def __init__(self, config):
         mode = config.skill_harness.mode
-        if mode != "solver_baseline":
+        if mode not in self.supported_modes:
             raise NotImplementedError(f"Training mode {mode!r} is not wired yet; refusing a solver-only substitute")
         self.artifact_root = Path(config.skill_harness.artifact_root)
         self.artifact_root.mkdir(parents=True, exist_ok=True)

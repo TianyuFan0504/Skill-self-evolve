@@ -1,0 +1,68 @@
+# Real joint solver/curate training; all roles use Uni-Agent and native Codex.
+defaults:
+  - /ppo_trainer
+  - alfworld_common
+  - _self_
+
+hydra:
+  searchpath:
+    - file://${oc.env:VERL_SOURCE_ROOT,/workspace/verl-0.9.1}/verl/trainer/config
+  run:
+    dir: ${oc.env:SKILL_RUN_DIR}/hydra
+
+actor_rollout_ref:
+  actor:
+    ppo_epochs: 1
+    checkpoint:
+      async_save: false
+  rollout:
+    agent:
+      agent_loop_manager_class: verl.experimental.skill_harness.framework.SkillAwareRolloutAdapter
+
+skill_harness:
+  mode: skill_joint
+  replay_root: ${skill_harness.artifact_root}/curate_replay
+  ledger_root: ${skill_harness.artifact_root}/credit_ledger
+  ema:
+    enabled: true
+    buffer_policy: copy
+  loading:
+    enabled: true
+    branch: main
+    top_k: 6
+    skill_token_budget: 1024
+  curate_loss:
+    coefficient: 0.1
+    clip_low: 0.2
+    clip_high: 0.2
+    historical_is_cap: 10.0
+    max_log_ratio: 20.0
+  joint:
+    solver_gpus: ${trainer.n_gpus_per_node}
+    available_gpus: ${oc.decode:${oc.env:PHYSICAL_GPU_COUNT,8}}
+    curator_gpus: 2
+    credit_gpus: 2
+    route_tensor_parallel_size: 1
+    gateway_count: 2
+    sources_per_step: 1
+    candidates_per_source: 2
+    probes_per_step: 2
+    required_exposures: 1
+    min_delay_steps: 1
+    replay_batch_size: 2
+    max_replay_lag_steps: 64
+    max_pending_windows: 64
+    window_seconds: 86400
+    lease_seconds: 3600
+    cost_weight: 0.0
+    max_label_updates: 1
+    admission_threshold: 0.0
+    seed: 42
+    frozen_model_path: ${actor_rollout_ref.model.path}
+
+trainer:
+  n_gpus_per_node: ${oc.decode:${oc.env:TRAINING_GPUS,4}}
+  checkpoint_callback_class: verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback
+  # A newer partial save must never prune the previous COMPLETE joint snapshot.
+  max_actor_ckpt_to_keep: null
+  remove_previous_ckpt_in_save: false

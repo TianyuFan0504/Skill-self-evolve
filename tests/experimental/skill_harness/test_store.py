@@ -252,12 +252,14 @@ except module.SnapshotConflict:
     def test_tampered_artifact_and_snapshot_fail_closed(self):
         snapshot = self.publish()
         blob = self.root / "artifacts" / f"{snapshot.skills[0].content_hash}.json"
-        data = json.loads(blob.read_text()); data["principle"] = "Tampered text"
+        data = json.loads(blob.read_text())
+        data["principle"] = "Tampered text"
         blob.write_text(json.dumps(data))
         with self.assertRaises(IntegrityError):
             self.store.retrieve("clean")
         manifest = self.root / "snapshots" / f"{snapshot.snapshot_id}.json"
-        data = json.loads(manifest.read_text()); data["parent_id"] = None
+        data = json.loads(manifest.read_text())
+        data["parent_id"] = None
         manifest.write_text(json.dumps(data))
         with self.assertRaises(IntegrityError):
             self.store.get_snapshot()
