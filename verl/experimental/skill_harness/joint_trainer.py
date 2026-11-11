@@ -49,6 +49,7 @@ from .policy_routes import fingerprint_model
 from .replay_batch import required_solver_fields
 from .store import SkillStore
 from .trainer import SkillSyncTrainer
+from .uniagent_compat import actual_adapter_sha256
 
 CALLBACK_FQN = "verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback"
 
@@ -81,6 +82,7 @@ def _source_fingerprint():
     ))
     payload = [(path.relative_to(root).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
                for path in sorted(set(paths))]
+    payload.append(("external/uni_agent/gateway/adapters/openai_response.py", actual_adapter_sha256()))
     return _digest(payload)
 
 
@@ -194,6 +196,10 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         return self._joint_identity
 
     def _compatibility(self):
+        if self._joint_compatibility is not None:
+            bound = self._joint_compatibility.get("versions", {}).get("uni_agent_adapter")
+            if bound is not None and bound != actual_adapter_sha256():
+                raise RuntimeError("Uni-Agent adapter changed after checkpoint compatibility was initialized")
         if self._joint_compatibility is None:
             identity = self._identity()
             ema = self.config.skill_harness.ema
@@ -204,6 +210,7 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             self._joint_compatibility = {
                 "world_size": self.actor_rollout_wg.world_size, "layout_fingerprint": layout,
                 "versions": {"code": _source_fingerprint(), "verl": verl.__version__,
+                             "uni_agent_adapter": actual_adapter_sha256(),
                              "model": fingerprint_model(self.config.actor_rollout_ref.model.path)["fingerprint"],
                              "tokenizer": identity.tokenizer_version, "template": identity.template_version},
                 "evaluator_fingerprint": identity.frozen_version, "protocol_fingerprint": identity.protocol_fingerprint,

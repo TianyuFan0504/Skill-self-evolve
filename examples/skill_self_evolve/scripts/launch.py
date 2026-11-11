@@ -329,6 +329,11 @@ def main() -> int:
     from verl.experimental.skill_harness.bootstrap import configure_runtime
 
     provenance = configure_runtime(register_tasks=False)
+    from verl.experimental.skill_harness.uniagent_compat import require_patched_adapter
+
+    # Verification only. Never mutate a shared dependency while another run
+    # may still be using it; the failure includes the explicit offline command.
+    require_patched_adapter(provenance["uni_agent_source"])
     config_name = "alfworld_joint" if args.joint else "alfworld_train"
     benchmark = Path(os.environ["ALFWORLD_BENCHMARK_ROOT"]).resolve()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

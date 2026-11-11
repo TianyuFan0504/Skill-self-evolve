@@ -9,6 +9,7 @@ hook, so driver and workers resolve the same source tree.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 import re
 import sys
@@ -113,7 +114,16 @@ def configure_runtime(*, register_tasks: bool = True) -> dict[str, Any]:
     uni_origin = Path(module.__file__).resolve()
     if uni_origin != uni_agent / "uni_agent" / "__init__.py":
         raise RuntimeError(f"Wrong Uni-Agent import: {uni_origin}")
+    # Load this stdlib sibling directly: bootstrap is also inspected by file
+    # path in CPU tests before the heavy verl package may be imported.
+    specification = importlib.util.spec_from_file_location(
+        "_skill_uniagent_compat", Path(__file__).with_name("uniagent_compat.py")
+    )
+    compatibility = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(compatibility)
+    adapter = compatibility.adapter_provenance(uni_agent)
     if register_tasks:
+        adapter = compatibility.require_patched_adapter(uni_agent)
         importlib.import_module("verl.experimental.skill_harness.alfworld.task")
     return {
         "python": sys.executable,
@@ -123,6 +133,8 @@ def configure_runtime(*, register_tasks: bool = True) -> dict[str, Any]:
         "verl_version": verl.__version__,
         "uni_agent_source": str(uni_agent),
         "uni_agent_origin": str(uni_origin),
+        "uni_agent_adapter_sha256": adapter["adapter_sha256"],
+        "uni_agent_adapter_compatibility": adapter,
         "dependency_site": None if dependency_site is None else str(dependency_site),
         "tasks_registered": register_tasks,
     }
