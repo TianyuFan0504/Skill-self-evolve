@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from verl.trainer.ppo.v1.trainer_sync import PPOTrainerSync
+from verl.utils import tensordict_utils as tu
 from verl.utils.transferqueue_utils import tq
 
 from .telemetry import append_metrics, episode_metrics
@@ -35,10 +36,10 @@ class SkillSyncTrainer(PPOTrainerSync):
             partition_id=batch.partition_id,
             select_fields=["uid", "session_id", "rm_scores", "extra_fields"],
         )
-        uids = fields["uid"].tolist()
-        sessions = fields["session_id"].tolist()
+        uids = tu.get(fields, "uid")
+        sessions = tu.get(fields, "session_id")
         scores = fields["rm_scores"].to_padded_tensor(0.0).sum(dim=-1).tolist()
-        extras = fields["extra_fields"].tolist()
+        extras = tu.get(fields, "extra_fields")
         rows = []
         for i, (uid, session, score, extra) in enumerate(zip(uids, sessions, scores, extras, strict=True)):
             info = extra.get("reward_extra_info", {})
