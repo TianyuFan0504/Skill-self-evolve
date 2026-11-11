@@ -20,7 +20,9 @@ import copy
 import hashlib
 import inspect
 import json
+import math
 import os
+import re
 import tempfile
 import time
 from collections.abc import Mapping
@@ -29,13 +31,19 @@ from pathlib import Path
 from typing import Any
 
 from .alfworld.data import GameRecord
+from .context import TokenizerRenderer
 from .credit import CreditLedger, CreditProtocol
 from .curate import (
+    SKILL_FIELDS,
+    SKILL_SCHEMA,
+    CurateCollection,
+    CurateProtocolError,
     CurateRequest,
     CuratorBehavior,
     collect_curate_candidate,
     load_completed_solver_episode,
     provision_native_curator_runtime,
+    redact_completed_episode,
 )
 from .framework import loading_settings
 from .policy_routes import PolicyRouteSpec, create_policy_routes, fingerprint_model
@@ -130,6 +138,8 @@ class JointSettings:
     max_label_updates: int = 1
     admission_threshold: float = 0.0
     seed: int = 42
+    curator_native_prefix_reserve_tokens: int = 4096
+    curator_output_headroom_tokens: int = 2048
 
     @classmethod
     def from_config(cls, config):
@@ -150,10 +160,17 @@ class JointSettings:
             "min_delay_steps",
             "max_pending_windows",
             "max_label_updates",
+            "curator_output_headroom_tokens",
         ):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"joint.{key} must be a positive integer")
-        for key in ("sources_per_step", "probes_per_step", "replay_batch_size", "max_replay_lag_steps"):
+        for key in (
+            "sources_per_step",
+            "probes_per_step",
+            "replay_batch_size",
+            "max_replay_lag_steps",
+            "curator_native_prefix_reserve_tokens",
+        ):
             if type(getattr(self, key)) is not int or getattr(self, key) < 0:
                 raise ValueError(f"joint.{key} must be a nonnegative integer")
         if self.window_seconds <= 0 or self.lease_seconds <= 0 or self.cost_weight < 0:
@@ -393,6 +410,8 @@ class SkillJointController:
                 "distribution_version": self.distribution_version,
                 "loading": self.loading,
                 "native_runtime": self.runtime.manifest(),
+                "curate_admission_policy": "complete-cohort-semantic-gates-v1",
+                "curate_source_policy": "whole-redacted-source-or-censor-v1",
             }
         )
 
@@ -799,6 +818,356 @@ class SkillJointController:
         }
         self.save_state()
 
+    def _curate_source_gate(self, source, request):
+        """Measure the exact host input before sampling; never truncate a trace."""
+        redacted = redact_completed_episode(source)
+        template = Path(self.runtime.task_prompt_path).read_text()
+        prompt = template.replace("{{SKILL_ID}}", request.skill_id).replace("{{TASK_FAMILY}}", redacted["task_family"])
+        prompt = prompt.replace("{{EPISODE_JSON}}", json.dumps(redacted, ensure_ascii=False, indent=2))
+        messages = [
+            {"role": "system", "content": Path(self.runtime.instructions_path).read_text()},
+            {"role": "user", "content": prompt},
+        ]
+        renderer = TokenizerRenderer(self.trainer.tokenizer, render_kwargs=self.loading["render_kwargs"])
+        rendered = renderer.render(messages)
+        rollout = self.routes["curator"].config.actor_rollout_ref.rollout
+        capacity = int(rollout.prompt_length) + int(rollout.response_length)
+        model_capacity = _get(rollout, "max_model_len")
+        if model_capacity is not None:
+            capacity = min(capacity, int(model_capacity))
+        budget = (
+            capacity - self.settings.curator_native_prefix_reserve_tokens - self.settings.curator_output_headroom_tokens
+        )
+        if budget <= 0:
+            raise ValueError("Curator route has no source budget after declared native/output reserves")
+        return {
+            "policy_version": "whole-redacted-source-or-censor-v1",
+            "accepted": len(rendered.token_ids) <= budget,
+            "host_prompt_tokens": len(rendered.token_ids),
+            "host_prompt_budget": budget,
+            "gateway_total_capacity": capacity,
+            "native_prefix_reserve_tokens": self.settings.curator_native_prefix_reserve_tokens,
+            "output_headroom_tokens": self.settings.curator_output_headroom_tokens,
+            "source_redacted_sha256": _digest(redacted),
+            "host_messages_sha256": _digest(messages),
+            "host_token_ids_sha256": _digest(rendered.token_ids),
+            "budget_scope": "complete host chat including curator instructions; native additions reserved separately",
+            "actual_native_request_verified": False,
+            "source_truncated": False,
+        }
+
+    @staticmethod
+    def _semantic_output_reason(content, request, family):
+        if not isinstance(content, str):
+            return "invalid_json_content_type"
+        try:
+            value = json.loads(content)
+        except ValueError:
+            return "invalid_json"
+        if not isinstance(value, dict) or set(value) != SKILL_FIELDS:
+            return "invalid_skill_schema"
+        if value["skill_id"] != request.skill_id or value["task_families"] != [family]:
+            return "invalid_skill_identity_or_family"
+        for key in ("title", "principle", "when_to_apply"):
+            field = value[key]
+            if (
+                not isinstance(field, str)
+                or not field.strip()
+                or len(field) > SKILL_SCHEMA["properties"][key]["maxLength"]
+            ):
+                return "invalid_skill_text_field"
+            if re.search(r"https?://|(?<!\w)/(?:\w+/)+", field):
+                return "forbidden_skill_path_or_endpoint"
+        return None
+
+    @staticmethod
+    def _valid_observed_capture(captured, behavior):
+        rows = captured.get("trajectories")
+        if not isinstance(rows, list) or not rows:
+            return False
+        for row in rows:
+            for key in ("observed_min_weight_version", "observed_max_weight_version"):
+                if type(row.get(key)) is not int or row[key] != behavior.rollout_weight_version:
+                    return False
+            prompt, actions, mask, probabilities = (
+                row.get(key)
+                for key in (
+                    "prompt_ids",
+                    "action_ids",
+                    "curate_mask",
+                    "behavior_logprobs",
+                )
+            )
+            if not prompt or not actions or probabilities is None or mask is None:
+                return False
+            if len(actions) != len(mask) or len(actions) != len(probabilities) or not any(mask):
+                return False
+            if any(type(value) is not int or value < 0 for value in [*prompt, *actions]):
+                return False
+            for selected, probability in zip(mask, probabilities, strict=True):
+                if (
+                    type(selected) is not int
+                    or selected not in (0, 1)
+                    or isinstance(probability, bool)
+                    or not isinstance(probability, int | float)
+                    or not math.isfinite(probability)
+                    or probability > 0
+                    or (not selected and probability != 0)
+                ):
+                    return False
+        return True
+
+    def _semantic_curate_rejection(self, error, source, request, behavior):
+        """Recognize only proved model-output errors, never catch generic infra."""
+        known_messages = {
+            "Curator must return exactly one plain JSON SkillArtifact object",
+            "Curator JSON must contain only the five allowed skill fields",
+            "Generated skill identity/family differs from the trusted curator request",
+            "Reusable skill text must not contain host paths or network endpoints",
+            "Curator must complete successfully without any native tool invocation",
+        }
+        semantic_origin = isinstance(error, CurateProtocolError) and str(error) in known_messages
+        current = error.__traceback__
+        while current is not None:
+            code = current.tb_frame.f_code
+            if Path(code.co_filename).name == "curate.py" and code.co_name == "_parse_artifact":
+                semantic_origin = isinstance(error, ValueError | TypeError)
+            current = current.tb_next
+        if not semantic_origin:
+            return None
+        directory = self.artifact_root / "curate" / request.collection_id
+        capture_path = directory / "generated.json"
+        if not capture_path.is_file():
+            return None
+        captured, intent = _read_state(capture_path), _read_state(directory / "intent.json")
+        if (
+            captured.get("input_hash") != intent.get("input_hash")
+            or intent.get("request") != _plain(asdict(request))
+            or intent.get("behavior") != _plain(asdict(behavior))
+            or captured.get("session_id") != request.session_id
+            or not self._valid_observed_capture(captured, behavior)
+        ):
+            return None
+        try:
+            self.replay.get_ref(request.record_id)
+        except FileNotFoundError:
+            pass
+        else:
+            return None
+        if captured.get("tool_events_seen") is True:
+            reason = "native_tool_invocation"
+        elif captured.get("agent_ok") is True and captured.get("agent_finished") is True:
+            reason = self._semantic_output_reason(captured.get("content"), request, source["task_type"])
+        else:
+            return None
+        if reason is None:
+            return None
+        return {
+            "reason": reason,
+            "sampled": True,
+            "collector_error_type": type(error).__name__,
+            "generated_capture": str(capture_path),
+            "generated_capture_sha256": hashlib.sha256(capture_path.read_bytes()).hexdigest(),
+            "old_mu_observed": True,
+            "reward_event_created": False,
+            "training_label_created": False,
+        }
+
+    def _job_audit(self, job, request, disposition):
+        payload = {
+            "schema_version": 1,
+            "collection_id": request.collection_id,
+            "candidate_group_id": request.candidate_group_id,
+            "candidate_index": request.candidate_index,
+            "optimizer_step": self.state["optimizer_step"],
+            "status": job["status"],
+            **disposition,
+        }
+        path = self.artifact_root / "controller/curate_jobs" / (request.collection_id + ".json")
+        if path.exists() and _read_state(path) != payload:
+            raise ControllerRecoveryRequired("A terminal curator job disposition cannot be rewritten")
+        _write_state(path, payload)
+        job["disposition"] = payload
+        self.state.setdefault("curate_job_dispositions", {})[request.collection_id] = payload
+        self.save_state()
+
+    def _retained_collection(self, job, request):
+        candidate = self.store.get_candidate(job["candidate_id"])
+        record, ref = self.replay.get(job["record_id"]), self.replay.get_ref(job["record_id"])
+        if record.record_id != request.record_id or dict(record.skill_ref) != candidate.artifact.to_dict():
+            raise ControllerRecoveryRequired("Retained cohort identity differs from its durable replay")
+        return CurateCollection(
+            request.collection_id,
+            request.session_id,
+            record.record_id,
+            candidate,
+            self.store.load_artifact(candidate.artifact),
+            ref,
+            job["output_dir"],
+        )
+
+    def _censor_cohort(self, jobs, rejecting_job):
+        cohort_id = rejecting_job["candidate_group_id"]
+        cohort = self.state["cohorts"].setdefault(cohort_id, {"probe_ids": [], "assignments": {}})
+        cohort.update(
+            status="censored", reason="incomplete_curate_cohort", rejected_index=rejecting_job["candidate_index"]
+        )
+        for job in jobs:
+            if job is rejecting_job:
+                continue
+            request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
+            sampled = "record_id" in job
+            if sampled:
+                self.store.reject(
+                    job["candidate_id"], reason="Administrative cohort censorship; no negative utility was observed"
+                )
+                window = self.state["pending"].get("window_" + request.collection_id)
+                if window is not None:
+                    if window.get("observed") or window.get("settlement_id"):
+                        raise ControllerRecoveryRequired(
+                            "An incomplete cohort already acquired credit; reconcile its history"
+                        )
+                    window.update(status="censored", reason="incomplete_curate_cohort")
+            job["status"] = "censored"
+            self._job_audit(
+                job,
+                request,
+                {
+                    "reason": "incomplete_curate_cohort",
+                    "sampled": sampled,
+                    "reward_event_created": False,
+                    "training_label_created": False,
+                    **(
+                        {"retained_record_id": job["record_id"], "retained_candidate_id": job["candidate_id"]}
+                        if sampled
+                        else {}
+                    ),
+                },
+            )
+        self.save_state()
+
+    async def _collect_cohorts(self, current, behavior, step):
+        grouped = {}
+        for job in current["curate_jobs"]:
+            grouped.setdefault(job["candidate_group_id"], []).append(job)
+        for cohort_id, jobs in grouped.items():
+            if len(jobs) != self.settings.candidates_per_source:
+                raise ControllerRecoveryRequired("Incomplete declared candidate group in the durable curate queue")
+            rejecting = next((job for job in jobs if job["status"] in {"semantic_rejected", "source_censored"}), None)
+            if rejecting is not None:
+                self._censor_cohort(jobs, rejecting)
+                continue
+            for job in jobs:
+                if job["status"] in {"retained", "registered"}:
+                    continue
+                if job["status"] != "queued":
+                    raise ControllerRecoveryRequired("Unknown curator job lifecycle requires reconciliation")
+                source = self._load_source(job["episode_output_dir"])
+                request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
+                gate = self._curate_source_gate(source, request)
+                job["input_policy"] = gate
+                self.save_state()
+                if not gate["accepted"]:
+                    job["status"] = "source_censored"
+                    self._job_audit(
+                        job,
+                        request,
+                        {
+                            "reason": "source_input_over_capacity_budget",
+                            "sampled": False,
+                            "input_policy": gate,
+                            "reward_event_created": False,
+                            "training_label_created": False,
+                        },
+                    )
+                    rejecting = job
+                    break
+                try:
+                    result = await self._collect_curate(
+                        gateway_manager=self.ema_gateway,
+                        behavior=behavior,
+                        source_episode=source,
+                        store=self.store,
+                        replay=self.replay,
+                        request=request,
+                        runtime=self.runtime,
+                        output_root=self.artifact_root / "curate",
+                    )
+                except Exception as error:
+                    rejection = self._semantic_curate_rejection(error, source, request, behavior)
+                    if rejection is None:
+                        raise
+                    job["status"] = "semantic_rejected"
+                    self._job_audit(job, request, rejection)
+                    rejecting = job
+                    break
+                job.update(
+                    status="retained",
+                    collection_id=result.collection_id,
+                    record_id=result.record_id,
+                    candidate_id=result.candidate.candidate_id,
+                    output_dir=result.output_dir,
+                )
+                self.save_state()
+            if rejecting is not None:
+                self._censor_cohort(jobs, rejecting)
+                continue
+            # All actions are durably retained before any window/probe admission.
+            for job in jobs:
+                if job["status"] == "registered":
+                    continue
+                request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
+                result = self._retained_collection(job, request)
+                self._register_collection(result, job, step)
+                job["status"] = "registered"
+                self.state["collections"][result.collection_id] = {
+                    "record_id": result.record_id,
+                    "window_id": "window_" + result.collection_id,
+                    "output_dir": result.output_dir,
+                }
+                self.save_state()
+            self.state["cohorts"][cohort_id]["status"] = "registered"
+            self.save_state()
+
+    def _complete_post_update(self, current, prepared, optimizer_step):
+        jobs = current["curate_jobs"]
+        report = {
+            "schema_version": 1,
+            "update_id": prepared.update_id,
+            "optimizer_step": optimizer_step,
+            "global_step": prepared.global_step,
+            "new_curate_windows": sum(job["status"] == "registered" for job in jobs),
+            "curate_semantic_rejections": sum(job["status"] == "semantic_rejected" for job in jobs),
+            "curate_censored_jobs": sum(job["status"] in {"censored", "source_censored"} for job in jobs),
+            "curate_retained_actions": sum("record_id" in job for job in jobs),
+            "curate_censored_cohorts": len(
+                {
+                    job["candidate_group_id"]
+                    for job in jobs
+                    if job["status"] in {"censored", "source_censored", "semantic_rejected"}
+                }
+            ),
+        }
+        path = self.artifact_root / "controller/updates" / (prepared.update_id + ".json")
+        if path.exists() and _read_state(path) != report:
+            raise ControllerRecoveryRequired("An optimizer post-update disposition cannot be rewritten")
+        _write_state(path, report)
+        final_state = self.export_state()
+        final_state.setdefault("post_update_reports", {})[prepared.update_id] = report
+        totals = final_state.setdefault("curate_metrics", {})
+        for key in (
+            "new_curate_windows",
+            "curate_semantic_rejections",
+            "curate_censored_jobs",
+            "curate_retained_actions",
+            "curate_censored_cohorts",
+        ):
+            totals[key] = totals.get(key, 0) + report[key]
+        final_state["prepared_update"] = None
+        _write_state(self.state_path, final_state)
+        self.state = final_state
+        return report
+
     async def after_update_and_sync(self, solver_data, step, *, prepared, optimizer_step):
         if self._busy:
             raise RuntimeError("Joint controller operations cannot overlap")
@@ -807,7 +1176,8 @@ class SkillJointController:
             current = self.state["prepared_update"]
             if current is None:
                 if prepared.update_id in self.state["applied_update_ids"]:
-                    return {"update_id": prepared.update_id, "already_completed": True}
+                    report = self.state.get("post_update_reports", {}).get(prepared.update_id, {})
+                    return {**report, "update_id": prepared.update_id, "already_completed": True}
                 raise ControllerRecoveryRequired("No prepared update owns this optimizer acknowledgement")
             if (
                 current["update_id"] != prepared.update_id
@@ -860,33 +1230,7 @@ class SkillJointController:
                 self.loading["tokenizer_version"],
                 self.runtime.template_version,
             )
-            collected = 0
-            for job in current["curate_jobs"]:
-                if job["status"] == "registered":
-                    continue
-                source = self._load_source(job["episode_output_dir"])
-                request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
-                result = await self._collect_curate(
-                    gateway_manager=self.ema_gateway,
-                    behavior=behavior,
-                    source_episode=source,
-                    store=self.store,
-                    replay=self.replay,
-                    request=request,
-                    runtime=self.runtime,
-                    output_root=self.artifact_root / "curate",
-                )
-                self._register_collection(result, job, step)
-                job.update(status="registered", collection_id=result.collection_id, record_id=result.record_id)
-                self.state["collections"][result.collection_id] = {
-                    "record_id": result.record_id,
-                    "window_id": "window_" + result.collection_id,
-                    "output_dir": result.output_dir,
-                }
-                collected += 1
-                self.save_state()
-            self.state["prepared_update"] = None
-            self.save_state()
-            return {"update_id": prepared.update_id, "optimizer_step": actual, "new_curate_windows": collected}
+            await self._collect_cohorts(current, behavior, step)
+            return self._complete_post_update(current, prepared, actual)
         finally:
             self._busy = False

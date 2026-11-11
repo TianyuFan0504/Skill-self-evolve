@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 import os
@@ -132,6 +133,19 @@ class FakeSandbox:
         pass
 
 
+class CallbackTokenizer:
+    pad_token_id = 0
+    is_fast = False
+
+    def encode(self, text, **kwargs):
+        return list(text.encode())
+
+    def apply_chat_template(self, messages, *, tokenize, add_generation_prompt, **kwargs):
+        rendered = "".join("<" + row["role"] + ">" + row["content"] + "</turn>" for row in messages)
+        rendered += "<assistant>" if add_generation_prompt else ""
+        return self.encode(rendered) if tokenize else rendered
+
+
 class ControllerTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -190,6 +204,8 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                     "rollout": {
                         "temperature": 1.0,
                         "prompt_length": 4096,
+                        "response_length": 32768,
+                        "max_model_len": 36864,
                         "custom": {"agent_framework": {"gateway_count": 2}},
                     },
                 },
@@ -197,9 +213,10 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         )
         self.actor, self.gateways, self.probe_calls, self.curate_calls = FakeActor(), [], [], []
         self.negative_probe = False
-        self.trainer = SimpleNamespace(
-            config=self.config, actor_rollout_wg=self.actor, tokenizer=SimpleNamespace(pad_token_id=0)
-        )
+        self.curate_bad_content = {}
+        self.curate_bad_fields = {}
+        self.curate_tool_indices = set()
+        self.trainer = SimpleNamespace(config=self.config, actor_rollout_wg=self.actor, tokenizer=CallbackTokenizer())
 
     async def routes(self, config, specs, **kwargs):
         self.assertEqual(kwargs["solver_gpus"], 4)
@@ -312,11 +329,18 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                     "when_to_apply": "An object must be cleaned before placement.",
                     "task_families": [kwargs["source_episode"]["task_type"]],
                 }
-                return SimpleNamespace(output={"content": json.dumps(content)}, info={"ok": True}, finished=True)
+                content.update(self.curate_bad_fields.get(request.candidate_index, {}))
+                text = self.curate_bad_content.get(request.candidate_index, json.dumps(content))
+                return SimpleNamespace(output={"content": text}, info={"ok": True}, finished=True)
 
             return SimpleNamespace(run=run)
 
-        return await curate.collect_curate_candidate(**kwargs, _agent_factory=agent, _sandbox_factory=FakeSandbox)
+        def sandbox(*arguments):
+            value = FakeSandbox(*arguments)
+            value.tool_events_seen = request.candidate_index in self.curate_tool_indices
+            return value
+
+        return await curate.collect_curate_candidate(**kwargs, _agent_factory=agent, _sandbox_factory=sandbox)
 
     async def native_probe(self, **kwargs):
         self.probe_calls.append(kwargs["request"])
@@ -334,6 +358,21 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
             )
             (output / "initial-state.json").write_text(json.dumps({"observation": "Identical paired game state"}))
             refs = store.get_snapshot(metadata["skill_snapshot_id"]).skills
+            group, variant = metadata["credit_probe_group"], metadata["credit_probe_variant"]
+            workdir = "/tmp/alfworld-skill-episodes/credit_" + group
+            home = "/tmp/codex-home-" + hashlib.sha256(session.encode()).hexdigest()[:32]
+            archives = []
+            for name, source in (("workspace.tar", workdir), ("codex-home.tar", home)):
+                archive = output / name
+                archive.write_bytes(("CPU native-boundary fixture: " + session).encode())
+                archives.append(
+                    {
+                        "source": source,
+                        "path": str(archive),
+                        "removed": True,
+                        "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                    }
+                )
             return {
                 "finished": True,
                 "reward": reward,
@@ -342,6 +381,23 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                 "extra_info": {
                     "eval_completed": True,
                     "episode_output_dir": str(output),
+                    "role": "counterfactual_probe",
+                    "credit_probe_group": group,
+                    "credit_probe_variant": variant,
+                    "paired_workdir": {
+                        "schema_version": 1,
+                        "kind": "paired_empty_workdir",
+                        "credit_probe_group": group,
+                        "variant": variant,
+                        "workdir": workdir,
+                        "empty_before_run": True,
+                        "cleanup_completed": True,
+                        "codex_homes": [home],
+                        "archives": archives,
+                        "host_uid": 0,
+                        "agent_uid": 1001,
+                        "agent_gid": 1001,
+                    },
                     "skill_context": {
                         "snapshot_id": metadata["skill_snapshot_id"],
                         "injected_refs": [ref.to_dict() for ref in refs],
@@ -476,6 +532,123 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity.template_version, self.runtime.template_version)
         self.assertEqual(len(identity.frozen_version), 64)
         self.assertEqual(self.gateways, [])
+
+    async def test_one_invalid_candidate_censors_entire_cohort_after_one_verified_optimizer(self):
+        self.curate_bad_content[1] = "This is not JSON."
+        controller = await self.create()
+        data = self.solver()
+        prepared = await self.update(controller, data, 1)
+        self.assertEqual(self.actor.clock, 1)
+        self.assertEqual(len(self.actor.update_calls), 1)
+        self.assertIsNone(controller.state["prepared_update"])
+        self.assertEqual(controller.state["optimizer_step"], 1)
+        self.assertEqual(controller.state["pending"], {})
+        self.assertEqual(controller.ledger.sample_ready(100), [])
+        self.assertEqual(controller.store.get_snapshot().skills, ())
+        self.assertEqual(len(list((controller.replay.root / "records").glob("*.json"))), 1)
+        dispositions = list(controller.state["curate_job_dispositions"].values())
+        self.assertEqual({row["status"] for row in dispositions}, {"semantic_rejected", "censored"})
+        rejected = next(row for row in dispositions if row["status"] == "semantic_rejected")
+        self.assertFalse(rejected["training_label_created"])
+        self.assertNotIn("skill_ref", rejected)
+        self.assertNotIn("retained_record_id", rejected)
+        self.assertTrue(all(row["status"] == "censored" for row in controller.state["cohorts"].values()))
+        report = controller.state["post_update_reports"][prepared.update_id]
+        self.assertEqual(
+            (report["new_curate_windows"], report["curate_semantic_rejections"], report["curate_retained_actions"]),
+            (0, 1, 1),
+        )
+        repeat = await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertTrue(repeat["already_completed"])
+        self.assertEqual(len(self.curate_calls), 2)
+        following = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
+        self.assertFalse((following.data["role_id"] == 1).any())
+        self.assertEqual(self.probe_calls, [])
+
+    async def test_invalid_field_type_is_nonfatal_but_has_no_fake_replay_label(self):
+        self.curate_bad_fields[0] = {"title": []}
+        controller = await self.create()
+        await self.update(controller, self.solver(), 1)
+        self.assertEqual(self.actor.clock, 1)
+        self.assertEqual(len(self.curate_calls), 1)
+        self.assertEqual(controller.state["curate_metrics"]["curate_semantic_rejections"], 1)
+        self.assertEqual(list((controller.replay.root / "records").glob("*.json")), [])
+
+    async def test_proved_tool_invocation_censors_cohort_without_sampling_its_other_member(self):
+        self.curate_tool_indices.add(0)
+        controller = await self.create()
+        await self.update(controller, self.solver(), 1)
+        self.assertEqual(self.actor.clock, 1)
+        self.assertEqual(len(self.curate_calls), 1)
+        self.assertEqual(controller.state["pending"], {})
+        self.assertEqual(controller.state["curate_metrics"]["curate_retained_actions"], 0)
+        self.assertIsNone(controller.state["prepared_update"])
+
+    async def test_oversize_whole_source_is_censored_before_sampling_against_total_capacity(self):
+        controller = await self.create()
+        data = self.solver()
+        files = list((self.root / "episodes").glob("*/*/initial-state.json"))
+        for path in files:
+            path.write_text(json.dumps({"observation": "Long observed feedback. " * 3000}))
+        originals = {str(path): path.read_bytes() for path in files}
+        await self.update(controller, data, 1)
+        self.assertEqual(self.curate_calls, [])
+        self.assertEqual(controller.state["pending"], {})
+        disposition = next(
+            row for row in controller.state["curate_job_dispositions"].values() if row["status"] == "source_censored"
+        )
+        policy = disposition["input_policy"]
+        self.assertEqual(policy["gateway_total_capacity"], 36864)
+        self.assertEqual(policy["host_prompt_budget"], 36864 - 4096 - 2048)
+        self.assertGreater(policy["host_prompt_tokens"], policy["host_prompt_budget"])
+        self.assertFalse(policy["source_truncated"])
+        self.assertFalse(disposition["sampled"])
+        self.assertEqual(originals, {str(path): path.read_bytes() for path in files})
+
+    async def test_actual_version_failure_is_fatal_after_update_and_preserves_postprocessing_cut(self):
+        controller = await self.create()
+        native = controller._collect_curate
+
+        async def broken(**kwargs):
+            kwargs["gateway_manager"].client.optimizer_step += 1
+            return await native(**kwargs)
+
+        controller._collect_curate = broken
+        data = self.solver()
+        prepared = await controller.prepare_update(data, 1)
+        self.actor.update_actor(prepared.data)
+        with self.assertRaisesRegex(curate.CurateProtocolError, "weight versions"):
+            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(controller.state["optimizer_step"], 1)
+        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
+        self.assertNotIn(prepared.update_id, controller.state.get("post_update_reports", {}))
+        self.assertEqual(controller.state.get("curate_metrics", {}), {})
+
+    async def test_replay_io_failure_is_not_mislabeled_as_semantic_and_retry_does_not_step_again(self):
+        controller = await self.create()
+        data = self.solver()
+        prepared = await controller.prepare_update(data, 1)
+        self.actor.update_actor(prepared.data)
+        with patch.object(controller.replay, "append", side_effect=OSError("durable append failed")):
+            with self.assertRaises(OSError):
+                await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
+        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
+        await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(self.actor.clock, 1)
+        self.assertEqual(len(self.actor.update_calls), 1)
+        self.assertEqual(len(controller.state["pending"]), 2)
+
+    async def test_unverified_optimizer_receipt_keeps_existing_replay_leases_uncertain(self):
+        controller = await self.create()
+        await self.update(controller, self.solver(), 1)
+        data = self.solver(("future-b", "future-c"))
+        prepared = await controller.prepare_update(data, 2)
+        self.actor.update_actor(prepared.data)
+        with self.assertRaises(controller_module.ControllerRecoveryRequired):
+            await controller.after_update_and_sync(data, 2, prepared=prepared, optimizer_step=3)
+        for ack in prepared.acknowledgments:
+            self.assertEqual(controller.ledger.training_status(ack["settlement_id"])["state"], "leased")
 
 
 if __name__ == "__main__":
