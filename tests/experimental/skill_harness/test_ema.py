@@ -89,6 +89,13 @@ class ParameterEMATest(unittest.TestCase):
         other.initialize({"weight": torch.zeros(1, 2)}, self.buffers)
         self.assertNotEqual(other.metadata()["layout_fingerprint"], initial)
 
+    def test_online_layout_inspection_matches_ema_without_copying_values_or_clock(self):
+        pointers = {key: value.data_ptr() for key, value in self.parameters.items()}
+        report = ema_module.describe_local_layout(self.parameters, self.buffers)
+        self.assertEqual(report["layout_fingerprint"], self.ema.metadata()["layout_fingerprint"])
+        self.assertNotIn("last_optimizer_step", report)
+        self.assertEqual({key: value.data_ptr() for key, value in self.parameters.items()}, pointers)
+
     def test_invalid_clock_layout_and_nonfinite_updates_are_atomic(self):
         original = self.ema.state_dict()
         for step in (7, 6, 9, True, -1):

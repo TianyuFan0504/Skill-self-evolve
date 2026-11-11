@@ -22,7 +22,7 @@ from verl.single_controller.base.decorator import Dispatch, make_nd_compute_data
 from verl.utils import tensordict_utils as tu
 from verl.workers.engine_workers import ActorRolloutRefWorker, TrainingWorker
 
-from .ema import ParameterEMA, require_single_optimizer_step
+from .ema import ParameterEMA, describe_local_layout, require_single_optimizer_step
 
 
 class EMATrainingWorker(TrainingWorker):
@@ -187,6 +187,18 @@ class EMAActorRolloutRefWorker(ActorRolloutRefWorker):
     """An opt-in actor worker; its default online solver sync is not changed."""
 
     actor_worker_cls = EMATrainingWorker
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def get_online_layout_metadata(self, buffer_policy: str = "copy"):
+        """Validate checkpoint compatibility before any EMA state is initialized."""
+        if not self._is_actor or self.actor is None:
+            raise RuntimeError("An initialized online actor is required for layout inspection")
+        parameters, buffers = self.actor._sources()
+        return {
+            "worker_rank": self.rank,
+            "world_size": torch.distributed.get_world_size(),
+            **describe_local_layout(parameters, buffers, buffer_policy=buffer_policy),
+        }
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def initialize_ema(self, *args, **kwargs):

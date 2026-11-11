@@ -64,6 +64,27 @@ def tensor_layout(value: torch.Tensor) -> dict[str, Any]:
     return result
 
 
+def describe_local_layout(
+    parameters: TensorProvider, buffers: TensorProvider | None = None, *, buffer_policy: str = "copy",
+) -> dict[str, Any]:
+    """Inspect current local shards without copying values or creating an EMA clock."""
+    if buffer_policy not in {"copy", "exclude"}:
+        raise ValueError("buffer_policy must be copy or exclude")
+    params = _tensors(parameters)
+    bufs = _tensors(buffers) if buffer_policy == "copy" else {}
+    descriptor = {
+        "parameters": {name: tensor_layout(value) for name, value in params.items()},
+        "buffers": {name: tensor_layout(value) for name, value in bufs.items()},
+    }
+    return {
+        "layout_fingerprint": hashlib.sha256(
+            json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "parameter_count": len(params),
+        "local_parameter_elements": sum(local_tensor(value).numel() for value in params.values()),
+    }
+
+
 def require_single_optimizer_step(
     local_batch_size: int,
     dp_size: int,
