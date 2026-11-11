@@ -169,3 +169,15 @@ def runtime_env_config() -> dict[str, Any]:
         "env_vars": env_vars,
         "worker_process_setup_hook": "verl.experimental.skill_harness.bootstrap.configure_worker",
     }
+
+
+def apply_runtime_environment(config, runtime: dict[str, Any] | None = None) -> None:
+    """Replace an inherited struct runtime-env node instead of merging into it."""
+    from omegaconf import OmegaConf
+
+    current = OmegaConf.select(config, "ray_kwargs.ray_init.runtime_env", default={}) or {}
+    plain = OmegaConf.to_container(current, resolve=True) if OmegaConf.is_config(current) else dict(current)
+    if plain.get("pip") or plain.get("conda"):
+        raise ValueError("Remote dependency downloads are disabled; relay packages through the workstation")
+    merged = OmegaConf.merge(plain, runtime if runtime is not None else runtime_env_config())
+    OmegaConf.update(config, "ray_kwargs.ray_init.runtime_env", merged, merge=False, force_add=True)

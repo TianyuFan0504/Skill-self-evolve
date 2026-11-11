@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # ruff: noqa: E402 - runtime provenance must be pinned before trainer imports.
-from .bootstrap import configure_runtime, runtime_env_config
+from .bootstrap import apply_runtime_environment, configure_runtime
 
 # Run before imports from the external Uni-Agent stack or distributed trainer.
 IMPORT_PROVENANCE = configure_runtime()
@@ -115,12 +115,7 @@ class SkillTaskRunner:
 def main(config):
     auto_set_device(config)
     validate_config(config, use_reference_policy=need_reference_policy(config), use_critic=need_critic(config))
-    runtime = runtime_env_config()
-    current = OmegaConf.select(config, "ray_kwargs.ray_init.runtime_env", default={}) or {}
-    if current.get("pip") or current.get("conda"):
-        raise ValueError("Remote runtime dependency downloads are disabled; relay dependencies through the workstation")
-    merged = OmegaConf.merge(current, runtime)
-    OmegaConf.update(config, "ray_kwargs.ray_init.runtime_env", merged, force_add=True)
+    apply_runtime_environment(config)
     save_run_manifest(config)
     try:
         run_ppo(config, task_runner_class=SkillTaskRunner)

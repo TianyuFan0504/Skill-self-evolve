@@ -43,6 +43,36 @@ def gpu_count() -> int:
     return min(count, len([value for value in visible.split(",") if value])) if visible is not None else count
 
 
+def archive_previous_attempt(run: Path) -> None:
+    """Preserve terminal attempt metadata while the full training log stays append-only."""
+    if not (run / "status.json").is_file() or not (run / "training.log").exists():
+        return
+    previous = json.loads((run / "status.json").read_text())
+    if previous.get("state") == "running":
+        raise RuntimeError("A running attempt must be reconciled before replacing its metadata")
+    folder = run / "attempt_history" / str(time.time_ns())
+    folder.mkdir(parents=True)
+    for name in (
+        "status.json",
+        "training-manifest.json",
+        "launch_manifest.json",
+        "resolved-config.yaml",
+        "hydra_overrides.json",
+        "preflight.json",
+        "supervisor-input.json",
+    ):
+        source = run / name
+        if source.is_file():
+            shutil.copy2(source, folder / name)
+    write_json(
+        folder / "log-reference.json",
+        {
+            "path": str(run / "training.log"),
+            "bytes_at_attempt_end": (run / "training.log").stat().st_size,
+        },
+    )
+
+
 def install_codex_runtime(run: Path, benchmark: Path, capacity: int) -> tuple[Path, Path]:
     """Install only public instructions/launcher outside the private NAS tree."""
     public = Path("/opt/alfworld-tools/skill_self_evolve") / hashlib.sha256(str(run).encode()).hexdigest()[:16]
@@ -274,6 +304,7 @@ def main() -> int:
                 pass
     run.mkdir(parents=True, exist_ok=True, mode=0o700)
     run.chmod(0o700)
+    archive_previous_attempt(run)
     data = run / "data"
     data.mkdir(exist_ok=True)
     runtime = run / "runtime"
