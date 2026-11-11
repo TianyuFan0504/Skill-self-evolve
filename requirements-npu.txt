@@ -1,6 +1,5 @@
 # requirements.txt records the full set of dependencies for development
 accelerate
-av>=10.0,<19.0
 bytecode
 codetiming
 datasets
@@ -21,4 +20,4 @@ einops
 qwen_vl_utils
 hf_transfer
 triton-ascend==3.2.2
-TransferQueue==0.1.11
+TransferQueue @ git+https://github.com/Ascend/TransferQueue.git@main

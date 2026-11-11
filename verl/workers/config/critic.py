@@ -21,6 +21,7 @@ from verl.base_config import BaseConfig
 from verl.trainer.config import BaseModelConfig, CheckpointConfig
 from verl.utils.profiler import ProfilerConfig
 
+from .checkpoint import McoreCheckpointConfig
 from .engine import (
     FSDPEngineConfig,
     McoreEngineConfig,
@@ -164,12 +165,14 @@ class McoreCriticConfig(CriticConfig):
     Args:
         nccl_timeout (int): NCCL timeout in seconds for distributed operations.
         megatron (Dict[str, Any]): Megatron-specific parallelism settings.
+        checkpoint (McoreCheckpointConfig): Megatron-specific checkpoint config
+            that adds ``mbridge_config`` on top of the base checkpoint fields.
     """
 
     strategy: str = "megatron"
     nccl_timeout: int = 600
     megatron: McoreEngineConfig = field(default_factory=McoreEngineConfig)
-    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    checkpoint: McoreCheckpointConfig = field(default_factory=McoreCheckpointConfig)
 
     def validate(self, n_gpus: int, train_batch_size: int):
         """Validate Megatron critic configuration with runtime parameters."""

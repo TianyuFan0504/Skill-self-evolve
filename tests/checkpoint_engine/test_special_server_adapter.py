@@ -184,6 +184,7 @@ async def test_server_adapter(init_config):
                 "NCCL_DEBUG": "WARN",
                 "VLLM_LOGGING_LEVEL": "INFO",
                 "VLLM_USE_V1": "1",
+                "VLLM_DISABLE_COMPILE_CACHE": "1",
             }
         }
     )

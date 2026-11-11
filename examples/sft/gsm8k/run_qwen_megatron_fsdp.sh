@@ -55,6 +55,7 @@ ENGINE=(
     engine.pipeline_model_parallel_size=${PP}
     engine.expert_model_parallel_size=${EP}
     engine.use_mbridge=True
+    engine.vanilla_mbridge=False
     engine.use_megatron_fsdp=True
     +engine.override_transformer_config.gradient_accumulation_fusion=False
 )

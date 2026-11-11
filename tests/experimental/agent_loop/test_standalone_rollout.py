@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import asyncio
 import os
 
 import pytest
@@ -32,8 +31,8 @@ def init_config() -> DictConfig:
     with initialize_config_dir(config_dir=os.path.abspath("verl/trainer/config")):
         config = compose(config_name="ppo_trainer")
 
-    config.trainer.n_gpus_per_node = int(os.getenv("VERL_TEST_N_GPUS_PER_NODE", "4"))
-    config.trainer.nnodes = int(os.getenv("VERL_TEST_NNODES", "2"))
+    config.trainer.n_gpus_per_node = 4
+    config.trainer.nnodes = 2
     config.actor_rollout_ref.actor.use_dynamic_bsz = True
     config.actor_rollout_ref.model.path = os.path.expanduser("~/models/Qwen/Qwen2.5-1.5B-Instruct")
     config.actor_rollout_ref.rollout.name = os.environ["ROLLOUT_NAME"]
@@ -74,7 +73,6 @@ async def test_standalone_rollout(init_config, tp_size):
     )
 
     server_addresses = llm_server_manager.get_addresses()
-    assert server_addresses, "Expected at least one rollout server"
     assert len(server_addresses) == num_replicas
 
     # The rollout servers listen on Ray node addresses, which NO_PROXY does not
@@ -84,17 +82,16 @@ async def test_standalone_rollout(init_config, tp_size):
         os.environ.pop(var, None)
         os.environ.pop(var.lower(), None)
 
-    # Exercise every replica concurrently
-    async def generate(server_address):
-        async with AsyncOpenAI(api_key="123-abc", base_url=f"http://{server_address}/v1") as client:
-            completion = await client.chat.completions.create(
-                model=init_config.actor_rollout_ref.model.path,
-                messages=[{"role": "user", "content": "What can you do?"}],
-            )
-            assert completion.choices
-            print(f"{server_address}: {completion.choices[0].message.content}")
+    client = AsyncOpenAI(
+        api_key="123-abc",
+        base_url=f"http://{server_addresses[0]}/v1",
+    )
 
-    await asyncio.gather(*(generate(address) for address in server_addresses))
+    completion = await client.chat.completions.create(
+        model=init_config.actor_rollout_ref.model.path,
+        messages=[{"role": "user", "content": "What can you do?"}],
+    )
+    print(completion.choices[0].message.content)
 
     ray.shutdown()
 

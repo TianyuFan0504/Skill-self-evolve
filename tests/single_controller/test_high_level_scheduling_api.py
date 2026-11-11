@@ -18,7 +18,7 @@ import ray
 
 from verl.single_controller.base.worker import Worker
 from verl.single_controller.ray.base import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup, merge_resource_pool
-from verl.utils.device import get_device_name, get_torch_device
+from verl.utils.device import get_device_name
 
 
 @ray.remote
@@ -32,8 +32,10 @@ class TestActor(Worker):
 
 
 def test():
+    import torch
+
     ray.init()
-    ngpus = get_torch_device().device_count()
+    ngpus = torch.cuda.device_count()
     half = ngpus // 2
 
     # test single-node-no-partition

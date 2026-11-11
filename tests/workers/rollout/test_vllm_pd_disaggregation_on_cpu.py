@@ -31,7 +31,6 @@ from unittest.mock import patch
 
 import pytest
 
-from verl.utils.device import get_device_name
 from verl.workers.config import DisaggregationConfig, RolloutConfig
 
 # ---------------------------------------------------------------------------
@@ -204,7 +203,7 @@ def test_build_kv_transfer_config_prefill_role_maps_to_kv_producer():
     assert cfg["kv_connector"] == "NixlConnector"
     assert cfg["kv_role"] == "kv_producer"
     assert cfg["engine_id"] == "e0"
-    assert cfg["kv_buffer_device"] == get_device_name()
+    assert cfg["kv_buffer_device"] == "cuda"
     assert "kv_connector_extra_config" not in cfg
 
 

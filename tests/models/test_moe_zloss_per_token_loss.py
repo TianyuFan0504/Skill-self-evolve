@@ -114,6 +114,7 @@ def _grad_norm(model_path, calculate_per_token_loss, data_td):
         engine_config=McoreEngineConfig(
             forward_only=False,
             use_mbridge=True,
+            vanilla_mbridge=False,  # NVIDIA Megatron-Bridge (production path; ISEEKYAN mbridge is deprecated)
             tensor_model_parallel_size=1,
             pipeline_model_parallel_size=1,
             context_parallel_size=1,

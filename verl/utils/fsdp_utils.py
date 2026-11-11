@@ -194,10 +194,19 @@ def offload_fsdp_model_to_cpu(model: FSDP, empty_cache: bool = True):
 
 @torch.no_grad()
 def offload_fsdp2_model_to_cpu(model, empty_cache: bool = True):
-    # FSDPModule._apply may read CPU data to repad uneven shards or pin memory
-    # inside model.to(). Complete each D2H copy before those reads: synchronizing
-    # after model.to() cannot repair values copied from an unfinished transfer.
-    model.to("cpu", non_blocking=False)
+    # PyTorch currently allocates pinned host storage for CUDA-to-CPU
+    # Tensor.to() copies when non_blocking=True. This behavior is not strictly
+    # documented, so keep it covered by the FSDP2 model-transfer regression
+    # test. The pinned parameters also make the subsequent CPU-to-GPU copy
+    # asynchronous.
+    #
+    # The CPU tensors are not safe for host access until the D2H copy finishes.
+    # Current callers reload them on the same CUDA stream, whose ordering keeps
+    # the D2H-to-H2D round trip correct. A caller that reads the tensors on the
+    # host must synchronize first, and a caller that reloads them on another
+    # stream must establish an explicit stream dependency. empty_cache() below
+    # is not a synchronization point.
+    model.to("cpu", non_blocking=True)
     if empty_cache:
         get_torch_device().empty_cache()
 
@@ -513,7 +522,7 @@ def fsdp2_load_full_state_dict(model: torch.nn.Module, full_state: dict, device_
         dist.broadcast(buf, src=0)
 
     if cpu_offload:
-        offload_fsdp2_model_to_cpu(model, empty_cache=False)
+        model.to("cpu", non_blocking=True)
         for buf in model.buffers():
             buf.data = buf.data.to(get_device_id())
 
@@ -1155,7 +1164,7 @@ def fsdp2_sharded_save_to_cpu(
         # Only process sharded parameters of DTensor type (core parameters of FSDP2)
         if not isinstance(param, DTensor):
             # Save non-sharded parameters (e.g., running_mean of BatchNorm) as local data
-            cpu_tensor = param.detach().to("cpu", copy=True)
+            cpu_tensor = param.detach().cpu()
             cpu_sharded_state[param_name] = (cpu_tensor, None)
             continue
 
@@ -1168,7 +1177,7 @@ def fsdp2_sharded_save_to_cpu(
         # 1. Extract local shard data from the current GPU (_local_tensor)
         local_gpu_tensor = param._local_tensor  # Local shard attribute defined in your DTensor class
         # 2. Move to CPU memory and detach from computation graph
-        local_cpu_tensor = local_gpu_tensor.detach().to("cpu", copy=True)
+        local_cpu_tensor = local_gpu_tensor.detach().cpu()
         # 3. Save CPU shard + original DTensorSpec (ensure sharding rules remain unchanged)
         cpu_sharded_state[param_name] = (local_cpu_tensor, param._spec)
 

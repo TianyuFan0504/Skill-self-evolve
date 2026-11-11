@@ -30,7 +30,6 @@ actor_rollout_ref:
       ulysses_parallel_size: 1
       expert_parallel_size: 1
       mixed_precision: true
-      low_precision_reduce_scatter_comm: false
       seed: 42
       full_determinism: false
       init_device: meta
@@ -45,8 +44,6 @@ actor_rollout_ref:
       forward_only: false
       enable_fsdp_offload: false
       enable_reentrant: false
-      broadcast_model_weights_from_rank0: true
-      ep_sharded_stream_load: false
       attn_implementation: flash_attention_2
       moe_implementation: fused
       cross_entropy_loss_implementation: eager
@@ -161,6 +158,16 @@ actor_rollout_ref:
           steps: null
           stages: ${oc.select:global_profiler.global_tool_config.precision_debugger.stages,null}
           strict: ${oc.select:global_profiler.global_tool_config.precision_debugger.strict,False}
+    qat:
+      enable: false
+      mode: w4a16
+      group_size: 16
+      ignore_patterns:
+      - lm_head
+      - embed_tokens
+      - re:.*mlp.gate$
+      activation_observer: static_minmax
+      quantization_config_path: null
     use_remove_padding: ${oc.select:actor_rollout_ref.model.use_remove_padding,false}
     pad_to_length: false
   ref:
@@ -222,7 +229,6 @@ actor_rollout_ref:
       ulysses_parallel_size: ${oc.select:actor_rollout_ref.actor.veomni.ulysses_parallel_size,1}
       expert_parallel_size: ${oc.select:actor_rollout_ref.actor.veomni.expert_parallel_size,1}
       mixed_precision: true
-      low_precision_reduce_scatter_comm: false
       seed: ${oc.select:actor_rollout_ref.actor.veomni.seed,42}
       full_determinism: false
       init_device: meta
@@ -237,8 +243,6 @@ actor_rollout_ref:
       forward_only: true
       enable_fsdp_offload: false
       enable_reentrant: false
-      broadcast_model_weights_from_rank0: true
-      ep_sharded_stream_load: false
       attn_implementation: ${oc.select:actor_rollout_ref.actor.veomni.attn_implementation,flash_attention_2}
       moe_implementation: ${oc.select:actor_rollout_ref.actor.veomni.moe_implementation,fused}
       cross_entropy_loss_implementation: ${oc.select:actor_rollout_ref.actor.veomni.cross_entropy_loss_implementation,eager}
@@ -280,7 +284,6 @@ actor_rollout_ref:
     response_length: ${oc.select:data.max_response_length,512}
     dtype: bfloat16
     gpu_memory_utilization: 0.5
-    standalone_gpu_memory_utilization: ${oc.select:actor_rollout_ref.rollout.gpu_memory_utilization}
     ignore_eos: false
     enforce_eager: false
     cudagraph_capture_sizes: null
@@ -292,7 +295,6 @@ actor_rollout_ref:
     max_num_batched_tokens: 8192
     max_model_len: null
     max_num_seqs: 256
-    ray_actor_max_concurrency: 1024
     enable_chunked_prefill: true
     enable_prefix_caching: true
     logprobs_mode: processed_logprobs
@@ -335,7 +337,6 @@ actor_rollout_ref:
       format: hermes
       num_repeat_rollouts: null
     calculate_log_probs: true
-    topk_log_probs: 0
     agent:
       _target_: verl.workers.config.AgentLoopConfig
       num_workers: 8
@@ -399,14 +400,10 @@ actor_rollout_ref:
       port: 9090
       file: /tmp/ray/session_latest/metrics/prometheus/prometheus.yml
       served_model_name: ${oc.select:actor_rollout_ref.model.path,null}
-    quantization:
-      _target_: verl.workers.config.RolloutQuantizationConfig
-      linear: null
-      moe: null
-      moe_activation: null
-      ignore: []
-      config_file: null
+    quantization: null
+    quantization_config_file: null
     mtp: ${oc.select:actor_rollout_ref.model.mtp, null}
+    qat: ${oc.select:actor_rollout_ref.actor.fsdp_config.qat,${oc.select:actor_rollout_ref.actor.megatron.qat,null}}
     disaggregation:
       enabled: false
       prefill_replicas: 1
@@ -512,7 +509,6 @@ data:
   custom_cls:
     path: null
     name: null
-  custom_dataloader: null
   return_multi_modal_inputs: true
   apply_chat_template_kwargs: {}
   mm_processor_kwargs: {}
@@ -542,7 +538,6 @@ critic:
     ulysses_parallel_size: 1
     expert_parallel_size: 1
     mixed_precision: true
-    low_precision_reduce_scatter_comm: false
     seed: 42
     full_determinism: false
     init_device: meta
@@ -557,8 +552,6 @@ critic:
     forward_only: false
     enable_fsdp_offload: false
     enable_reentrant: false
-    broadcast_model_weights_from_rank0: true
-    ep_sharded_stream_load: false
     attn_implementation: flash_attention_2
     moe_implementation: fused
     cross_entropy_loss_implementation: eager
@@ -808,13 +801,8 @@ reward:
       'n': 1
       prompt_length: 2048
       response_length: 2048
-      quantization:
-        _target_: verl.workers.config.RolloutQuantizationConfig
-        linear: null
-        moe: null
-        moe_activation: null
-        ignore: []
-        config_file: null
+      quantization: null
+      quantization_config_file: null
       mtp: null
       disaggregation:
         enabled: false
@@ -838,7 +826,6 @@ algorithm:
     bypass_mode: false
     loss_type: ppo_clip
     rollout_is_batch_normalize: false
-    score_centering: false
   _target_: verl.trainer.config.AlgoConfig
   gamma: 1.0
   lam: 1.0
@@ -873,7 +860,6 @@ distillation:
     distillation_loss_coef: 1.0
     loss_max_clamp: null
     log_prob_min_clamp: null
-    tail_mass_eps: 1.0e-06
     use_policy_gradient: false
     policy_loss_mode: vanilla
     clip_ratio: 0.2
@@ -914,22 +900,23 @@ distillation:
   teacher_key: data_source
 transfer_queue:
   enable: false
+  metrics:
+    enabled: false
+    port: 0
   backend:
     storage_backend: SimpleStorage
     SimpleStorage:
-      total_storage_size: null
+      total_storage_size: 100000
       num_data_storage_units: 8
-      ssd_offload:
-        enabled: false
-        path: null
-        threshold_bytes: 1048576
     MooncakeStore:
       auto_init: false
-      metadata_server: P2PHANDSHAKE
+      metadata_server: localhost:50123
       master_server_address: localhost:50124
+      local_hostname: localhost
+      protocol: tcp
       global_segment_size: 4294967296
       local_buffer_size: 1073741824
-      hard_pin: true
+      device_name: ''
 trainer:
   balance_batch: true
   total_epochs: 30

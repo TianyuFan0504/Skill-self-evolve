@@ -206,8 +206,20 @@ class TRTLLMHttpServer:
 
         per_worker_gpu_share = 1.0 / self.max_colocate_count
 
-        if self.config.quantization.enabled:
-            raise NotImplementedError("rollout.quantization is only supported by vLLM")
+        quantization = self.config.quantization
+        if quantization is not None:
+            if quantization == "fp8":
+                FP8_BLOCK_QUANT_KWARGS = {
+                    "activation_scheme": "dynamic",
+                    "fmt": "e4m3",
+                    "quant_method": "fp8",
+                    "weight_block_size": [128, 128],
+                }
+                engine_kwargs["model_kwargs"] = {"quantization_config": FP8_BLOCK_QUANT_KWARGS}
+                if self.config.load_format != "dummy":
+                    raise ValueError("FP8 quantization is only supported for dummy load format")
+            else:
+                raise ValueError(f"Currently only support fp8 quantization, got: {quantization}")
 
         llm_kwargs = {
             "model": self.model_config.local_path,
@@ -312,7 +324,6 @@ class TRTLLMHttpServer:
         video_data: Optional[list[Any]] = None,
         audio_data: Optional[list[Any]] = None,
         mm_processor_kwargs: Optional[dict[str, Any]] = None,
-        session_id: Optional[str] = None,
     ) -> TokenOutput:
         from tensorrt_llm.llmapi import SamplingParams
 
@@ -641,7 +652,7 @@ class TRTLLMReplica(RolloutReplica):
             ),
             runtime_env={"env_vars": _server_env_vars},
             name=name,
-            max_concurrency=self.config.ray_actor_max_concurrency,
+            max_concurrency=self.max_concurrency,
         ).remote(
             config=self.config,
             model_config=self.model_config,

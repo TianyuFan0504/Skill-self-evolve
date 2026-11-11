@@ -108,7 +108,7 @@ def get_tensor_parallel_partition_stride(param):
 
 class _VocabParallelEntropy(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, vocab_parallel_logits: torch.Tensor, inplace_backward: bool = True) -> torch.Tensor:
+    def forward(ctx, vocab_parallel_logits: torch.Tensor) -> torch.Tensor:
         @torch.compile(dynamic=True)
         def mul_reduce(a, b):
             return (a * b).sum(dim=-1, keepdim=True)
@@ -124,23 +124,19 @@ class _VocabParallelEntropy(torch.autograd.Function):
         dist.all_reduce(sum_softmax_times_logits, group=mpu.get_tensor_model_parallel_group())
         entropy = logits_max + normalized_sum_exp_logits.log() - sum_softmax_times_logits
         ctx.save_for_backward(vocab_parallel_logits, softmax_logits, sum_softmax_times_logits)
-        ctx.inplace_backward = inplace_backward
         return entropy.squeeze(dim=-1)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
         vocab_parallel_logits, softmax_logits, sum_softmax_times_logits = ctx.saved_tensors
         # reuse softmax_logits as grad
-        if ctx.inplace_backward:
-            vocab_parallel_logits.sub_(sum_softmax_times_logits)
-            softmax_logits.mul_(vocab_parallel_logits)
-            # recover vocab_parallel_logits
-            vocab_parallel_logits.add_(sum_softmax_times_logits)
-        else:
-            softmax_logits.mul_(vocab_parallel_logits - sum_softmax_times_logits)
+        vocab_parallel_logits.sub_(sum_softmax_times_logits)
+        softmax_logits.mul_(vocab_parallel_logits)
         softmax_logits.mul_(grad_output.unsqueeze(dim=-1))
+        # recover vocab_parallel_logits
+        vocab_parallel_logits.add_(sum_softmax_times_logits)
         softmax_logits.mul_(-1)
-        return softmax_logits, None
+        return softmax_logits
 
 
 def vocab_parallel_entropy(vocab_parallel_logits: torch.Tensor) -> torch.Tensor:
@@ -168,8 +164,7 @@ def vocab_parallel_entropy_with_chunking(vocab_parallel_logits: torch.Tensor, ch
 
     for i in range(0, vocab_parallel_logits.shape[1], chunk_size):
         logits_chunk = vocab_parallel_logits[:, i : i + chunk_size, :]
-        # Chunks are views of one tensor: an in-place backward on one invalidates the others.
-        entropy_chunk = _VocabParallelEntropy.apply(logits_chunk, False)
+        entropy_chunk = _VocabParallelEntropy.apply(logits_chunk)
         entropy[:, i : i + chunk_size] = entropy_chunk
 
     return entropy

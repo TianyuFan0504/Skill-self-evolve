@@ -28,7 +28,6 @@ import torch
 from transformers import Qwen3VLConfig, Qwen3VLForConditionalGeneration
 
 from verl.models.transformers.monkey_patch import apply_monkey_patch
-from verl.utils.device import get_device_name, get_torch_device, is_device_available
 
 
 def create_tiny_qwen3_vl():
@@ -42,7 +41,7 @@ def create_tiny_qwen3_vl():
             num_key_value_heads=2,
             vocab_size=1000,
             rope_scaling=dict(
-                rope_type="default",
+                type="mrope",
                 mrope_section=[4, 4, 4],
             ),
         ),
@@ -58,10 +57,10 @@ def create_tiny_qwen3_vl():
         ),
     )
     model = Qwen3VLForConditionalGeneration(config)
-    return model.to(dtype=torch.bfloat16, device=get_device_name())
+    return model.to(dtype=torch.bfloat16, device="cuda")
 
 
-@pytest.mark.skipif(not is_device_available(), reason="Requires an accelerator device")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires CUDA")
 def test_liger_vl_forward_with_monkey_patch():
     """Liger with fused_linear_cross_entropy=False + apply_monkey_patch works on VL models."""
     pytest.importorskip("liger_kernel")
@@ -76,7 +75,7 @@ def test_liger_vl_forward_with_monkey_patch():
     )
     apply_monkey_patch(model, use_remove_padding=False, use_fused_kernels=False)
 
-    input_ids = torch.randint(0, 500, (1, 32), device=get_device_name())
+    input_ids = torch.randint(0, 500, (1, 32), device="cuda")
     attention_mask = torch.ones_like(input_ids)
     output = model(input_ids=input_ids, attention_mask=attention_mask)
 
@@ -84,4 +83,4 @@ def test_liger_vl_forward_with_monkey_patch():
     assert output.logits.shape[-1] == 1000  # vocab_size
 
     del model
-    get_torch_device().empty_cache()
+    torch.cuda.empty_cache()

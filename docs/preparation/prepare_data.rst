@@ -1,12 +1,10 @@
 Prepare Data for Post-Training
 ========================================
 
-Last updated: 11/02/2026.
+Last updated: 02/09/2025.
 
 Before starting the post-training job, we need to prepare the data for
-the policy training. The default loading path uses parquet files.
-For V1 PPO, a :ref:`custom dataloader <custom-ppo-dataloader>`
-can instead supply batches directly from an existing loading pipeline.
+the policy training. The data should be stored in the parquet format.
 
 We provide several data preprocess scripts for different datasets,
 including GSM8K, MATH, HelloSwag, Full_hh_rlhf. To prepare other datasets, we need
