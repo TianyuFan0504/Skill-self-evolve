@@ -162,7 +162,16 @@ class AlfworldSkillTrainingTask(Task):
                 "catalog_digest",
             )
         }
-        for key in ("sample_index", "role", "chain_id", "skill_snapshot_id", "parameter_version", "global_step"):
+        for key in (
+            "sample_index",
+            "role",
+            "chain_id",
+            "skill_snapshot_id",
+            "skill_context_version",
+            "skill_context_group_id",
+            "parameter_version",
+            "global_step",
+        ):
             if key in metadata:
                 identity[key] = metadata[key]
         manifest = {**identity, "attempt_id": attempt_id, "started_at_epoch": started}
@@ -183,6 +192,7 @@ class AlfworldSkillTrainingTask(Task):
             workdir = None
             agent_info = {}
             error = None
+            skill_context = None
             try:
                 if created.get("catalog_digest") != metadata["catalog_digest"]:
                     raise ValueError("The environment response has a different catalog digest")
@@ -194,6 +204,12 @@ class AlfworldSkillTrainingTask(Task):
                 messages = agent_messages(
                     self.config.prompt, created["state"], instruction=metadata.get("instruction")
                 )
+                if metadata.get("skill_context_options", {}).get("enabled") is True:
+                    from ..context import enrich_task_messages
+
+                    enriched = enrich_task_messages(messages, metadata)
+                    messages, skill_context = enriched.messages, enriched.manifest
+                    (output / "skill-context.json").write_text(json.dumps(skill_context, indent=2) + "\n")
                 (output / "agent-messages.json").write_text(json.dumps(messages, indent=2) + "\n")
                 (output / "agent-prompt.txt").write_text("\n\n".join(m["content"] for m in messages) + "\n")
                 sandbox = AlfworldUserSandbox(base + "/session/" + session_id, output)
@@ -225,6 +241,7 @@ class AlfworldSkillTrainingTask(Task):
                 "agent_exit_status": agent_info.get("exit_status"),
                 "wall_seconds_total": time.time() - started,
                 "workdir": str(workdir) if workdir is not None else None,
+                **({"skill_context": skill_context} if skill_context is not None else {}),
             }
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print("ALFWORLD_EPISODE_RESULT " + json.dumps(result), flush=True)
@@ -243,5 +260,6 @@ class AlfworldSkillTrainingTask(Task):
                     "error": result["agent_error"],
                     "eval_completed": error is None,
                     "eval_execution_time": result["wall_seconds_total"],
+                    **({"skill_context": skill_context} if skill_context is not None else {}),
                 },
             )
