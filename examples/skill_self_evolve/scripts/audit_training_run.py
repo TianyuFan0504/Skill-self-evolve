@@ -175,6 +175,68 @@ def gateway_trace(reader, directory):
     return count
 
 
+def _expected_terminal_end(result, engine, transitions):
+    """Validate host/backend stop evidence without inventing native completion."""
+    backend, binding = result.get("backend_terminal"), result.get("backend_binding")
+    if not isinstance(backend, dict) or not isinstance(binding, dict):
+        return False
+    keys = ("binding_id", "binding_sha256", "attempt_id", "gateway_session_id", "environment_session_id")
+    if not (
+        result.get("backend_stop_confirmed") is True
+        and type(backend.get("schema_version")) is int
+        and backend["schema_version"] == 1
+        and backend.get("backend_stop_confirmed") is True
+        and backend.get("fenced") is True
+        and type(backend.get("active_requests")) is int
+        and backend.get("active_requests") == 0
+        and backend.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+        and all(isinstance(binding.get(key), str) and binding[key] and backend.get(key) == binding[key] for key in keys)
+        and backend.get("attempt_id") == result.get("attempt_id")
+        and backend.get("environment_session_id") == result.get("environment_session_id")
+        and isinstance(backend.get("binding_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", backend["binding_sha256"])
+    ):
+        return False
+    host = result.get("expected_host_terminal_stop") is True
+    proof = result.get("terminal_stop") if host else backend
+    if not isinstance(proof, dict):
+        return False
+    if host:
+        controlled = proof.get("status") == "terminal_stop" and proof.get("termination_requested") is True
+        controlled = (
+            controlled and proof.get("termination_completed") is True and proof.get("alive_after_termination") is False
+        )
+    else:
+        controlled = (
+            result.get("expected_backend_terminal_stop") is True
+            and backend.get("expected_backend_terminal_stop") is True
+            and backend.get("status") in ("terminal_refused", "terminal_aborted")
+            and backend.get("reason")
+            == {"terminal_refused": "terminal_refusal", "terminal_aborted": "terminal_abort"}.get(backend.get("status"))
+        )
+    state = proof.get("terminal_state", {})
+    if not isinstance(state, dict) or any(type(state.get(key)) is not bool for key in ("done", "won")):
+        return False
+    selected = {key: state[key] for key in ("done", "won")}
+    for key in ("steps", "max_steps"):
+        if type(state.get(key)) is not int or state[key] < (1 if key == "max_steps" else 0):
+            return False
+        selected[key] = state[key]
+    private_done = engine.get("won") is True or engine.get("step_limit") is True
+    private_done = private_done or bool(transitions and transitions[-1].get("after", {}).get("done") is True)
+    return bool(
+        controlled
+        and private_done
+        and (state["done"] or state["won"])
+        and state["steps"] <= state["max_steps"]
+        and proof.get("terminal_state_hash") == digest(selected)
+        and backend.get("terminal_state") == selected
+        and backend.get("terminal_state_hash") == digest(selected)
+        and state["won"] == engine.get("won")
+        and all(state[key] == engine.get(key) for key in ("steps", "max_steps"))
+    )
+
+
 def episode(reader, directory):
     directory = Path(directory).resolve()
     files = {
@@ -205,17 +267,26 @@ def episode(reader, directory):
                 raise EvidenceError(f"{directory}: raw attempt/Task/engine differ in {key}")
         if len(transitions) != engine.get("steps"):
             raise EvidenceError(f"{directory}: environment transitions do not cover engine steps")
-        if result.get("agent_ok") is not True or result.get("agent_error") or result.get("agent_exit_code") != 0:
+        outcome_valid = True
+        expected_stop = _expected_terminal_end(result, engine, transitions)
+        if not expected_stop and (
+            result.get("agent_ok") is not True or result.get("agent_error") or result.get("agent_exit_code") != 0
+        ):
             raise EvidenceError(f"{directory}: environment outcome exists but native completion is not clean")
-        if not any(event.get("type") == "turn.completed" for event in events):
+        native_complete = any(event.get("type") == "turn.completed" for event in events)
+        if not expected_stop and not native_complete:
             raise EvidenceError(f"{directory}: no raw native turn.completed event")
-        if any(event.get("type") in ("turn.failed", "error") for event in events):
+        if not expected_stop and any(event.get("type") in ("turn.failed", "error") for event in events):
             raise EvidenceError(f"{directory}: raw native execution contains an error")
         return {
             "valid": True,
+            "outcome_valid": True,
             "path": str(directory),
             "result": result,
             "engine_win": won,
+            "expected_terminal_stop_validated": expected_stop,
+            "native_bookkeeping_error": result.get("agent_error"),
+            "native_completion_event_observed": native_complete,
             "evidence_paths": list(map(str, files.values())),
         }
     except (EvidenceError, KeyError, TypeError) as error:
@@ -223,6 +294,7 @@ def episode(reader, directory):
         engine = engine if "engine" in locals() else {}
         return {
             "valid": False,
+            "outcome_valid": locals().get("outcome_valid", False),
             "path": str(directory),
             "result": result,
             "engine_win": engine.get("won"),
@@ -445,17 +517,202 @@ class RunAudit:
             observed_train_game_ids=sorted(value for value in self.train_games if value),
         )
 
+    def _case_audit_rows(self, stage, phase, split_root, protocol, summary):
+        """Resolve one explicitly indexed audit; never select a latest/globbed retry.
+
+        Returned rows are an in-memory join. Original dump fields and files are
+        unchanged; host identity is carried separately in ``_case_audit``.
+        """
+        paths, issues = [], []
+        mapping = summary.get("case_audits")
+        if "case_audits" in summary and not isinstance(mapping, dict):
+            raise EvidenceError(f"{phase}: completed summary has an invalid case audit mapping")
+        pointer = mapping.get(phase) if isinstance(mapping, dict) else None
+        if mapping is not None and not pointer:
+            raise EvidenceError(f"{phase}: completed summary lacks its explicit case audit mapping")
+        if pointer is None:
+            metrics_path = split_root / "metrics.json"
+            if metrics_path.is_file():
+                metrics = self.reader.json(metrics_path)
+                paths.append(metrics_path)
+                if any(
+                    metrics.get(key) != value
+                    for key, value in (
+                        ("stage", stage),
+                        ("phase", phase),
+                        ("global_step", protocol.get("global_step")),
+                    )
+                ):
+                    raise EvidenceError(f"{metrics_path}: partial phase scope differs from its protocol")
+                pointer = metrics.get("case_audit_path")
+        if pointer is None:
+            # Older dumps can be checked only when they contain direct pointers.
+            files = sorted(split_root.glob("*.jsonl"))
+            return [(file, row) for file in files for row in self.reader.rows(file)], files, [], None
+        if not isinstance(pointer, str) or not pointer:
+            raise EvidenceError(f"{phase}: invalid case audit pointer")
+        path = _path(self.root, pointer).resolve()
+        if path.parent != split_root.resolve() or path.suffix != ".json":
+            raise EvidenceError(f"{path}: case audit escaped its exact official stage/phase")
+        report = self.reader.json(path)
+        paths.append(path)
+        count, cursor = OFFICIAL_COUNTS[phase], protocol.get("global_step")
+        if (
+            type(report.get("schema_version")) is not int
+            or type(report.get("global_cursor")) is not int
+            or type(cursor) is not int
+            or cursor < 0
+            or any(
+                report.get(key) != value
+                for key, value in (
+                    ("schema_version", 1),
+                    ("kind", "official_validation_case_audit"),
+                    ("stage", stage),
+                    ("phase", phase),
+                    ("global_cursor", cursor),
+                    ("optimizer_version_inferred_from_cursor", False),
+                )
+            )
+        ):
+            raise EvidenceError(f"{path}: case audit schema/stage/phase/cursor differs from the protocol")
+        audit_id = report.get("audit_id")
+        if not isinstance(audit_id, str) or not re.fullmatch(r"[0-9a-f]{32}", audit_id):
+            raise EvidenceError(f"{path}: missing valid evaluation audit identity")
+        if report.get("complete") is not True or report.get("reasons") != []:
+            issues.append(f"{path}: case audit is explicitly incomplete")
+        for key in (
+            "expected_cases",
+            "submitted_cases",
+            "raw_task_cases",
+            "materialized_cases",
+            "expected_case_denominator",
+            "parent_observed_reward_denominator",
+        ):
+            if type(report.get(key)) is not int or report[key] != count:
+                issues.append(f"{path}: {key} does not cover all {count} official games")
+        versions = report.get("observed_weight_versions")
+        if (
+            not isinstance(versions, list)
+            or len(versions) > 1
+            or any(type(value) is not int or value < 0 for value in versions)
+        ):
+            issues.append(f"{path}: invalid/mixed observed weight versions")
+        cases = report.get("cases")
+        if not isinstance(cases, list) or any(not isinstance(case, dict) for case in cases):
+            raise EvidenceError(f"{path}: no structured per-case evidence")
+        expected, by_key, game_counts, uid_counts = self.phase_ids.get(phase, set()), {}, {}, {}
+        for case in cases:
+            game, uid = case.get("game_id"), case.get("rollout_uid")
+            if not isinstance(game, str) or not isinstance(uid, str):
+                continue
+            game_counts[game] = game_counts.get(game, 0) + 1
+            uid_counts[uid] = uid_counts.get(uid, 0) + 1
+        if len(cases) != count or set(game_counts) != expected:
+            issues.append(f"{path}: case identities do not equal the complete official partition")
+        for case in cases:
+            game, uid, keys = case.get("game_id"), case.get("rollout_uid"), case.get("trajectory_keys")
+            won, scores, contexts = case.get("engine_won"), case.get("parent_scores"), case.get("reward_context")
+            if (
+                game not in expected
+                or game_counts.get(game) != 1
+                or uid_counts.get(uid) != 1
+                or not isinstance(uid, str)
+                or not uid
+                or case.get("session_index") != 0
+                or type(case.get("session_index")) is not int
+                or type(won) is not bool
+                or case.get("status") != "observed"
+                or case.get("reasons") != []
+                or not isinstance(keys, list)
+                or not keys
+                or any(not isinstance(key, str) for key in keys)
+                or len(set(keys)) != len(keys)
+                or not isinstance(scores, list)
+                or len(scores) != len(keys)
+                or not isinstance(contexts, list)
+                or len(contexts) != len(keys)
+                or case.get("authoritative_reward") != float(won)
+                or case.get("authoritative_accuracy") != float(won)
+                or any(not finite(score) or score != float(won) for score in scores)
+                or not isinstance(case.get("episode_output_dir"), str)
+                or not case.get("attempt_id")
+            ):
+                issues.append(f"{path}: unobserved, duplicated, or inconsistent case {game!r}")
+                continue
+            for key, context in zip(keys, contexts, strict=True):
+                parts = key.rsplit("_", 2)
+                if (
+                    len(parts) != 3
+                    or parts[0] != uid
+                    or parts[1] != "0"
+                    or not parts[2].isdigit()
+                    or not isinstance(context, dict)
+                    or context.get("rollout_uid") != uid
+                    or type(context.get("session_index")) is not int
+                    or context.get("session_index") != 0
+                    or context.get("game_id") != game
+                    or context.get("episode_output_dir") != case["episode_output_dir"]
+                    or key in by_key
+                ):
+                    issues.append(f"{path}: invalid/conflicting protected trajectory identity {key!r}")
+                    continue
+                by_key[key] = {"case": case, "audit_id": audit_id, "stage": stage, "cursor": cursor}
+        dump = _path(self.root, report.get("dump_path", "/missing-validation-dump")).resolve()
+        if dump != (split_root / f"{cursor}.jsonl").resolve():
+            raise EvidenceError(f"{path}: exact dump pointer differs from this official stage/cursor")
+        paths.append(dump)
+        normalized, seen = [], set()
+        for row in self.reader.rows(dump):
+            key = row.get("uid")
+            if not isinstance(key, str) or key not in by_key or key in seen:
+                issues.append(f"{dump}: unknown or repeated trajectory UID {key!r}")
+                continue
+            seen.add(key)
+            scope = by_key[key]
+            case = scope["case"]
+            if row.get("step") != cursor or type(row.get("step")) is not int:
+                issues.append(f"{dump}: trajectory UID {key} has a different cursor")
+                continue
+            if row.get("episode_output_dir", case["episode_output_dir"]) != case["episode_output_dir"]:
+                issues.append(f"{dump}: dump/sidecar episode pointer differs")
+                continue
+            normalized.append((dump, {**row, "episode_output_dir": case["episode_output_dir"], "_case_audit": scope}))
+        if seen != set(by_key):
+            issues.append(f"{dump}: emitted trajectory UIDs do not cover the indexed materialized prefixes")
+        observed = [case for case in cases if type(case.get("engine_won")) is bool]
+        if len(observed) == count and len(game_counts) == count:
+            wins = sum(case["engine_won"] for case in observed)
+            if any(
+                report.get(key) != value
+                for key, value in (
+                    ("authoritative_wins", wins),
+                    ("authoritative_reward_mean", wins / count),
+                    ("authoritative_accuracy", wins / count),
+                    ("parent_observed_reward_mean", wins / count),
+                )
+            ):
+                issues.append(f"{path}: reported aggregate does not reconcile with individual cases")
+        return normalized, paths, issues, str(path)
+
     def official_evaluation(self):
         stages, protocols = {}, {}
         for stage in ("initial", "final"):
             root = self.root / "evaluation" / stage
             reasons, splits, paths = [], {}, [root / "protocol.json", root / "summary.json"]
+            summary = {}
             try:
                 protocol = self.reader.json(paths[0])
-                summary = self.reader.json(paths[1])
                 protocols[stage] = protocol
-                if summary.get("completed") is not True or protocol.get("stage") != stage:
+                if protocol.get("stage") != stage:
+                    reasons.append("Stage protocol is not consistently named")
+                try:
+                    summary = self.reader.json(paths[1])
+                except EvidenceError as error:
+                    reasons.append(str(error))
+                if summary.get("completed") is not True or summary.get("stage") != stage:
                     reasons.append("Stage summary/protocol is not completed and consistently named")
+                if "case_audits" in summary and summary.get("global_step") != protocol.get("global_step"):
+                    reasons.append("Stage summary and protocol cursors differ")
                 if protocol.get("optimizer_updates") is not False or protocol.get("curation") is not False:
                     reasons.append("Official evaluation does not declare optimizer/curation isolation")
                 dataset, budgets = protocol.get("dataset", {}), protocol.get("budgets", {})
@@ -497,68 +754,117 @@ class RunAudit:
                 issues, outcomes, attempts = [], {}, {}
                 ambiguous = set()
                 observed_engine = {}
-                files = sorted(split_root.glob("*.jsonl"))
+                native_errors, expected_stops = {}, set()
+                sidecar_path = None
+                try:
+                    joined, files, audit_issues, sidecar_path = self._case_audit_rows(
+                        stage,
+                        phase,
+                        split_root,
+                        protocols.get(stage, {}),
+                        summary,
+                    )
+                    issues.extend(audit_issues)
+                except (EvidenceError, KeyError, TypeError) as error:
+                    joined, files = [], []
+                    issues.append(str(error))
                 paths.extend(files)
-                if not files:
+                if not joined:
                     issues.append("Missing underlying per-game validation trajectory dump")
-                for file in files:
+                for file, row in joined:
                     try:
-                        for row in self.reader.rows(file):
-                            pointer = row.get("episode_output_dir")
+                        pointer = row.get("episode_output_dir")
+                        if (
+                            not pointer
+                            or not isinstance(row.get("input"), str)
+                            or not row["input"]
+                            or not isinstance(row.get("output"), str)
+                        ):
+                            issues.append(f"{file}: missing raw episode pointer or decoded input/output trajectory")
+                            continue
+                        item = self.raw_episode(pointer)
+                        data = item["result"]
+                        scope = row.get("_case_audit")
+                        case = scope["case"] if scope else None
+                        if type(item.get("engine_win")) is bool:
+                            observed_engine[item["path"]] = item["engine_win"]
+                        signature = (data.get("game_id"), row.get("score"), row.get("acc"), row.get("error"))
+                        if pointer in attempts and attempts[pointer] != signature:
+                            issues.append(f"{pointer}: conflicting outcomes across prefix trajectories")
+                        attempts[pointer] = signature
+                        if not item["valid"]:
+                            issues.append(item["reason"])
+                            if not scope or not item.get("outcome_valid"):
+                                continue
+                            # Keep authoritative engine outcomes, including failures, in
+                            # the denominator. Native quality cannot silently erase a case.
+                            native_errors[item["path"]] = item["reason"]
+                        elif item.get("expected_terminal_stop_validated"):
+                            expected_stops.add(item["path"])
+                            if item.get("native_bookkeeping_error"):
+                                native_errors[item["path"]] = item["native_bookkeeping_error"]
+                        game = data.get("game_id")
+                        if scope:
+                            expected_identity = {
+                                "rollout_uid": case["rollout_uid"],
+                                "session_index": 0,
+                                "evaluation_audit_id": scope["audit_id"],
+                                "evaluation_stage": stage,
+                                "global_step": scope["cursor"],
+                                "game_id": case["game_id"],
+                                "attempt_id": case["attempt_id"],
+                            }
+                            attempt = self.reader.json(Path(pointer) / "attempt.json")
                             if (
-                                not pointer
-                                or not isinstance(row.get("input"), str)
-                                or not row["input"]
-                                or not isinstance(row.get("output"), str)
+                                any(
+                                    data.get(key) != value or attempt.get(key) != value
+                                    for key, value in expected_identity.items()
+                                )
+                                or case["engine_won"] != item["engine_win"]
+                                or case.get("native_error")
+                                != (
+                                    data.get("agent_error")
+                                    or (None if data.get("agent_ok") is True else "native_not_ok")
+                                )
                             ):
-                                issues.append(f"{file}: missing raw episode pointer or decoded input/output trajectory")
+                                issues.append(f"{pointer}: raw Task/attempt differs from the indexed evaluation case")
                                 continue
-                            item = self.raw_episode(pointer)
-                            data = item["result"]
-                            if type(item.get("engine_win")) is bool:
-                                observed_engine[item["path"]] = item["engine_win"]
-                            signature = (row.get("game_id"), row.get("score"), row.get("acc"), row.get("error"))
-                            if pointer in attempts and attempts[pointer] != signature:
-                                issues.append(f"{pointer}: conflicting outcomes across prefix trajectories")
-                            attempts[pointer] = signature
-                            if not item["valid"]:
-                                issues.append(item["reason"])
+                        if (
+                            data.get("split") != OFFICIAL_SPLITS[phase]
+                            or data.get("dataset_phase") != phase
+                            or (case["game_id"] if case else row.get("game_id")) != game
+                            or not finite(row.get("score"))
+                            or not finite(row.get("acc"))
+                            or row.get("score") != data["reward"]
+                            or row.get("acc") != data["accuracy"]
+                            or (not scope and (row.get("error") or row.get("eval_completed") is not True))
+                            or (scope and (not finite(row.get("reward")) or row["reward"] != data["reward"]))
+                            or data.get("catalog_digest") != self.split.get("catalog_digest")
+                        ):
+                            issues.append(f"{pointer}: validation row/Task/catalog identities or outcomes differ")
+                            continue
+                        token_count = 0
+                        for trace in self.trace_directories.get(data.get("workdir"), []):
+                            try:
+                                token_count = self.trace_cache.get(str(trace)) or gateway_trace(self.reader, trace)
+                                self.trace_cache[str(trace)] = token_count
+                                break
+                            except EvidenceError:
                                 continue
-                            game = data.get("game_id")
-                            if (
-                                data.get("split") != OFFICIAL_SPLITS[phase]
-                                or data.get("dataset_phase") != phase
-                                or row.get("game_id") != game
-                                or row.get("score") != data["reward"]
-                                or row.get("acc") != data["accuracy"]
-                                or row.get("error")
-                                or row.get("eval_completed") is not True
-                                or data.get("catalog_digest") != self.split.get("catalog_digest")
-                            ):
-                                issues.append(f"{pointer}: validation row/Task/catalog identities or outcomes differ")
-                                continue
-                            token_count = 0
-                            for trace in self.trace_directories.get(data.get("workdir"), []):
-                                try:
-                                    token_count = self.trace_cache.get(str(trace)) or gateway_trace(self.reader, trace)
-                                    self.trace_cache[str(trace)] = token_count
-                                    break
-                                except EvidenceError:
-                                    continue
-                            if not token_count:
-                                issues.append(f"{pointer}: no linked numeric Gateway model trajectory")
-                                continue
-                            budget = protocols.get(stage, {}).get("budgets", {}).get("environment_max_steps")
-                            if data.get("max_steps") != budget:
-                                issues.append(f"{pointer}: actual environment step budget differs from stage protocol")
-                            if game in outcomes and outcomes[game]["episode"] != item["path"]:
-                                issues.append(f"{game}: more than one distinct attempt in this stage/split")
-                                ambiguous.add(game)
-                                outcomes.pop(game)
-                            if game in ambiguous:
-                                continue
-                            outcomes[game] = {"won": item["engine_win"], "episode": item["path"]}
-                    except EvidenceError as error:
+                        if not token_count:
+                            issues.append(f"{pointer}: no linked numeric Gateway model trajectory")
+                            continue
+                        budget = protocols.get(stage, {}).get("budgets", {}).get("environment_max_steps")
+                        if data.get("max_steps") != budget:
+                            issues.append(f"{pointer}: actual environment step budget differs from stage protocol")
+                        if game in outcomes and outcomes[game]["episode"] != item["path"]:
+                            issues.append(f"{game}: more than one distinct attempt in this stage/split")
+                            ambiguous.add(game)
+                            outcomes.pop(game)
+                        if game in ambiguous:
+                            continue
+                        outcomes[game] = {"won": item["engine_win"], "episode": item["path"]}
+                    except (EvidenceError, KeyError, TypeError) as error:
                         issues.append(str(error))
                 expected = self.phase_ids.get(phase, set())
                 if len(outcomes) != expected_count or set(outcomes) != expected:
@@ -570,11 +876,14 @@ class RunAudit:
                     issues,
                     files,
                     expected_games=expected_count,
+                    case_audit_path=sidecar_path,
                     verified_games=len(outcomes),
                     outcomes=outcomes,
                     engine_wins=sum(row["won"] for row in outcomes.values()),
                     observed_raw_engine_wins=sum(observed_engine.values()),
                     observed_raw_engine_attempts=len(observed_engine),
+                    native_errors=native_errors,
+                    validated_expected_terminal_stops=len(expected_stops),
                     reward_mean=sum(row["won"] for row in outcomes.values()) / len(outcomes) if outcomes else None,
                     accuracy=sum(row["won"] for row in outcomes.values()) / len(outcomes) if outcomes else None,
                 )

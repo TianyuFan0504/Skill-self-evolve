@@ -255,6 +255,115 @@ class Fixture:
                     )
                 rows(root / phase / "0.jsonl", dump)
 
+    def sidecar_evaluations(self, *, prefixes=False):
+        """Production format: only a scoped sidecar contains raw Task pointers."""
+        self.evaluations()
+        self.case_reports = {}
+        for stage in ("initial", "final"):
+            root = self.root / "evaluation" / stage
+            cursor = 1 if stage == "initial" else 3
+            summary = {"completed": True, "stage": stage, "global_step": cursor, "case_audits": {}}
+            for phase in ("test_seen", "test_unseen"):
+                old_path = root / phase / "0.jsonl"
+                old = [json.loads(line) for line in old_path.read_text().splitlines()]
+                old_path.unlink()
+                cases, dump = [], []
+                audit_id = sha([stage, phase])[:32]
+                for index, row in enumerate(old):
+                    directory = Path(row["episode_output_dir"])
+                    uid = f"rollout_{stage}_{phase}_{index}"
+                    identity = {
+                        "rollout_uid": uid,
+                        "session_index": 0,
+                        "global_step": cursor,
+                        "evaluation_audit_id": audit_id,
+                        "evaluation_stage": stage,
+                    }
+                    for name in ("attempt.json", "result.json"):
+                        payload = json.loads((directory / name).read_text())
+                        write(directory / name, {**payload, **identity})
+                    keys, contexts, scores = [], [], []
+                    for prefix in range(2 if prefixes and index == 0 else 1):
+                        key = uid + "_0_" + str(prefix)
+                        keys.append(key)
+                        scores.append(row["score"])
+                        contexts.append(
+                            {
+                                "rollout_uid": uid,
+                                "session_index": 0,
+                                "game_id": row["game_id"],
+                                "episode_output_dir": str(directory),
+                            }
+                        )
+                        dump.append(
+                            {
+                                "uid": key,
+                                "step": cursor,
+                                "input": row["input"],
+                                "output": row["output"],
+                                "gts": "Fixture reward",
+                                "score": row["score"],
+                                "reward": row["score"],
+                                "acc": row["acc"],
+                            }
+                        )
+                    cases.append(
+                        {
+                            "game_id": row["game_id"],
+                            "rollout_uid": uid,
+                            "session_index": 0,
+                            "engine_won": bool(row["score"]),
+                            "authoritative_reward": row["score"],
+                            "authoritative_accuracy": row["acc"],
+                            "native_error": None,
+                            "status": "observed",
+                            "trajectory_keys": keys,
+                            "parent_scores": scores,
+                            "reasons": [],
+                            "episode_output_dir": str(directory),
+                            "attempt_id": row["attempt_id"],
+                            "reward_context": contexts,
+                            "expected_host_terminal_stop": False,
+                            "expected_backend_terminal_stop": False,
+                            "backend_stop_confirmed": None,
+                            "terminal_stop": None,
+                        }
+                    )
+                dump_path = root / phase / f"{cursor}.jsonl"
+                rows(dump_path, dump)
+                count, wins = len(cases), sum(case["engine_won"] for case in cases)
+                report = {
+                    "schema_version": 1,
+                    "kind": "official_validation_case_audit",
+                    "audit_id": audit_id,
+                    "stage": stage,
+                    "phase": phase,
+                    "global_cursor": cursor,
+                    "optimizer_version_inferred_from_cursor": False,
+                    "observed_weight_versions": [cursor - 1],
+                    "expected_cases": count,
+                    "submitted_cases": count,
+                    "raw_task_cases": count,
+                    "materialized_cases": count,
+                    "authoritative_wins": wins,
+                    "authoritative_reward_mean": wins / count,
+                    "authoritative_accuracy": wins / count,
+                    "parent_observed_reward_mean": wins / count,
+                    "parent_observed_reward_denominator": count,
+                    "expected_case_denominator": count,
+                    "native_error_cases": 0,
+                    "complete": True,
+                    "reasons": [],
+                    "cases": cases,
+                    "parent_metrics": {},
+                    "dump_path": str(dump_path),
+                }
+                path = root / phase / ("case-session-audit-" + audit_id + ".json")
+                write(path, report)
+                self.case_reports[stage, phase] = path
+                summary["case_audits"][phase] = str(path)
+            write(root / "summary.json", summary)
+
     def lineage(self, *, actual_update=True):
         source, source_result = self.episode("train_a", "train", "producer", False)
         for name in ("result.json", "attempt.json", "engine-result.json"):
@@ -602,6 +711,204 @@ class RunAuditTest(unittest.TestCase):
         report = audit.audit_run(self.root)["delayed_skill_lineage"]
         self.assertEqual(report["complete_lineages"], 1)
         self.assertIn("not separately measured", report["lineages"][0]["curate_branch_gradient"])
+
+    def test_pointerless_production_dump_joins_full_official_cases_without_rewriting_it(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations(prefixes=True)
+        path = self.root / "evaluation/initial/test_seen/1.jsonl"
+        original = path.read_bytes()
+        self.assertNotIn("episode_output_dir", json.loads(original.splitlines()[0]))
+        # An unrelated dump/retry must not be selected by globbing or modification time.
+        rows(path.parent / "999.jsonl", [{"uid": "dev_only_0_0", "score": 1}])
+        result = audit.audit_run(self.root)["official_evaluation"]
+        self.assertEqual(result["status"], "observed")
+        self.assertTrue(result["controlled_improvement_supported"])
+        self.assertEqual(result["overall_win_delta"], 2)
+        for stage in ("initial", "final"):
+            for phase, count in audit.OFFICIAL_COUNTS.items():
+                split = result["stages"][stage]["splits"][phase]
+                self.assertEqual(split["verified_games"], count)
+                self.assertEqual(split["case_audit_path"], str(fixture.case_reports[stage, phase].resolve()))
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_sidecar_complete_cannot_hide_missing_uid_raw_task_or_numeric_trajectory(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations()
+        path = self.root / "evaluation/initial/test_seen/1.jsonl"
+        dump = [json.loads(line) for line in path.read_text().splitlines()]
+        # Parent reward can still average 139 observed rows; a claimed denominator140
+        # cannot turn the unobserved last task into a zero or a complete evaluation.
+        rows(path, dump[:-1])
+        report = audit.audit_run(self.root)["official_evaluation"]
+        split = report["stages"]["initial"]["splits"]["test_seen"]
+        self.assertEqual(split["verified_games"], 139)
+        self.assertFalse(report["controlled_improvement_supported"])
+        rows(path, dump)
+        case_path = fixture.case_reports["initial", "test_seen"]
+        case = json.loads(case_path.read_text())["cases"][-1]
+        raw_path = Path(case["episode_output_dir"]) / "engine-result.json"
+        original = raw_path.read_bytes()
+        raw_path.unlink()
+        self.assertEqual(
+            audit.audit_run(self.root)["official_evaluation"]["stages"]["initial"]["splits"]["test_seen"][
+                "verified_games"
+            ],
+            139,
+        )
+        raw_path.write_bytes(original)
+        (self.root / "agent_logs/step_1/initial-test_seen-139/trajectory.npz").unlink()
+        self.assertFalse(audit.audit_run(self.root)["official_evaluation"]["controlled_improvement_supported"])
+
+    def test_sidecar_scope_raw_identity_and_score_must_each_match(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations()
+        path = fixture.case_reports["initial", "test_seen"]
+        original = json.loads(path.read_text())
+        for changes in ({"stage": "final"}, {"phase": "dev"}, {"global_cursor": 0}):
+            write(path, {**original, **changes})
+            self.assertFalse(audit.audit_run(self.root)["official_evaluation"]["controlled_improvement_supported"])
+        write(path, original)
+        case = original["cases"][0]
+        result_path = Path(case["episode_output_dir"]) / "result.json"
+        task = json.loads(result_path.read_text())
+        write(result_path, {**task, "evaluation_audit_id": "f" * 32})
+        self.assertFalse(audit.audit_run(self.root)["official_evaluation"]["controlled_improvement_supported"])
+        write(result_path, task)
+        dump_path = Path(original["dump_path"])
+        dump = [json.loads(line) for line in dump_path.read_text().splitlines()]
+        dump[0]["score"] = 0.5
+        rows(dump_path, dump)
+        self.assertFalse(audit.audit_run(self.root)["official_evaluation"]["controlled_improvement_supported"])
+
+    def test_duplicate_sidecar_games_or_dump_uid_cannot_substitute_for_an_official_case(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations()
+        path = fixture.case_reports["initial", "test_seen"]
+        original = json.loads(path.read_text())
+        changed = copy.deepcopy(original)
+        changed["cases"][-1] = copy.deepcopy(changed["cases"][0])
+        write(path, changed)
+        report = audit.audit_run(self.root)["official_evaluation"]
+        self.assertLess(report["stages"]["initial"]["splits"]["test_seen"]["verified_games"], 140)
+        self.assertFalse(report["controlled_improvement_supported"])
+        write(path, original)
+        dump_path = Path(original["dump_path"])
+        dump = [json.loads(line) for line in dump_path.read_text().splitlines()]
+        rows(dump_path, dump + [copy.deepcopy(dump[0])])
+        self.assertFalse(audit.audit_run(self.root)["official_evaluation"]["controlled_improvement_supported"])
+
+    def test_phase_sidecar_without_completed_stage_is_useful_but_never_complete(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations()
+        (self.root / "evaluation/initial/summary.json").unlink()
+        for phase in audit.OFFICIAL_COUNTS:
+            write(
+                self.root / "evaluation/initial" / phase / "metrics.json",
+                {
+                    "stage": "initial",
+                    "phase": phase,
+                    "global_step": 1,
+                    "case_audit_path": str(fixture.case_reports["initial", phase]),
+                },
+            )
+        result = audit.audit_run(self.root)["official_evaluation"]
+        self.assertEqual(result["stages"]["initial"]["splits"]["test_seen"]["verified_games"], 140)
+        self.assertEqual(result["stages"]["initial"]["status"], "incomplete")
+        self.assertFalse(result["controlled_improvement_supported"])
+
+    def test_sidecar_cannot_convert_dev_only_dump_into_official_evaluation(self):
+        Fixture(self.root)
+        rows(self.root / "validation/0.jsonl", [{"uid": "dev_0_0", "score": 1, "acc": 1}])
+        report = audit.audit_run(self.root)["official_evaluation"]
+        self.assertEqual(report["status"], "incomplete")
+        for stage in report["stages"].values():
+            self.assertEqual(stage["splits"]["test_seen"]["verified_games"], 0)
+
+    def test_native_bookkeeping_error_does_not_drop_observed_engine_win_from_denominator(self):
+        fixture = Fixture(self.root)
+        fixture.sidecar_evaluations()
+        path = fixture.case_reports["initial", "test_seen"]
+        sidecar = json.loads(path.read_text())
+        case = sidecar["cases"][0]
+        directory = Path(case["episode_output_dir"])
+        result = json.loads((directory / "result.json").read_text())
+        result.update(agent_ok=False, agent_error="Unexplained missing native completion")
+        write(directory / "result.json", result)
+        rows(directory / "codex-events.jsonl", [])
+        case["native_error"] = result["agent_error"]
+        sidecar["native_error_cases"] = 1
+        write(path, sidecar)
+        report = audit.audit_run(self.root)["official_evaluation"]
+        split = report["stages"]["initial"]["splits"]["test_seen"]
+        self.assertEqual(split["verified_games"], 140)
+        self.assertEqual(split["engine_wins"], 70)
+        self.assertEqual(split["reward_mean"], 70 / 140)
+        self.assertTrue(split["native_errors"])
+        self.assertEqual(split["status"], "incomplete")
+        self.assertFalse(report["controlled_improvement_supported"])
+
+    def test_expected_terminal_stop_preserves_raw_native_error_and_needs_matching_private_proof(self):
+        fixture = Fixture(self.root)
+        directory, result = fixture.episode("train_a", "train", "terminal", True)
+        state = {"done": True, "won": True, "steps": 1, "max_steps": 50}
+        binding = {
+            "binding_id": "binding_fixture",
+            "binding_sha256": "a" * 64,
+            "attempt_id": "terminal",
+            "gateway_session_id": "gateway_fixture",
+            "environment_session_id": "environment_fixture",
+        }
+        receipt = {
+            **binding,
+            "schema_version": 1,
+            "status": "terminal_aborted",
+            "fenced": True,
+            "terminal_state": state,
+            "terminal_state_hash": sha(state),
+            "active_requests": 0,
+            "backend_stop_confirmed": True,
+            "expected_backend_terminal_stop": True,
+            "reason": "terminal_abort",
+        }
+        result.update(
+            agent_ok=False,
+            agent_error="Native CLI terminated after proven terminal state",
+            agent_exit_code=-15,
+            expected_host_terminal_stop=True,
+            expected_backend_terminal_stop=True,
+            terminal_stop={
+                "status": "terminal_stop",
+                "termination_requested": True,
+                "termination_completed": True,
+                "alive_after_termination": False,
+                "terminal_state": state,
+                "terminal_state_hash": sha(state),
+            },
+            backend_binding=binding,
+            backend_terminal=receipt,
+            backend_stop_confirmed=True,
+            environment_session_id=binding["environment_session_id"],
+        )
+        write(directory / "result.json", result)
+        rows(directory / "codex-events.jsonl", [{"type": "error", "message": "Actual native failure retained"}])
+        observed = audit.episode(audit.Reader(), directory)
+        self.assertTrue(observed["valid"])
+        self.assertTrue(observed["expected_terminal_stop_validated"])
+        self.assertEqual(observed["result"]["agent_exit_code"], -15)
+        self.assertEqual(observed["native_bookkeeping_error"], result["agent_error"])
+        self.assertFalse(observed["native_completion_event_observed"])
+        # Flags never substitute for a drained backend, exact identities, or
+        # agreement with the private environment outcome.
+        for changes in (
+            {"active_requests": 1},
+            {"attempt_id": "some_other_attempt"},
+            {"terminal_state_hash": "f" * 64},
+            {"terminal_state": {**state, "won": False}},
+        ):
+            write(directory / "result.json", {**result, "backend_terminal": {**receipt, **changes}})
+            failed = audit.episode(audit.Reader(), directory)
+            self.assertFalse(failed["valid"])
+            self.assertTrue(failed["engine_win"])
 
 
 if __name__ == "__main__":
