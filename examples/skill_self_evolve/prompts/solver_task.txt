@@ -1,0 +1,4 @@
+Complete the ALFWorld goal shown in the initial game state. Interact only with
+the game using `alfworld-step 'EXACT ACTION'`, choosing actions from the current
+admissible commands. Use the returned observations to track your inventory and
+progress. Stop as soon as the environment reports success or termination.

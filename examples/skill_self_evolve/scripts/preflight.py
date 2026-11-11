@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""CPU-only import, source-provenance and data-boundary checks for training."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib
+import importlib.metadata
+import inspect
+import json
+import os
+import pwd
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+RECIPE = Path(__file__).resolve().parents[1]
+
+
+def check(condition: bool, message: str) -> None:
+    if not condition:
+        raise RuntimeError(message)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--require-service", action="store_true")
+    parser.add_argument("--allow-busy-gpus", action="store_true")
+    parser.add_argument("--overrides-file", type=Path)
+    args = parser.parse_args()
+    run = args.run_dir.resolve()
+    report: dict[str, object] = {"cpu_only_import_checks": True, "run_dir": str(run)}
+    gpu_csv = subprocess.check_output(
+        ["nvidia-smi", "--query-gpu=index,name,memory.total", "--format=csv,noheader"], text=True
+    ).strip()
+    report["gpu_inventory"] = gpu_csv.splitlines()
+    busy = subprocess.check_output(["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"], text=True)
+    active_pids = [line.strip() for line in busy.splitlines() if line.strip() != str(os.getpid()) and line.strip()]
+    if not args.allow_busy_gpus:
+        check(not active_pids, "GPU jobs are already active; use --allow-busy-gpus only after identifying them")
+    report["other_gpu_process_ids"] = active_pids
+
+    # This process only validates imports/configuration. Its child training process
+    # is launched separately with the parent's original GPU visibility.
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    source = Path(os.environ.get("VERL_SOURCE_ROOT", "/workspace/verl-0.9.1")).resolve()
+    sys.path.insert(0, str(source))
+    from verl.experimental.skill_harness.bootstrap import configure_runtime, runtime_env_config
+
+    report["imports"] = configure_runtime(register_tasks=True)
+    modules = (
+        "uni_agent.framework.entry",
+        "uni_agent.agents.codex.agent",
+        "verl.experimental.skill_harness.alfworld.task",
+        "verl.experimental.skill_harness.alfworld.runner",
+    )
+    report["module_origins"] = {name: str(Path(importlib.import_module(name).__file__).resolve()) for name in modules}
+    entry = importlib.import_module("uni_agent.framework.entry")
+    signature = inspect.signature(entry.AgentFrameworkRolloutAdapter.create)
+    check({"config", "llm_client"}.issubset(signature.parameters), "Uni-Agent adapter create() contract changed")
+    report["package_versions"] = {}
+    for package in ("verl", "torch", "vllm", "ray", "transferqueue", "transformers", "uni-agent"):
+        try:
+            report["package_versions"][package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            report["package_versions"][package] = "source-only"
+    check(report["package_versions"]["verl"] == "0.9.1", "Editable distribution metadata shadows verl 0.9.1")
+
+    manifest = json.loads((run / "data/split_manifest.json").read_text())
+    phases = manifest["phase_game_ids"]
+    train, dev = set(phases["train"]), set(phases["dev"])
+    tests = set(phases["test_seen"]) | set(phases["test_unseen"])
+    check(bool(train) and bool(dev), "Training and train-derived dev partitions must both be nonempty")
+    check(not train & dev and not (train | dev) & tests, "Training/dev/test game identities overlap")
+    check(manifest["evaluation_games_used_for_training"] is False, "Official evaluation games entered training")
+    for value in manifest["parquet_files"].values():
+        p = Path(value["path"])
+        check(hashlib.sha256(p.read_bytes()).hexdigest() == value["sha256"], f"Prepared data changed: {p}")
+    report["split_game_counts"] = {name: len(ids) for name, ids in phases.items()}
+    report["catalog_digest"] = manifest["catalog_digest"]
+
+    model_path = Path(os.environ["MODEL_PATH"]).resolve()
+    check((model_path / "config.json").is_file(), f"A local model config is required: {model_path}")
+    model = json.loads((model_path / "config.json").read_text())
+    report["model"] = {
+        "path": str(model_path),
+        "architectures": model.get("architectures"),
+        "model_type": model.get("model_type"),
+    }
+    check(Path(os.environ["CODEX_NATIVE_BIN"]).is_file(), "Native Codex executable is missing")
+    check(os.access(os.environ["CODEX_NATIVE_BIN"], os.X_OK), "Native Codex executable is not executable")
+    check(Path(os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"]).is_file(), "Solver instructions are missing")
+    account = pwd.getpwnam("alfworld_eval")
+    report["agent_user"] = {"name": account.pw_name, "uid": account.pw_uid}
+    check(os.access("/opt/alfworld-tools/alfworld-step", os.X_OK), "The game tool is missing")
+
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    overrides = json.loads(args.overrides_file.read_text()) if args.overrides_file else []
+    with initialize_config_dir(config_dir=str(RECIPE / "config"), version_base=None):
+        cfg = compose(config_name="alfworld_train", overrides=overrides)
+    OmegaConf.resolve(cfg)
+    check(cfg.actor_rollout_ref.rollout.n >= 2, "GRPO requires stochastic response groups")
+    check(cfg.data.train_files.endswith("/train.parquet"), "The training recipe must consume train.parquet")
+    check(cfg.data.val_files.endswith("/dev.parquet"), "Scheduled validation must use train-derived dev.parquet")
+    check(cfg.actor_rollout_ref.rollout.calculate_log_probs, "Behavior log probabilities must be retained")
+    check(
+        cfg.actor_rollout_ref.rollout.agent.agent_loop_manager_class
+        == "uni_agent.framework.entry.AgentFrameworkRolloutAdapter",
+        "The recipe must use the official Uni-Agent adapter",
+    )
+    (run / "resolved-config.preflight.yaml").write_text(OmegaConf.to_yaml(cfg, resolve=True))
+    report["ray_worker_setup_hook"] = runtime_env_config()["worker_process_setup_hook"]
+    if args.require_service:
+        settings = json.loads(Path(os.environ["ALFWORLD_SERVER_CONFIG"]).read_text())
+        check(settings["catalog_digest"] == manifest["catalog_digest"], "Service/data catalog digests differ")
+        check(
+            set(settings.get("allowed_splits", [])) == {"train"}, "Training service permits official evaluation games"
+        )
+        with urllib.request.urlopen(settings["url"].rstrip("/") + "/health", timeout=5) as response:
+            health = json.load(response)
+        check(health.get("ready") is True, "The ALFWorld service is not ready")
+        check(health.get("catalog_digest") == manifest["catalog_digest"], "Health endpoint has a different catalog")
+        report["environment_health"] = health
+    report["passed"] = True
+    (run / "preflight.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
