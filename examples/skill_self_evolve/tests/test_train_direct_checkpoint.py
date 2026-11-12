@@ -82,14 +82,14 @@ class EntryTests(unittest.TestCase):
         }
         self.config = types.SimpleNamespace(
             trainer=types.SimpleNamespace(v1=types.SimpleNamespace(trainer_mode="sync")),
-            skill_harness=types.SimpleNamespace(mode="skill_joint"),
+            skill_harness=types.SimpleNamespace(mode="skill_joint", artifact_root="/unused-cpu-run"),
             transfer_queue=types.SimpleNamespace(enable=False),
             actor_rollout_ref=types.SimpleNamespace(
                 rollout=types.SimpleNamespace(agent=types.SimpleNamespace(agent_loop_manager_class="factory"))
             ),
         )
 
-    def execute(self, failure=None):
+    def execute(self, failure=None, observer=None):
         events = self.events
 
         class Trainer:
@@ -120,6 +120,7 @@ class EntryTests(unittest.TestCase):
             patch.dict(sys.modules, self.modules),
             patch.object(entry, "trainer_class", return_value=Trainer),
             patch.object(entry, "initialized_receipt", side_effect=lambda *args: events.append("direct-initialized")),
+            patch.object(entry, "passive_diagnostics", return_value=observer or entry._NoDiagnostics()),
         ):
             entry.runner_class()().run(self.config)
 
@@ -146,6 +147,19 @@ class EntryTests(unittest.TestCase):
             self.execute("fit")
         self.assertIn("preserve-failure", self.events)
         self.assertEqual(self.events[-2:], [("finish", {"exit_code": 1}), "tq-close"])
+
+    def test_passive_observer_attaches_before_init_and_closes_after_failed_fit_cleanup(self):
+        observer = types.SimpleNamespace(
+            stage=lambda name: self.events.append(("observer-stage", name)),
+            attach=lambda trainer: self.events.append("observer-attach"),
+            close=lambda: self.events.append("observer-close"),
+        )
+        with self.assertRaisesRegex(RuntimeError, "fit failed"):
+            self.execute("fit", observer=observer)
+        self.assertLess(self.events.index("observer-attach"), self.events.index("trainer-init"))
+        self.assertIn(("observer-stage", "trainer_fit"), self.events)
+        self.assertIn(("observer-stage", "failure_cleanup"), self.events)
+        self.assertEqual(self.events[-3:], [("observer-stage", "queue_close"), "tq-close", "observer-close"])
 
     def test_trainer_inherits_direct_restore_and_unchanged_frozen_fit(self):
         class Frozen:
