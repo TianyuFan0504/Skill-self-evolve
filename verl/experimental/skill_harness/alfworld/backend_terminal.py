@@ -28,10 +28,19 @@ from urllib.parse import urlsplit
 from verl.workers.rollout.llm_server import LLMServerClient
 
 _CURRENT = contextvars.ContextVar("alfworld_owned_backend_request", default=None)
-_DONE = {"completed", "failed", "terminal_refused", "terminal_tail_archived"}
+_DONE = {"completed", "failed", "terminal_refused", "terminal_tail_archived", "host_refused", "host_tail_archived"}
+_HOST_STOP_KINDS = {"budget_timeout", "task_cancel", "host_error"}
 
 
-class TerminalMDPStopped(RuntimeError):
+class BackendControlStopped(RuntimeError):
+    """A durable bound stop; never synthetic EOS or a task-result reward."""
+
+
+class HostBackendStopped(BackendControlStopped):
+    """Budget/cancellation/host-error control, distinct from absorbing MDP done."""
+
+
+class TerminalMDPStopped(BackendControlStopped):
     """Proven absorbing MDP terminal control, not model EOS or native success."""
 
 
@@ -183,17 +192,32 @@ def _fenced(binding):
     return proof
 
 
-def _fence(binding, state):
+def _stop_kind(proof):
+    return proof.get("stop_kind", "mdp_terminal") if proof is not None else None
+
+
+def _stop_exception(proof, message):
+    return TerminalMDPStopped(message) if _stop_kind(proof) == "mdp_terminal" else HostBackendStopped(message)
+
+
+def _fence(binding, state, *, stop_kind="mdp_terminal", reason=None):
     old = _fenced(binding)
     if old is not None:
-        return old
+        return old  # First bound stop is immutable; never upgrade a budget stop to MDP done.
     proof = {
         "binding_sha256": binding.binding_sha256,
         "capability": binding.capability,
+        "attempt_id": binding.attempt_id,
+        "gateway_session_id": binding.gateway_session_id,
+        "environment_session_id": binding.environment_session_id,
+        "stop_kind": stop_kind,
+        "reason": reason,
         "terminal_state": state,
-        "terminal_state_hash": _digest(state),
+        "terminal_state_hash": _digest(state) if state is not None else None,
         "observed_at": time.time(),
     }
+    # Retain the original private filename for existing MDP proof readers. Kind
+    # and null state distinguish host control; no non-MDP stop invents done/EOS.
     _write(binding.directory / "terminal.json", proof)
     return proof
 
@@ -207,6 +231,35 @@ def fence_episode(binding, validated_private_terminal_state):
         raise RuntimeError("Terminal fence caller does not own the bound attempt")
     with _admission_lock(binding.directory):
         return _fence(binding, state)
+
+
+def fence_host_stop(binding, stop_kind, *, reason=None):
+    """Durably fence this attempt before its CLI is terminated or UID drained."""
+    if stop_kind not in _HOST_STOP_KINDS:
+        raise ValueError("Host stop kind must be budget_timeout, task_cancel, or host_error")
+    if _load(binding.root, binding.gateway_session_id) != binding:
+        raise RuntimeError("Host stop caller does not own the bound attempt")
+    with _admission_lock(binding.directory):
+        return _fence(binding, None, stop_kind=stop_kind, reason=reason)
+
+
+def read_first_observed_input(binding):
+    """Read only actual admission-0 input paired with a completed backend output."""
+    if _load(binding.root, binding.gateway_session_id) != binding:
+        raise RuntimeError("First-input reader does not own this binding")
+    path = binding.directory / "first-observed-input.json"
+    if not path.exists():
+        return None
+    payload = _read(path)
+    if (
+        payload.get("binding_sha256") != binding.binding_sha256
+        or payload.get("attempt_id") != binding.attempt_id
+        or payload.get("admission_index") != 0
+        or payload.get("observed_on_completed_output") is not True
+        or payload.get("raw_stop_reason") != "completed"
+    ):
+        raise RuntimeError("First-input proof does not describe this attempt's first completed backend request")
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "payload": payload}
 
 
 async def _observe(binding, timeout):
@@ -246,13 +299,20 @@ async def wait_for_terminal_drain(binding, timeout_seconds=15.0):
         if "terminal_refusal" in reasons
         else None
     )
-    confirmed = not active
-    expected = bool(confirmed and proof and reason)
+    backend_errors = [row for row in requests if row.get("phase") == "failed" or row.get("error_type")]
+    confirmed = not active and not backend_errors
+    stop_kind = _stop_kind(proof)
+    expected = bool(confirmed and stop_kind == "mdp_terminal" and reason)
+    expected_host = bool(confirmed and stop_kind in _HOST_STOP_KINDS)
     status = (
         ("terminal_aborted" if reason == "terminal_abort" else "terminal_refused")
         if expected
+        else "host_stopped"
+        if expected_host
         else "drained"
         if confirmed
+        else "backend_failed"
+        if backend_errors
         else "unconfirmed"
     )
     return {
@@ -264,6 +324,10 @@ async def wait_for_terminal_drain(binding, timeout_seconds=15.0):
         "gateway_session_id": binding.gateway_session_id,
         "environment_session_id": binding.environment_session_id,
         "fenced": proof is not None,
+        "stop_kind": stop_kind,
+        "host_stop_requested": stop_kind in _HOST_STOP_KINDS,
+        "expected_host_stop": expected_host,
+        "backend_error_types": sorted({row["error_type"] for row in backend_errors if row.get("error_type")}),
         "terminal_state": proof["terminal_state"] if proof else None,
         "terminal_state_hash": proof["terminal_state_hash"] if proof else None,
         "active_requests": len(active),
@@ -288,6 +352,8 @@ class _Lease:
     abort_acknowledged: bool = False
     phase: str = "checking"
     reason: str | None = None
+    stop_kind: str | None = None
+    admission_index: int | None = None
 
 
 class TerminalAwareLLMServerClient(LLMServerClient):
@@ -315,6 +381,8 @@ class TerminalAwareLLMServerClient(LLMServerClient):
         data = {
             "binding_sha256": lease.binding.binding_sha256,
             "request_nonce": lease.nonce,
+            "admission_index": lease.admission_index,
+            "stop_kind": lease.stop_kind,
             "gateway_session_id": lease.binding.gateway_session_id,
             "attempt_id": lease.binding.attempt_id,
             "server_id": lease.server_id,
@@ -344,9 +412,10 @@ class TerminalAwareLLMServerClient(LLMServerClient):
         lease = _CURRENT.get()
         if lease is not None:
             lease.actual_request_id = actual
-            if _fenced(lease.binding):
-                lease.terminal, lease.reason, lease.phase = True, "terminal_refusal", "terminal_refused"
-                raise TerminalMDPStopped("ALFWorld terminal fence refused a new backend submission")
+            proof = _fenced(lease.binding)
+            if proof:
+                self._mark_stopped(lease, proof, "refusal")
+                raise _stop_exception(proof, "A bound stop refused a new backend submission")
             lease.phase = "submitting"
             self._record(lease)
         return actual
@@ -365,8 +434,10 @@ class TerminalAwareLLMServerClient(LLMServerClient):
                     proof = fence_episode(lease.binding, state)
             if proof is not None:
                 lease.terminal = True
+                lease.stop_kind = _stop_kind(proof)
                 if lease.server is not None and lease.actual_request_id is not None:
-                    lease.reason, lease.phase = "terminal_abort", "cancelling"
+                    prefix = "terminal" if lease.stop_kind == "mdp_terminal" else lease.stop_kind
+                    lease.reason, lease.phase = prefix + "_abort", "cancelling"
                     lease.abort_attempts += 1
                     self._record(lease)
                     try:
@@ -381,31 +452,92 @@ class TerminalAwareLLMServerClient(LLMServerClient):
             else:
                 await asyncio.sleep(self.poll_seconds)
 
+    def _mark_stopped(self, lease, proof, action):
+        lease.terminal, lease.stop_kind = True, _stop_kind(proof)
+        prefix = "terminal" if lease.stop_kind == "mdp_terminal" else lease.stop_kind
+        lease.reason = prefix + "_" + action
+        lease.phase = "terminal_refused" if lease.stop_kind == "mdp_terminal" else "host_refused"
+
+    def _first_observed(self, lease, kwargs, output):
+        if lease.admission_index != 0 or output.stop_reason != "completed":
+            return
+        if not lease.actual_request_id:
+            raise RuntimeError("A completed first-input proof requires the actual backend request identity")
+        prompt_ids = list(kwargs["prompt_ids"])
+        raw_output = {
+            "token_ids": list(output.token_ids),
+            "log_probs": None if output.log_probs is None else list(output.log_probs),
+            "stop_reason": output.stop_reason,
+            "extra_fields": dict(output.extra_fields),
+        }
+        payload = {
+            "binding_sha256": lease.binding.binding_sha256,
+            "attempt_id": lease.binding.attempt_id,
+            "gateway_session_id": lease.binding.gateway_session_id,
+            "environment_session_id": lease.binding.environment_session_id,
+            "admission_index": 0,
+            "actual_request_id": lease.actual_request_id,
+            "prompt_ids": prompt_ids,
+            "prompt_ids_sha256": _digest(prompt_ids),
+            "output_sha256": _digest(raw_output),
+            "raw_stop_reason": output.stop_reason,
+            "observed_on_completed_output": True,
+            "trajectory_complete": False,
+            "archive_only": True,
+            "behavior_gradient": False,
+            "observed_at": time.time(),
+        }
+        with _admission_lock(lease.binding.directory):
+            path = lease.binding.directory / "first-observed-input.json"
+            if path.exists():
+                old = _read(path)
+                if any(old.get(k) != payload[k] for k in payload if k != "observed_at"):
+                    raise RuntimeError("The immutable actual first-input proof changed")
+            else:
+                _write(path, payload)
+
     async def generate(self, request_id, **kwargs):
         binding = _load(self.binding_root, str(request_id))
         if binding is None:
             return await super().generate(request_id, **kwargs)
+        kwargs = dict(kwargs, prompt_ids=list(kwargs["prompt_ids"]))
         lease = _Lease(binding)
-        # Admission is durable BEFORE scheduling the owned task. A concurrent
-        # drain/fence uses the same interprocess lock, so empty scans cannot
-        # miss a queued backend task that could later submit GPU work.
         with _admission_lock(binding.directory):
-            self._record(lease)
+            proof = _fenced(binding)
+            if proof is not None:
+                self._mark_stopped(lease, proof, "refusal")
+                self._record(lease, finished=True)
+                raise _stop_exception(proof, "A durable bound stop closed backend admission")
+            counter_path = binding.directory / "admission-counter.json"
+            counter = (
+                _read(counter_path)
+                if counter_path.exists()
+                else {"binding_sha256": binding.binding_sha256, "next_index": 0}
+            )
+            if counter["binding_sha256"] != binding.binding_sha256:
+                raise RuntimeError("Backend admission counter belongs to another attempt")
+            lease.admission_index = counter["next_index"]
+            _write(counter_path, {**counter, "next_index": lease.admission_index + 1})
+            self._record(lease)  # Durable before the owned task can submit any GPU work.
         task = asyncio.create_task(self._generate_owned(lease, request_id, kwargs))
         self._owned_tasks.add(task)
 
         def completed(value):
             self._owned_tasks.discard(value)
             if not value.cancelled():
-                value.exception()  # Retrieve an orphaned exception; artifacts retain its cause.
+                value.exception()
 
         task.add_done_callback(completed)
-        return await asyncio.shield(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            fence_host_stop(binding, "task_cancel", reason="gateway_frontend_cancelled")
+            raise  # The owned backend future and watcher retain their ownership.
 
     async def _generate_owned(self, lease, request_id, kwargs):
         binding = lease.binding
         token = _CURRENT.set(lease)
-        watcher = None
+        watcher = future = None
         self._record(lease)
         try:
             proof = _fenced(binding)
@@ -417,18 +549,36 @@ class TerminalAwareLLMServerClient(LLMServerClient):
                 if state is not None:
                     proof = fence_episode(binding, state)
             if proof is not None:
-                lease.terminal, lease.reason, lease.phase = True, "terminal_refusal", "terminal_refused"
-                raise TerminalMDPStopped("ALFWorld absorbing terminal state refused an unnecessary decode")
+                self._mark_stopped(lease, proof, "refusal")
+                raise _stop_exception(proof, "A bound stop refused an unnecessary decode")
             future = asyncio.create_task(super().generate(request_id, **kwargs))
             watcher = asyncio.create_task(self._watch(lease, future))
-            output = await future
-            if lease.terminal or _fenced(binding):
-                lease.reason = lease.reason or "terminal_refusal"
+            while True:
+                try:
+                    output = await asyncio.shield(future)
+                    break
+                except asyncio.CancelledError:
+                    if future.cancelled():
+                        raise RuntimeError("The original backend future was cancelled without drain proof") from None
+                    fence_host_stop(binding, "task_cancel", reason="owned_client_task_cancelled")
+                    # Cancellation of this control task does not prove kernel drain.
+                    # Keep the original future plus its UUID-targeted watcher alive.
+            self._first_observed(lease, kwargs, output)
+            proof = _fenced(binding)
+            if lease.terminal or proof or output.stop_reason != "completed":
+                if proof:
+                    lease.stop_kind = _stop_kind(proof)
+                lease.reason = lease.reason or (
+                    ("terminal_refusal" if lease.stop_kind == "mdp_terminal" else lease.stop_kind + "_refusal")
+                    if lease.stop_kind
+                    else "unconfirmed_backend_stop"
+                )
                 payload = {
                     "binding_sha256": binding.binding_sha256,
                     "attempt_id": binding.attempt_id,
                     "gateway_session_id": binding.gateway_session_id,
                     "actual_request_id": lease.actual_request_id,
+                    "stop_kind": lease.stop_kind,
                     "prompt_ids": list(kwargs["prompt_ids"]),
                     "token_ids": list(output.token_ids),
                     "log_probs": None if output.log_probs is None else list(output.log_probs),
@@ -447,20 +597,37 @@ class TerminalAwareLLMServerClient(LLMServerClient):
                     "raw_stop_reason": output.stop_reason,
                     "archive_only": True,
                 }
-                lease.phase = "terminal_tail_archived"
+                if proof is None or output.stop_reason not in ("completed", "aborted"):
+                    lease.phase = "failed"
+                    self._record(
+                        lease,
+                        finished=True,
+                        tail=tail,
+                        raw_stop_reason=output.stop_reason,
+                        error_type="UnconfirmedBackendStop",
+                    )
+                    raise RuntimeError("An unconfirmed backend stop is not a normal task outcome")
+                lease.phase = "terminal_tail_archived" if lease.stop_kind == "mdp_terminal" else "host_tail_archived"
                 self._record(lease, finished=True, tail=tail, raw_stop_reason=output.stop_reason)
-                raise TerminalMDPStopped("ALFWorld terminal decode stopped; exact raw tail was archived")
+                raise _stop_exception(proof, "Bound decode stopped; exact raw tail was archived")
             lease.phase = "completed"
             self._record(lease, finished=True, raw_stop_reason=output.stop_reason)
             return output
-        except TerminalMDPStopped:
-            if lease.phase != "terminal_tail_archived":
-                lease.phase = "terminal_refused"
+        except BackendControlStopped:
+            if lease.phase not in ("terminal_tail_archived", "host_tail_archived"):
+                lease.phase = "terminal_refused" if lease.stop_kind == "mdp_terminal" else "host_refused"
                 self._record(lease, finished=True)
             raise
         except BaseException as error:
+            previous = _read(binding.directory / "requests" / (lease.nonce + ".json"))
             lease.phase = "failed"
-            self._record(lease, finished=True, error_type=type(error).__name__)
+            self._record(
+                lease,
+                finished=future is None or future.done(),
+                tail=previous.get("tail_archive_ref"),
+                raw_stop_reason=previous.get("raw_stop_reason"),
+                error_type=type(error).__name__,
+            )
             raise
         finally:
             if watcher is not None:

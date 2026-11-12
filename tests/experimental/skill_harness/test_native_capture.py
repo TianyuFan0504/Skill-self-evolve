@@ -85,6 +85,9 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         self.sandbox.native_started = False
         self.sandbox.launcher_proofs = []
         self.sandbox.terminal_stop_evidence = []
+        self.sandbox.host_stop_evidence = []
+        self.requested_host_stops = []
+        self.sandbox._request_backend_stop = self.requested_host_stops.append
         self.sandbox.private_tmp_identity = None
         self.sandbox.CAPTURE_DRAIN_TIMEOUT_SECONDS = 0.08
         self.sandbox.TERMINATION_TIMEOUT_SECONDS = 0.08
@@ -210,13 +213,21 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_timeout_returns_minus_one_and_kills_owned_group(self):
         ready = self.root / "timeout-child.pid"
-        result = await self.execute(self.stubborn_script(ready), timeout=0.3)
+        original_signal = os.killpg
+
+        def fenced_signal(pid, number):
+            self.assertEqual(self.requested_host_stops, ["budget_timeout"])
+            return original_signal(pid, number)
+
+        with patch.object(os, "killpg", side_effect=fenced_signal):
+            result = await self.execute(self.stubborn_script(ready), timeout=0.3)
         self.assertEqual(result.exit_code, -1)
         self.assertIn("actual partial output", result.stdout)
         self.assertEqual(result.stderr, "")
         diagnostic = self.diagnostic()
         self.assertTrue(diagnostic["timed_out"])
         self.assertFalse(diagnostic["cancelled"])
+        self.assertEqual(self.requested_host_stops, ["budget_timeout"])
         self.assertIn("SIGKILL", diagnostic["termination_signals"])
         self.assertFalse(running(diagnostic["pid"]))
         self.assertFalse(running(int(ready.read_text())))
@@ -231,6 +242,7 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         diagnostic = self.diagnostic()
         self.assertTrue(diagnostic["cancelled"])
         self.assertFalse(diagnostic["timed_out"])
+        self.assertEqual(self.requested_host_stops, ["task_cancel"])
         self.assertIn("actual partial output", (self.root / "codex-events.jsonl").read_text())
         self.assertEqual((self.root / "codex-stderr.log").read_text(), "")
         self.assertFalse(running(diagnostic["pid"]))
@@ -301,7 +313,8 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         imports = [
             node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "backend_terminal"
         ]
-        self.assertEqual(len(imports), 2)
+        names = {alias.name for node in imports for alias in node.names}
+        self.assertTrue({"bind_episode", "wait_for_terminal_drain", "fence_host_stop"}.issubset(names))
         self.assertTrue(all(node.level == 1 for node in imports))
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
         bind_line = next(

@@ -288,6 +288,31 @@ class AlfworldUserSandbox(LocalSandbox):
         self.native_codex_homes = []
         self.native_model_catalogs = []
         self.terminal_stop_evidence = []
+        self.host_stop_evidence = []
+        self.backend_binding = None
+
+    def _request_backend_stop(self, stop_kind):
+        from .backend_terminal import fence_host_stop
+
+        if self.backend_binding is None:
+            raise AccountIsolationError("Native stop has no trusted backend attempt binding")
+        proof = fence_host_stop(self.backend_binding, stop_kind, reason="native_cli_" + stop_kind)
+        evidence = {
+            "requested_stop_kind": stop_kind,
+            "effective_stop_kind": proof["stop_kind"],
+            "binding_id": self.backend_binding.binding_id,
+            "binding_sha256": self.backend_binding.binding_sha256,
+            "attempt_id": self.backend_binding.attempt_id,
+            "recorded_at": time.time(),
+            "backend_stop_confirmed": None,
+            "model_eos_invented": False,
+        }
+        self.host_stop_evidence.append(evidence)
+        with (self.output / "backend-host-stop-evidence.jsonl").open("a") as stream:
+            stream.write(json.dumps(evidence, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        return evidence
 
     async def _observe_terminal_state(self):
         async with aiohttp.ClientSession(
@@ -415,6 +440,7 @@ class AlfworldUserSandbox(LocalSandbox):
         termination_signals = []
         termination_lock = asyncio.Lock()
         termination_finished = False
+        isolation_error = None
 
         async def capture(reader, channel, filename):
             with (self.output / filename).open("ab") as stream:
@@ -461,6 +487,21 @@ class AlfworldUserSandbox(LocalSandbox):
                     signal_group(signal.SIGKILL)
                 termination_finished = True
 
+        async def stop_owned(stop_kind):
+            nonlocal isolation_error
+            try:
+                self._request_backend_stop(stop_kind)  # Durable admission fence BEFORE the first CLI signal.
+            except Exception as error:
+                isolation_error = error
+                record_isolation_incident(
+                    self.account_lease["owner"]["run_root"],
+                    error,
+                    lease_id=self.account_lease["lease_id"],
+                    attempt_id=self.attempt_id,
+                )
+            finally:
+                await terminate()  # Fence persistence failure is fatal; still stop this owned CLI.
+
         def preserve_terminal_evidence(evidence):
             value = evidence.to_dict()
             value["backend_stop_confirmed"] = None  # CLI ownership does not attest backend GPU cancellation.
@@ -487,41 +528,47 @@ class AlfworldUserSandbox(LocalSandbox):
         timed_out = False
         cancelled = False
         drain_timed_out = False
-        isolation_error = None
         try:
             raw = await asyncio.wait_for(asyncio.to_thread(os.read, ready_read, 65536), timeout=10)
             proof = decode_launcher_proof(raw, uid=self.account.pw_uid, gid=self.account.pw_gid)
             self.account_pool.mark_launcher(self.account_lease, self.attempt_id, proof)
             self.launcher_proofs.append(proof)
         except BaseException as error:
-            isolation_error = error
-            record_isolation_incident(
-                self.account_lease["owner"]["run_root"],
-                error,
-                lease_id=self.account_lease["lease_id"],
-                attempt_id=self.attempt_id,
-            )
-            await terminate()
+            if isinstance(error, asyncio.CancelledError):
+                cancelled = True
+                await stop_owned("task_cancel")
+            else:
+                isolation_error = error
+                record_isolation_incident(
+                    self.account_lease["owner"]["run_root"],
+                    error,
+                    lease_id=self.account_lease["lease_id"],
+                    attempt_id=self.attempt_id,
+                )
+                await stop_owned("host_error")
         finally:
             os.close(ready_read)
         try:
             await asyncio.wait_for(wait_for_parent_exit(), timeout=timeout)
         except asyncio.TimeoutError:
             timed_out = True
-            await terminate()
+            await stop_owned("budget_timeout")
         except asyncio.CancelledError:
             cancelled = True
-            await terminate()
+            await stop_owned("task_cancel")
         draining = asyncio.gather(*pumps)
         try:
             await asyncio.wait_for(draining, timeout=self.CAPTURE_DRAIN_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
             # A descendant holding an inherited pipe cannot stall the runner.
             drain_timed_out = True
-            await terminate()
+            await stop_owned("host_error")
         except asyncio.CancelledError:
             cancelled = True
-            await terminate()
+            await stop_owned("task_cancel")
+        except Exception as error:
+            isolation_error = error
+            await stop_owned("host_error")
         # Cancellation may finish the gathering future after wait_for raises.
         # Retrieve its result so no orphaned CancelledError reaches the loop.
         await asyncio.gather(draining, return_exceptions=True)
@@ -548,6 +595,7 @@ class AlfworldUserSandbox(LocalSandbox):
             "termination_signals": termination_signals,
             "terminal_monitor_error": terminal_monitor_error,
             "backend_stop_confirmed": None,
+            "host_stop_evidence": list(getattr(self, "host_stop_evidence", [])),
         }
         # Capture failures are host diagnostics, never invented native stderr.
         with (self.output / "native-capture-diagnostics.jsonl").open("a", encoding="utf-8") as stream:
@@ -673,6 +721,25 @@ class AlfworldSkillTrainingTask(Task):
             isolation_error = None
             agent_started = False
             uid_drained = False
+
+            def request_host_stop(stop_kind, reason):
+                nonlocal isolation_error
+                if backend_binding is None:
+                    return
+                try:
+                    from .backend_terminal import fence_host_stop
+
+                    fence_host_stop(backend_binding, stop_kind, reason=reason)
+                except Exception as stop_error:
+                    isolation_error = AccountIsolationError("Backend host-stop fence failed: " + str(stop_error))
+                    record_isolation_incident(
+                        metadata["run_dir"],
+                        isolation_error,
+                        lease_id=account_lease.get("lease_id") if account_lease else None,
+                        attempt_id=attempt_id,
+                    )
+                    raise
+
             try:
                 if created.get("catalog_digest") != metadata["catalog_digest"]:
                     raise ValueError("The environment response has a different catalog digest")
@@ -769,12 +836,23 @@ class AlfworldSkillTrainingTask(Task):
                     environment_session_url=base + "/session/" + session_id,
                     attempt_id=attempt_id,
                 )
+                sandbox.backend_binding = backend_binding
                 agent_started = True
                 agent_result = await agent.run(sandbox=sandbox, messages=messages, workdir=str(workdir))
                 agent_info = agent_result.info or {}
+            except asyncio.CancelledError as cancelled_error:
+                try:
+                    request_host_stop("task_cancel", "task_cancelled")
+                except Exception as stop_error:
+                    cancelled_error.add_note("Backend stop fence failed: " + str(stop_error))
+                raise
             except AccountIsolationError as exc:
                 isolation_error = exc
                 error = f"{type(exc).__name__}: {exc}"
+                try:
+                    request_host_stop("host_error", type(exc).__name__)
+                except Exception as stop_error:
+                    exc.add_note("Backend stop fence failed: " + str(stop_error))
                 record_isolation_incident(
                     metadata["run_dir"],
                     error,
@@ -785,6 +863,10 @@ class AlfworldSkillTrainingTask(Task):
                 error = f"{type(exc).__name__}: {exc}"
                 phase = "execution" if agent_started else "boundary setup"
                 isolation_error = AccountIsolationError("Host attempt " + phase + " failed: " + error)
+                try:
+                    request_host_stop("host_error", type(exc).__name__)
+                except Exception as stop_error:
+                    exc.add_note("Backend stop fence failed: " + str(stop_error))
                 record_isolation_incident(
                     metadata["run_dir"],
                     isolation_error,
@@ -968,7 +1050,8 @@ class AlfworldSkillTrainingTask(Task):
                 if (
                     bound
                     and backend_receipt.get("backend_stop_confirmed") is True
-                    and backend_receipt.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+                    and backend_receipt.get("status")
+                    in ("drained", "terminal_refused", "terminal_aborted", "host_stopped")
                 ):
                     backend_confirmed = True
                     observed = _validated_state(backend_receipt.get("terminal_state"))
@@ -983,6 +1066,7 @@ class AlfworldSkillTrainingTask(Task):
                         and observed[0]["won"] == engine["won"]
                         and all(observed[0].get(key) == engine.get(key) for key in ("steps", "max_steps"))
                     )
+            host_stop_kind = (backend_receipt or {}).get("stop_kind")
             result = {
                 **manifest,
                 **engine,
@@ -1014,6 +1098,11 @@ class AlfworldSkillTrainingTask(Task):
                 if backend_binding is not None
                 else None,
                 "environment_session_id": session_id,
+                "host_stop_kind": host_stop_kind,
+                "host_stop_requested": (backend_receipt or {}).get("host_stop_requested", False),
+                "budget_exhausted": host_stop_kind == "budget_timeout",
+                "task_cancelled": host_stop_kind == "task_cancel",
+                "budget_reward_eligible": False,
                 "account_isolation": account_summary,
                 "account_isolation_error": str(isolation_error) if isolation_error is not None else None,
                 **({"skill_context": skill_context} if skill_context is not None else {}),
@@ -1049,6 +1138,11 @@ class AlfworldSkillTrainingTask(Task):
                     "backend_binding": result["backend_binding"],
                     "environment_session_id": session_id,
                     "account_isolation": account_summary,
+                    "host_stop_kind": host_stop_kind,
+                    "host_stop_requested": (backend_receipt or {}).get("host_stop_requested", False),
+                    "budget_exhausted": host_stop_kind == "budget_timeout",
+                    "task_cancelled": host_stop_kind == "task_cancel",
+                    "budget_reward_eligible": False,
                     **({"skill_context": skill_context} if skill_context is not None else {}),
                     **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                     **({"native_files": native_files} if native_files is not None else {}),

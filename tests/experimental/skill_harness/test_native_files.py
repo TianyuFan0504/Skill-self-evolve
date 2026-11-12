@@ -372,6 +372,7 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             binding = types.SimpleNamespace(binding_sha256="sha", binding_id="binding")
             backend = types.ModuleType(package + ".backend_terminal")
             backend.bind_episode = lambda *args, **kwargs: binding
+            backend.fence_host_stop = Mock()
 
             async def wait_for_drain(*args, **kwargs):
                 return {
