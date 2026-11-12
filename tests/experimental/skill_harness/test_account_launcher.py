@@ -136,6 +136,94 @@ class AccountLauncherTests(unittest.TestCase):
                 accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
             sent.assert_not_called()
 
+    def test_missing_python_and_libc_wrappers_use_pidfd_syscalls(self):
+        syscall = mock.Mock(side_effect=[91, 0])
+        libc = SimpleNamespace(syscall=syscall)
+        with (
+            mock.patch.object(os, "pidfd_open", None, create=True),
+            mock.patch.object(accounts.signal, "pidfd_send_signal", None, create=True),
+            mock.patch.object(accounts.ctypes, "CDLL", return_value=libc),
+            mock.patch.object(accounts.sys, "platform", "linux"),
+            mock.patch.object(accounts.platform, "machine", return_value="x86_64"),
+            mock.patch.object(Path, "read_text", return_value="Uid:\t19000 19000 19000 19000\n"),
+            mock.patch.object(os, "close") as closed,
+            mock.patch.object(os, "kill") as numeric_signal,
+        ):
+            accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+        self.assertEqual(
+            [[argument.value for argument in call.args] for call in syscall.call_args_list],
+            [[434, 12345, 0], [424, 91, accounts.signal.SIGTERM, None, 0]],
+        )
+        closed.assert_called_once_with(91)
+        numeric_signal.assert_not_called()
+
+    def test_exported_libc_pidfd_wrappers_do_not_require_syscall_numbers(self):
+        opened, sent = mock.Mock(return_value=92), mock.Mock(return_value=0)
+        libc = SimpleNamespace(pidfd_open=opened, pidfd_send_signal=sent, syscall=mock.Mock())
+        with (
+            mock.patch.object(os, "pidfd_open", None, create=True),
+            mock.patch.object(accounts.signal, "pidfd_send_signal", None, create=True),
+            mock.patch.object(accounts.ctypes, "CDLL", return_value=libc),
+            mock.patch.object(accounts.sys, "platform", "linux"),
+            mock.patch.object(accounts.platform, "machine", return_value="another-architecture"),
+        ):
+            self.assertEqual(accounts._open_pidfd(12345), 92)
+            accounts._send_pidfd_signal(92, accounts.signal.SIGTERM)
+        opened.assert_called_once_with(12345, 0)
+        sent.assert_called_once_with(92, accounts.signal.SIGTERM, None, 0)
+        libc.syscall.assert_not_called()
+
+    def test_pidfd_kernel_errors_fail_closed_and_disappearance_is_benign(self):
+        for number in (errno.EPERM, errno.ENOSYS, errno.ESRCH):
+            with self.subTest(errno=number):
+                libc = SimpleNamespace(syscall=mock.Mock(return_value=-1))
+                with (
+                    mock.patch.object(os, "pidfd_open", None, create=True),
+                    mock.patch.object(accounts.ctypes, "CDLL", return_value=libc),
+                    mock.patch.object(accounts.ctypes, "get_errno", return_value=number),
+                    mock.patch.object(accounts.sys, "platform", "linux"),
+                    mock.patch.object(accounts.platform, "machine", return_value="x86_64"),
+                    mock.patch.object(Path, "read_text") as status,
+                ):
+                    if number == errno.ESRCH:
+                        accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                    else:
+                        with self.assertRaises(OSError) as error:
+                            accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                        self.assertEqual(error.exception.errno, number)
+                status.assert_not_called()
+
+    def test_pidfd_send_errors_close_descriptor_and_never_signal_numeric_pid(self):
+        for number in (errno.EPERM, errno.ENOSYS, errno.ESRCH):
+            with (
+                self.subTest(errno=number),
+                mock.patch.object(accounts, "_open_pidfd", return_value=93),
+                mock.patch.object(accounts, "_send_pidfd_signal", side_effect=OSError(number, os.strerror(number))),
+                mock.patch.object(Path, "read_text", return_value="Uid:\t19000 19000 19000 19000\n"),
+                mock.patch.object(os, "close") as closed,
+                mock.patch.object(os, "kill") as numeric_signal,
+            ):
+                if number == errno.ESRCH:
+                    accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                else:
+                    with self.assertRaises(OSError) as error:
+                        accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                    self.assertEqual(error.exception.errno, number)
+                closed.assert_called_once_with(93)
+                numeric_signal.assert_not_called()
+
+    def test_unverified_architecture_without_wrappers_fails_closed(self):
+        libc = SimpleNamespace(syscall=mock.Mock())
+        with (
+            mock.patch.object(os, "pidfd_open", None, create=True),
+            mock.patch.object(accounts.ctypes, "CDLL", return_value=libc),
+            mock.patch.object(accounts.sys, "platform", "linux"),
+            mock.patch.object(accounts.platform, "machine", return_value="aarch64"),
+        ):
+            with self.assertRaises(accounts.AccountIsolationError):
+                accounts._open_pidfd(12345)
+        libc.syscall.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

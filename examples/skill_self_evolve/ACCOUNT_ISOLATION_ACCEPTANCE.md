@@ -83,3 +83,50 @@ metadata/stat isolation. A real controlled native pair must additionally
 establish that both variants use one identity and that the actual model inputs
 only differ by the target skill. A new complete initial/final evaluation is
 still required to establish training improvement under this policy.
+
+## Conda Python pidfd compatibility
+
+The formal v4 initial evaluation exposed a previously unexercised cleanup path:
+the production `/opt/conda/bin/python` 3.11.13 has neither `os.pidfd_open` nor
+`signal.pidfd_send_signal`. Its glibc 2.35 also omits the corresponding exported
+wrappers, although the Linux 5.15 kernel supports both operations. The previous
+version/normal-exit checks had no surviving UID process to signal, and the CPU
+signal test supplied mock Python APIs. Those checks therefore did not establish
+the availability of the production interpreter's signal path.
+
+`accounts.py` now prefers the Python APIs, then exported libc wrappers. If both
+are absent, it uses the verified Linux x86_64 `pidfd_open` (434) and
+`pidfd_send_signal` (424) syscalls. These numbers match the installed
+`asm/unistd_64.h`. This is the same kernel process-handle mechanism, with no
+numeric-PID signal fallback. The opened process's UID is still checked before
+signaling, under the existing lease lock. A vanished process remains benign;
+permission errors, unsupported syscalls and unverified syscall architectures
+remain fatal. Descriptor closure also runs on refusal and error paths.
+
+The local CPU suite passed 22 checks: 10 launcher checks, 11 lease checks and
+one production-preflight contract. Regression cases cover the missing Python
+and libc wrappers, exported libc wrappers, UID mismatch, `ESRCH`, `EPERM`,
+`ENOSYS` and refusal of an unverified architecture. The production base
+interpreter also passed nine direct helper checks using one newly owned
+UID/GID 65534 child, empty supplementary groups, zero capabilities and
+`no_new_privs=1`. Wrong-UID signaling was refused without killing the child.
+The actual patched helper delivered `SIGTERM` through its real syscall
+compatibility path; the direct child's retained `Popen.wait` result was `-15`.
+An unrelated root-owned control child remained alive at measurement, and both
+owned children were removed afterward. Signaling the already vanished child
+was benign. No Native agent, model, learner or reward was created.
+
+The direct helper evidence is
+`/root/nas_chaohuang/skill_training/diagnostics/module64_direct_pidfd_1794457545202366689/acceptance.json`,
+SHA256 `ff0306dfd3010f5f23f8116dd73bc9e052d1ac5f542259d7f0915e72d5cc3ba7`.
+The tested `accounts.py` SHA256 is
+`77caeeb95330261024ef2c3d334a6e5c423b37733099bb1333eaf9e318948c08`.
+Server CPU logs and the 22-check summary are retained under
+`/root/nas_chaohuang/skill_training/diagnostics/module64_pidfd_acceptance_1794457295/`.
+
+The separate actual `AccountPool.drain` acceptance is still waiting for the
+existing Ceph pool lock before acquiring a lease or spawning any child. It
+remains one original live process; the successful direct helper check is a
+different, explicitly narrower diagnostic and does not replace that pending
+end-to-end observation. Existing failed run results, incidents and quarantined
+UIDs are retained; this repair does not relabel or automatically release them.

@@ -601,12 +601,53 @@ class AccountPool:
         return value
 
 
+def _native_pidfd_call(name, syscall_number, argtypes, values):
+    """Use the same Linux pidfd mechanism when CPython omits its wrappers."""
+    if sys.platform != "linux":
+        raise AccountIsolationError("Linux pidfd process ownership is required for native cleanup")
+    libc = ctypes.CDLL(None, use_errno=True)
+    function = getattr(libc, name, None)
+    if function is not None:
+        function.argtypes, function.restype = list(argtypes), ctypes.c_int
+        result = function(*values)
+    else:
+        # These numbers are verified against the production x86_64 headers.
+        # Do not assume another architecture shares this syscall table.
+        if platform.machine() != "x86_64":
+            raise AccountIsolationError("This architecture has no verified pidfd syscall compatibility path")
+        libc.syscall.restype = ctypes.c_long
+        result = libc.syscall(
+            ctypes.c_long(syscall_number), *(kind(value) for kind, value in zip(argtypes, values, strict=True))
+        )
+    if result < 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number))
+    return result
+
+
+def _open_pidfd(pid):
+    function = getattr(os, "pidfd_open", None)
+    if callable(function):
+        return function(pid, 0)
+    return _native_pidfd_call("pidfd_open", 434, (ctypes.c_int, ctypes.c_uint), (pid, 0))
+
+
+def _send_pidfd_signal(descriptor, number):
+    function = getattr(signal, "pidfd_send_signal", None)
+    if callable(function):
+        return function(descriptor, number, None, 0)
+    return _native_pidfd_call(
+        "pidfd_send_signal",
+        424,
+        (ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint),
+        (descriptor, number, None, 0),
+    )
+
+
 def _signal_uid_process(pid, uid, number):
     """Signal the opened process identity, not a reusable numeric PID."""
-    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
-        raise AccountIsolationError("pidfd process ownership is required for native cleanup")
     try:
-        descriptor = os.pidfd_open(pid, 0)
+        descriptor = _open_pidfd(pid)
     except ProcessLookupError:
         return
     try:
@@ -618,7 +659,7 @@ def _signal_uid_process(pid, uid, number):
         if str(uid) not in ids:
             raise AccountIsolationError("A process UID changed before its pidfd signal")
         with contextlib.suppress(ProcessLookupError):
-            signal.pidfd_send_signal(descriptor, number, None, 0)
+            _send_pidfd_signal(descriptor, number)
     finally:
         os.close(descriptor)
 
