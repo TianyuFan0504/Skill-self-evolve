@@ -88,15 +88,22 @@ request result and retain the same action ID. The launcher refuses an existing
 legacy service rather than silently changing a live service. Resume requires
 the same profile and the separately reconciled service transition.
 
-For `--parallel-environment --resume`, the launcher automatically selects
-`train_direct_checkpoint.py`. Its coordinator reuses one full checkpoint
-validation and reads model, optimizer, EMA and dataloader files directly from
-the original immutable checkpoint. Only writable skill/replay/ledger state
-and small JSON metadata get independent working copies. Fresh parallel starts
-keep their existing entry. See [DIRECT_CHECKPOINT_READ.md](DIRECT_CHECKPOINT_READ.md)
-and [DIRECT_CHECKPOINT_ENTRY.md](DIRECT_CHECKPOINT_ENTRY.md) for the source
-guards and explicitly recorded outer-entry/component provenance. This choice
-does not restart an already running experiment.
+Both fresh and resumed `--parallel-environment` launches select
+`train_all_native_spawn.py`. Build both helpers as described in
+[ALL_NATIVE_SPAWN.md](ALL_NATIVE_SPAWN.md) before launch; their loading is
+checked before preparation. The registered curator runuser path uses a separate
+three-stdio spawn helper, while ordinary solver workers keep the original
+four-descriptor ready-pipe component. Python DataLoader forks are excluded
+while parent stdio writers exist, and no fork lock is held across an await.
+See [ALL_NATIVE_SPAWN_ENTRY.md](ALL_NATIVE_SPAWN_ENTRY.md) for actual outer-entry,
+loop, helper and registered-profile receipts.
+
+On resume, the inherited direct-read coordinator reuses one full checkpoint
+validation and reads model, optimizer, EMA and dataloader files from the
+original immutable checkpoint. Only writable skill/replay/ledger state and
+small JSON metadata get independent working copies. See
+[DIRECT_CHECKPOINT_READ.md](DIRECT_CHECKPOINT_READ.md). Updating this launcher
+does not restart an already running experiment or replace its loaded helpers.
 
 Training and actor/reference logprob microbatch sizes remain explicit Hydra
 overrides. Choose them from the isolated memory, throughput and numerical

@@ -117,6 +117,8 @@ class LaunchTests(unittest.TestCase):
     def test_parallel_submission_selects_service_and_client_driver_together(self):
         spawn_module = types.ModuleType("skill_harness_examples.native_posix_spawn")
         spawn_module.NativeSpawnPolicy = lambda _: None
+        all_module = types.ModuleType("skill_harness_examples.all_native_spawn")
+        all_module.AllNativePolicy = lambda *args: None
         service_module = types.ModuleType("skill_harness_examples.parallel_environment_launcher")
 
         def start(*args):
@@ -124,13 +126,14 @@ class LaunchTests(unittest.TestCase):
             return 56789, True
 
         service_module.start_environment = start
-        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, service_module.__name__: service_module}), \
+        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, all_module.__name__: all_module,
+                                      service_module.__name__: service_module}), \
                 patch.object(module, "launch_receipt", return_value=self.run / "receipt.json"), \
                 patch.object(module.subprocess, "Popen", return_value=types.SimpleNamespace(pid=1234)) as spawn:
             self.assertEqual(self.execute("--parallel-environment"), 0)
         command = spawn.call_args.args[0]
         payload = json.loads(Path(command[3]).read_text())
-        self.assertTrue(payload["command"][1].endswith("train_parallel_client.py"))
+        self.assertTrue(payload["command"][1].endswith("train_all_native_spawn.py"))
         self.assertEqual(payload["environment_pid"], 56789)
         self.assertIn("parallel-service", self.events)
         self.assertNotIn("service", self.events)
@@ -138,15 +141,33 @@ class LaunchTests(unittest.TestCase):
     def test_parallel_resume_selects_direct_checkpoint_reader(self):
         spawn_module = types.ModuleType("skill_harness_examples.native_posix_spawn")
         spawn_module.NativeSpawnPolicy = lambda _: None
+        all_module = types.ModuleType("skill_harness_examples.all_native_spawn")
+        all_module.AllNativePolicy = lambda *args: None
         service_module = types.ModuleType("skill_harness_examples.parallel_environment_launcher")
         service_module.start_environment = lambda *args: (56789, False)
-        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, service_module.__name__: service_module}), \
+        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, all_module.__name__: all_module,
+                                      service_module.__name__: service_module}), \
                 patch.object(module, "launch_receipt", return_value=self.run / "receipt.json"), \
                 patch.object(module.subprocess, "Popen", return_value=types.SimpleNamespace(pid=1234)) as spawn:
             self.assertEqual(self.execute("--parallel-environment", "--resume"), 0)
         payload = json.loads(Path(spawn.call_args.args[0][3]).read_text())
-        self.assertTrue(payload["command"][1].endswith("train_direct_checkpoint.py"))
+        self.assertTrue(payload["command"][1].endswith("train_all_native_spawn.py"))
         self.assertEqual(payload["environment_pid"], 56789)
+
+    def test_missing_curator_helper_refuses_parallel_profile_before_preparation(self):
+        spawn_module = types.ModuleType("skill_harness_examples.native_posix_spawn")
+        spawn_module.NativeSpawnPolicy = lambda _: None
+        all_module = types.ModuleType("skill_harness_examples.all_native_spawn")
+
+        def missing(*args):
+            raise FileNotFoundError("CPU fixture curator helper unavailable")
+
+        all_module.AllNativePolicy = missing
+        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, all_module.__name__: all_module}), \
+                self.assertRaises(FileNotFoundError):
+            self.execute("--parallel-environment", "--prepare-only")
+        self.assertEqual(self.events, [])
+        self.assertFalse(self.run.exists())
 
     def test_spawn_helper_failure_precedes_preparation(self):
         fake = types.ModuleType("skill_harness_examples.native_posix_spawn")
