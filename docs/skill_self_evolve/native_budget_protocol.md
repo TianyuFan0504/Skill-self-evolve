@@ -59,6 +59,22 @@ GRPO group from training. An unknown counterfactual outcome can become
 closure. It creates no `UsageEvent`, marginal utility or curate advantage.
 Failed infrastructure or incomplete cleanup remains fatal/quarantined.
 
+## Frozen credit likelihood capture
+
+Derived EMA and frozen credit route configurations both request token
+logprobs. Frozen counterfactual trajectories never enter the learning buffer;
+their likelihoods support the strict archive-only stopped-tail proof. Without
+that request, vLLM correctly returns `log_probs=None`, which cannot satisfy the
+verifier for a nonempty stopped tail. Requesting these output likelihoods
+preserves the existing greedy reference temperature, seed and token capacity.
+The online solver configuration is copied without mutation.
+
+Curator behavior likelihoods remain mandatory for delayed replay and importance
+ratios. This change does not relax their retention or fabricate probabilities
+for older captures. In particular, earlier frozen captures that omitted
+logprobs retain that absence and are not retrospectively upgraded into timeout
+proofs.
+
 ## Changes and validation scope
 
 `alfworld/server.py` owns the registration, ordered state, action journal and

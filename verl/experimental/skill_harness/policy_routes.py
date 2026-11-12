@@ -229,7 +229,9 @@ def build_route_config(config: Any, spec: PolicyRouteSpec):
         tensor_model_parallel_size=spec.tensor_parallel_size,
         data_parallel_size=1,
         pipeline_model_parallel_size=1,
-        calculate_log_probs=spec.kind == "ema",
+        # Frozen credit tails are archive-only, but strict timeout proof still
+        # preserves their raw token likelihoods. EMA likelihoods train curate.
+        calculate_log_probs=True,
         load_format="dummy" if spec.kind == "ema" else "auto",
         # vLLM 0.24's batch-invariant mode rejects Qwen3.5 GDN_ATTN. Reference
         # reproducibility uses frozen weights, greedy decoding and an explicit

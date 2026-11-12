@@ -194,6 +194,11 @@ class PolicyRoutesTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_topology_and_configuration_are_isolated(self):
         original = config()
+        original["actor_rollout_ref"]["rollout"].update(
+            temperature=1.0, top_p=1.0, top_k=-1, seed=42,
+            prompt_length=4096, response_length=32768, max_model_len=36864,
+            val_kwargs={"temperature": 0.0, "top_p": 1.0, "top_k": -1},
+        )
         saved = copy.deepcopy(original)
         ema = routes.build_route_config(original, curator())
         frozen = routes.build_route_config(original, evaluator())
@@ -202,6 +207,15 @@ class PolicyRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frozen["actor_rollout_ref"]["rollout"]["load_format"], "auto")
         self.assertFalse(ema["actor_rollout_ref"]["rollout"]["full_determinism"])
         self.assertFalse(frozen["actor_rollout_ref"]["rollout"]["full_determinism"])
+        for route_config in (ema, frozen):
+            rollout = route_config["actor_rollout_ref"]["rollout"]
+            self.assertTrue(rollout["calculate_log_probs"])
+            for key in (
+                "temperature", "top_p", "top_k", "seed", "prompt_length", "response_length",
+                "max_model_len", "val_kwargs",
+            ):
+                self.assertEqual(rollout[key], saved["actor_rollout_ref"]["rollout"][key])
+        self.assertFalse(original["actor_rollout_ref"]["rollout"]["calculate_log_probs"])
         self.assertEqual(frozen["actor_rollout_ref"]["model"]["path"], "/models/frozen")
         self.assertIsNone(frozen["actor_rollout_ref"]["model"]["local_path"])
         created = await self.create()
