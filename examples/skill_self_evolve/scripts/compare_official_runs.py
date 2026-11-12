@@ -54,6 +54,17 @@ PARALLEL_SERVER = "examples/skill_self_evolve/scripts/parallel_environment_serve
 PARALLEL_POLICY = "parallel-environment-idempotent-client-v1"
 ENVIRONMENT_POLICY = "sticky-process-environments-durable-io-v1"
 ACTION_PROTOCOL = "alfworld-step-request-id-v1"
+DIRECT_POLICY = "parallel-native-direct-checkpoint-v1"
+DIRECT_RESTORE_POLICY = "single-validation-direct-checkpoint-read-v1"
+DIRECT_IDENTITY_FIELDS = ("policy", "driver_source_commit", "actual_entry", "files", "core_fingerprint_scope")
+DIRECT_FILES = {
+    "entry": "examples/skill_self_evolve/scripts/train_direct_checkpoint.py",
+    "restore_provider": "examples/skill_self_evolve/scripts/direct_checkpoint_restore.py",
+    "parallel_component": PARALLEL_DRIVER,
+    "spawn_component": SPAWN_DRIVER,
+    "checkpoint_core": "verl/experimental/skill_harness/joint_checkpoint.py",
+    "trainer_core": "verl/experimental/skill_harness/joint_trainer.py",
+}
 TASK_PROFILE_FIELD = (
     "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path"
 )
@@ -430,6 +441,7 @@ class Stage:
         self.read_parquet, self.expected_fingerprint = read_parquet, expected_fingerprint
         self.parquets, self.cases, self.allowed_differences = {}, {}, []
         self.parallel_extension, self.parallel_evidence = None, None
+        self.direct_observations, self.direct_evidence = [], None
         self.parallel_test_services, self.parallel_test_evidence = {}, {}
         self.setup_extension = None
         self.initialized_evidence = None
@@ -646,7 +658,96 @@ class Stage:
             "Parallel environment capability/topology/budget/source identity differs",
         )
 
+    def verify_direct_identity(self, value):
+        identity = {key: value[key] for key in DIRECT_IDENTITY_FIELDS}
+        need(identity["policy"] == DIRECT_POLICY and not self.base, "Unsupported direct-checkpoint execution policy")
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        commit = identity["driver_source_commit"]
+        need(
+            isinstance(commit, str)
+            and re.fullmatch(r"[0-9a-f]{40,64}", commit)
+            and identity["actual_entry"] == str(source / DIRECT_FILES["entry"])
+            and identity["core_fingerprint_scope"]
+            == "Unchanged legacy core; direct-restore implementation is identified separately",
+            "Direct checkpoint entry/source scope differs",
+        )
+        exact_keys(identity["files"], DIRECT_FILES, "Direct checkpoint implementation sources")
+        for name, relative in DIRECT_FILES.items():
+            ref = identity["files"][name]
+            exact_keys(ref, ("path", "sha256"), "Direct checkpoint " + name + " source")
+            self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+        need(runtime_blobs(source, commit) == self.source_blobs, "Direct checkpoint entry changed runtime sources")
+        return identity
+
+    def verify_direct_observation(self, value, path):
+        need(
+            path == path.resolve()
+            and path.parent == self.root / "driver_runs"
+            and re.fullmatch(r"[0-9]+\.direct_checkpoint\.json", path.name),
+            "Direct prelaunch observation escaped its explicit run binding",
+        )
+        exact_keys(
+            value,
+            (
+                "schema_version",
+                "kind",
+                *DIRECT_IDENTITY_FIELDS,
+                "observed_at_ns",
+                "imports",
+                "parallel_component_ref",
+                "spawn_component_identity",
+                "client_adapter",
+                "environment_health",
+                "environment_config_ref",
+                "config",
+                "original_training_manifest_preserved",
+                "not_a_post_init_or_served_model_receipt",
+            ),
+            "Direct checkpoint prelaunch component observation",
+        )
+        identity = self.verify_direct_identity(value)
+        need(
+            value["kind"] == "prelaunch_direct_checkpoint_parallel_components"
+            and value["original_training_manifest_preserved"] is True
+            and value["parallel_component_ref"] == identity["files"]["parallel_component"]
+            and value["spawn_component_identity"]["driver_source_commit"] == identity["driver_source_commit"],
+            "Direct checkpoint prelaunch component bindings differ",
+        )
+        for key in ("verl_source", "verl_version", "uni_agent_source", "uni_agent_adapter_sha256"):
+            need(
+                value["imports"].get(key) == self.manifest["import_provenance"].get(key),
+                "Direct checkpoint prelaunch imports differ",
+            )
+        # Reuse the exact existing component checks without claiming that the
+        # old outer entry was executed. The retained observation stays direct.
+        common = {
+            key: value[key]
+            for key in (
+                "schema_version",
+                "observed_at_ns",
+                "client_adapter",
+                "environment_health",
+                "environment_config_ref",
+                "not_a_post_init_or_served_model_receipt",
+            )
+        }
+        component = {
+            **common,
+            "kind": "prelaunch_parallel_environment_client_observation",
+            "spawn_extension": value["spawn_component_identity"],
+            "driver_path": value["parallel_component_ref"]["path"],
+            "driver_sha256": value["parallel_component_ref"]["sha256"],
+            "effective_config_before_spawn_entry": value["config"],
+            "core_fingerprint_scope": value["core_fingerprint_scope"],
+            "hash_link_scope": "Explicit direct-entry parallel component reference",
+        }
+        checked = self.verify_parallel_observation(component, path)
+        checked.update(observation=value, direct_entry=identity)
+        return checked
+
     def verify_parallel_observation(self, value, path):
+        if value.get("kind") == "prelaunch_direct_checkpoint_parallel_components":
+            return self.verify_direct_observation(value, path)
         prospective = value.get("kind") == "prospective_parallel_environment_runtime_identity"
         common = (
             "schema_version",
@@ -832,14 +933,51 @@ class Stage:
         candidates = (
             [self.root / PARALLEL_EXPECTED_RECEIPT]
             if self.base
-            else sorted((self.root / "driver_runs").glob("*.parallel_client.json"))
+            else sorted(
+                [
+                    *(self.root / "driver_runs").glob("*.parallel_client.json"),
+                    *(self.root / "driver_runs").glob("*.direct_checkpoint.json"),
+                ]
+            )
         )
-        matches = []
+        observed = []
         for path in candidates:
             if path.is_file():
                 value = self.reader.json(path)
                 if value.get("client_adapter", {}).get("task_profile", {}).get("sha256") == expected_hash:
-                    matches.append((path, self.verify_parallel_observation(value, path)))
+                    observed.append((path, value))
+        direct = [(path, value) for path, value in observed if path.name.endswith(".direct_checkpoint.json")]
+        # A direct continuation establishes its own outer-entry/service chain.
+        # Historical parallel observers are not substitutes or dependencies.
+        if direct:
+            need(
+                all(value.get("kind") == "prelaunch_direct_checkpoint_parallel_components" for _, value in direct),
+                "Unknown direct checkpoint observation kind",
+            )
+            lifecycle = self.reader.json(self.path / "lifecycle.json")
+            seal_ref = lifecycle["checkpoint_seal"]
+            exact_keys(seal_ref, ("path", "sha256"), "Direct lifecycle seal reference")
+            seal_path = Path(seal_ref["path"])
+            need(
+                seal_path == seal_path.resolve()
+                and seal_path.name == "checkpoint_seal.json"
+                and seal_path.parent.parent == self.root / "evaluation_lifecycle"
+                and self.reader.hash_file(seal_path) == seal_ref["sha256"],
+                "Direct lifecycle selection lacks its explicit seal binding",
+            )
+            component_ref = self.reader.json(seal_path)["initialized_receipt_ref"]
+            active = self.direct_initialized_for(component_ref, require_observation=False)
+            need(active is not None, "Direct observation lacks the lifecycle-linked initialized entry")
+            active_identity = active[2]
+            current_config_hash = self.reader.hash_file(self.root / "runtime/environment.json")
+            observed = [
+                (path, value)
+                for path, value in direct
+                if {key: value.get(key) for key in DIRECT_IDENTITY_FIELDS} == active_identity
+                and value.get("environment_config_ref", {}).get("sha256") == current_config_hash
+            ]
+            need(observed, "Direct startup lacks matching active source/service observations")
+        matches = [(path, self.verify_parallel_observation(value, path)) for path, value in observed]
         if not matches:
             need(
                 not (self.root / "client_adapter").exists(), "Parallel Task artifacts lack matching runtime observation"
@@ -848,6 +986,7 @@ class Stage:
         signatures = [parallel_signature(value) for _, value in matches]
         need(all(value == signatures[0] for value in signatures), "Conflicting matching parallel observations")
         self.parallel_extension = matches[0][1]
+        self.direct_observations = [(path, value) for path, value in matches if "direct_entry" in value]
         self.parallel_evidence = [
             {
                 "path": str(path),
@@ -938,6 +1077,155 @@ class Stage:
             "scope": "Retained test-only service configuration matched to each private budget registration",
         }
 
+    def direct_initialized_for(self, component_ref, *, require_observation=True):
+        candidates = []
+        for path in sorted((self.root / "driver_runs").glob("*.direct_checkpoint.initialized.json")):
+            value = self.reader.json(path)
+            if value.get("spawn_component_initialized_ref") == component_ref:
+                candidates.append((path, value))
+        if not self.direct_observations and not candidates:
+            return None
+        need(
+            len(candidates) == 1 and (self.direct_observations or not require_observation),
+            "Direct entry lacks its matching initialized chain",
+        )
+        path, value = candidates[0]
+        need(
+            path == path.resolve() and re.fullmatch(r"[0-9]+\.direct_checkpoint\.initialized\.json", path.name),
+            "Direct initialized receipt escaped its explicit run binding",
+        )
+        exact_keys(
+            value,
+            (
+                "schema_version",
+                "kind",
+                *DIRECT_IDENTITY_FIELDS,
+                "effective_config_after_trainer_init",
+                "original_training_manifest_sha256",
+                "restore_receipt_ref",
+                "spawn_component_initialized_ref",
+                "restored_checkpoint",
+                "restore_policy",
+                "core_version_binding",
+            ),
+            "Initialized direct checkpoint entry",
+        )
+        identity = self.verify_direct_identity(value)
+        need(
+            value["schema_version"] == 1
+            and value["kind"] == "initialized_direct_checkpoint_entry"
+            and value["restore_policy"] == DIRECT_RESTORE_POLICY
+            and (
+                not require_observation
+                or any(observation["direct_entry"] == identity for _, observation in self.direct_observations)
+            ),
+            "Direct initialized entry differs from its actual prelaunch sources",
+        )
+        return path, value, identity
+
+    def check_direct_restore(self, direct, initialized, seal, source_payload, expected_prelaunch):
+        path, value, identity = direct
+        need(
+            value["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"]
+            and value["restored_checkpoint"] == initialized["restored_checkpoint"]
+            and value["effective_config_after_trainer_init"] == initialized["effective_config_after_trainer_init"]
+            and value["core_version_binding"] == source_payload["spec"]["versions"],
+            "Direct and spawn initialized checkpoint/configuration proofs disagree",
+        )
+        need(
+            any(
+                observation["direct_entry"] == identity and observation["observation"]["config"] == expected_prelaunch
+                for _, observation in self.direct_observations
+            ),
+            "Direct initialized profile does not follow its recorded prelaunch configuration",
+        )
+        ref = value["restore_receipt_ref"]
+        exact_keys(ref, ("path", "sha256"), "Direct restore receipt reference")
+        mutable = Path(seal["store_root"]).parent
+        receipt_path = mutable / "DIRECT_READ_RESTORE.json"
+        need(
+            ref["path"] == str(receipt_path) and self.reader.hash_file(receipt_path) == ref["sha256"],
+            "Direct restore receipt path/hash differs",
+        )
+        receipt = self.reader.json(receipt_path)
+        exact_keys(
+            receipt,
+            (
+                "schema_version",
+                "policy",
+                "manifest_id",
+                "checkpoint_dir",
+                "mutable_state_root",
+                "online_source",
+                "ema_source",
+                "training_state_sources",
+                "full_validation_passes",
+                "ema_files_copied",
+                "copied_components",
+                "mutable_copy_bytes",
+                "source_guard",
+                "source_guard_sha256",
+                "restore_seconds_after_validation",
+            ),
+            "Direct read restore evidence",
+        )
+        restored = initialized["restored_checkpoint"]
+        checkpoint = Path(restored["checkpoint_dir"])
+        need(
+            receipt["schema_version"] == 1
+            and receipt["policy"] == DIRECT_RESTORE_POLICY
+            and receipt["manifest_id"] == restored["manifest_id"]
+            and receipt["checkpoint_dir"] == str(checkpoint)
+            and receipt["mutable_state_root"] == str(mutable)
+            and receipt["online_source"] == str(checkpoint / "actor")
+            and receipt["ema_source"] == str(checkpoint / "joint_state/ema")
+            and receipt["training_state_sources"] == [str(checkpoint / "data.pt")]
+            and type(receipt["full_validation_passes"]) is int
+            and receipt["full_validation_passes"] == 1
+            and type(receipt["ema_files_copied"]) is int
+            and receipt["ema_files_copied"] == 0
+            and receipt["copied_components"] == ["skill_store", "replay", "ledger"],
+            "Direct restore source paths, validation count or copy policy differs",
+        )
+        copied = sum(
+            item["size"]
+            for relative, item in source_payload["files"].items()
+            if relative in ("joint_state/controller.json", "joint_state/evaluation.json")
+            or any(relative.startswith("joint_state/" + name + "/") for name in receipt["copied_components"])
+        )
+        need(
+            type(receipt["mutable_copy_bytes"]) is int
+            and receipt["mutable_copy_bytes"] == copied
+            and receipt["source_guard"]
+            == "manifest and file metadata/inventory before/after validation and before loaders"
+            and isinstance(receipt["source_guard_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", receipt["source_guard_sha256"])
+            and INDEX.finite(receipt["restore_seconds_after_validation"])
+            and receipt["restore_seconds_after_validation"] >= 0
+            and self.reader.json(mutable / "RESTORE_COMPLETE.json") == {"manifest_id": restored["manifest_id"]}
+            and not (mutable / "ema").exists(),
+            "Direct restore completion, copy inventory or source guard evidence differs",
+        )
+        for name in receipt["copied_components"]:
+            destination = mutable / name
+            need(destination.is_dir() and not destination.is_symlink(), "Missing independent mutable component")
+            for source in (checkpoint / "joint_state" / name).rglob("*"):
+                relative = source.relative_to(checkpoint / "joint_state" / name)
+                target = destination / relative
+                if source.is_file() and target.exists():
+                    need(not target.is_symlink() and not source.samefile(target), "Mutable state aliases checkpoint")
+        self.direct_evidence = {
+            "initialized_receipt": {"path": str(path), "sha256": self.reader.hash_file(path)},
+            "spawn_component_initialized_ref": value["spawn_component_initialized_ref"],
+            "restore_receipt_ref": ref,
+            "source_checkpoint": restored,
+            "entry_identity": identity,
+            "restore_policy": receipt["policy"],
+            "full_validation_passes": 1,
+            "ema_files_copied": 0,
+            "scope": "Published operational entry and linked restore records; unchanged inference component signature",
+        }
+
     def check_initialized_setup(self, extension, ref, seal, final_spec):
         spawn = extension.get("policy") == SPAWN_POLICY
         extension = self.verify_setup_identity(extension, require_loaded=spawn)
@@ -954,6 +1242,7 @@ class Stage:
         )
         need(self.reader.hash_file(path) == ref["sha256"], "Initialized setup receipt hash differs")
         initialized = self.reader.json(path)
+        direct = self.direct_initialized_for(ref)
         spawn_fields = (
             ("counterfactual_loop_class", "event_loop_policy_class", "primary_runner_policy_install") if spawn else ()
         )
@@ -994,18 +1283,39 @@ class Stage:
         restored = initialized["restored_checkpoint"]
         exact_keys(restored, ("checkpoint_dir", "manifest_id", "spec"), "Explicit source checkpoint")
         checkpoint = Path(restored["checkpoint_dir"])
+        source_step = restored["spec"]["optimizer_step"] if direct else 4
         need(
-            checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_4"
-            and checkpoint == checkpoint.resolve(),
-            "Safe-setup continuation did not bind retained source checkpoint4",
+            type(source_step) is int
+            and 1 <= source_step <= 64
+            and (not direct or restored["spec"]["global_step"] == source_step),
+            "Unsupported direct source checkpoint clock/cursor",
         )
-        _, source_spec = self.verified_checkpoint(checkpoint, manifest_id=restored["manifest_id"], clock=4, cursor=4)
+        need(
+            checkpoint == Path(self.config["trainer"]["default_local_dir"]) / f"global_step_{source_step}"
+            and checkpoint == checkpoint.resolve(),
+            "Continuation did not bind its explicit retained source checkpoint",
+        )
+        source_payload, source_spec = self.verified_checkpoint(
+            checkpoint, manifest_id=restored["manifest_id"], clock=source_step, cursor=source_step
+        )
         need(
             source_spec.to_dict() == restored["spec"]
             and dict(source_spec.versions) == dict(final_spec.versions)
             and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
-            "Source checkpoint4 does not preserve final core/protocol compatibility",
+            "Source checkpoint does not preserve final core/protocol compatibility",
         )
+        if direct:
+            need(
+                source_spec.compatibility() == final_spec.compatibility()
+                and (
+                    source_step < 64
+                    and seal["seal_origin"] == "final_checkpoint_saved_after_quiescence"
+                    or source_step == 64
+                    and seal["seal_origin"] == "restored_complete_final_checkpoint"
+                    and restored["manifest_id"] == seal["manifest_id"]
+                ),
+                "Direct continuation source/final seal compatibility differs",
+            )
         effective = initialized["effective_config_after_trainer_init"]
         expected = copy.deepcopy(self.config)
         if self.parallel_extension is not None:
@@ -1035,7 +1345,8 @@ class Stage:
         sampler.update(path=str(source / SETUP_DRIVER), name="ResilientReplayBuffer")
         store = Path(seal["store_root"])
         need(
-            re.fullmatch(r"step_4_[0-9a-f]{32}", store.parent.name), "Restored store is not bound to source checkpoint4"
+            re.fullmatch(rf"step_{source_step}_[0-9a-f]{{32}}", store.parent.name),
+            "Restored store is not bound to its explicit source checkpoint",
         )
         for key, value in (
             ("store_root", store),
@@ -1047,9 +1358,12 @@ class Stage:
         need(field(effective, "trainer.resume_mode") in ("auto", "resume_path"), "Unknown initialized resume mode")
         set_existing_field(expected, "trainer.resume_mode", field(effective, "trainer.resume_mode"))
         resume_from = optional_field(effective, "trainer.resume_from_path")
-        need(resume_from is None or resume_from == str(checkpoint), "Initialized resume path does not bind checkpoint4")
+        need(resume_from is None or resume_from == str(checkpoint), "Initialized resume path differs from source")
         if "resume_from_path" in expected["trainer"]:
             set_existing_field(expected, "trainer.resume_from_path", resume_from)
+        expected_prelaunch = copy.deepcopy(expected)
+        for name in ("store_root", "replay_root", "ledger_root"):
+            expected_prelaunch["skill_harness"][name] = self.config["skill_harness"][name]
         if optional_field(expected, "data.gen_batch_size") in (None, 1):
             need(
                 optional_field(effective, "data.gen_batch_size") == 1
@@ -1089,6 +1403,8 @@ class Stage:
             "restored_checkpoint": restored,
             "effective_config_sha256": INDEX.digest(effective),
         }
+        if direct:
+            self.check_direct_restore(direct, initialized, seal, source_payload, expected_prelaunch)
 
     def check_lifecycle_binding(self):
         """Bind a resumed final stage to its explicit, successful sealed-store receipt."""
@@ -2053,7 +2369,13 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
         if trained.initialized_evidence:
             report["explicit_allowed_differences"].append(
                 "Resumed original manifest is preserved; inference uses only its verified initialized32/safe-runner "
-                "profile and explicit checkpoint4/store bindings, matched to the base's original actual profile."
+                "profile and explicit source-checkpoint/store bindings, matched to the base's original actual profile."
+            )
+        if trained.direct_evidence:
+            report["explicit_allowed_differences"].append(
+                "The trained direct-checkpoint entry changes only verified restore operations; its published "
+                "outer/provider sources and source checkpoint are retained separately from the common "
+                "parallel/spawn inference signature. The zero-epoch base does not execute restore operations."
             )
         if base.prospective_runtime_evidence:
             report["explicit_allowed_differences"].append(
@@ -2099,6 +2421,7 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
                 "trained": trained.parallel_test_evidence,
             },
         }
+        report["direct_checkpoint_restore_evidence"] = trained.direct_evidence
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:
         report["reasons"].append(f"{type(error).__name__}: {error}")
     changed = reader.changed()

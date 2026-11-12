@@ -176,6 +176,53 @@ The deferred launch plan remains gated on the main driver's successful64-update
 completion, its COMPLETE checkpoint and finished sealed274-case final stage.
 This offline comparer does not execute that plan or start a baseline.
 
+## Direct-checkpoint continuation evidence
+
+A run resumed through `train_direct_checkpoint.py` retains its actual outer
+entry identity. The comparer reads `*.direct_checkpoint.json` component
+observations and requires a matching `*.direct_checkpoint.initialized.json`
+record linked to the lifecycle's original spawn initialized receipt. An older
+parallel-entry observation cannot replace that initialized chain.
+Matching Direct observations take precedence over retained older parallel
+outer-entry observations. The lifecycle-linked initialized record selects the
+active published Direct identity; its observations must match the current
+train-service configuration hash. Older Direct records tied to another
+initialized chain or service are retained as history. Conflicting matching
+active observations remain unsupported; no newest-file heuristic selects a
+startup.
+
+The entry and restore provider, unchanged parallel/spawn components, and both
+checkpoint/trainer core files must match their published Git objects and
+retained file hashes. Their complete enumerated runtime source inventory must
+remain unchanged. The initialized direct and spawn records must agree on the
+effective configuration, preserved original manifest, source checkpoint and
+core versions. The recorded prelaunch config must lead to that configuration
+through only the existing constructor normalizations and explicit restore
+bindings.
+
+This route uses its explicitly recorded source checkpoint N, rather than
+assuming checkpoint4. The supported current profile has matching optimizer
+and global clocks, with 1 <= N < 64 for continued training. Source64 is allowed
+only for a final-only restore sealed as `restored_complete_final_checkpoint`.
+The source COMPLETE publication and files are verified, and its full
+world/layout/version/evaluator/protocol compatibility must equal the final
+checkpoint. The writable root must name the same source step.
+
+The linked `DIRECT_READ_RESTORE.json` and `RESTORE_COMPLETE.json` must bind that
+source and writable root. The original actor, EMA and `data.pt` paths, one full
+validation pass, zero copied EMA files, three copied mutable components and
+their original byte total are checked. Existing mutable files must not alias
+source checkpoint files. The source guard and elapsed time are recorded
+operational evidence; the comparer does not claim to have observed the original
+startup's disk operations or measured a speedup.
+
+The common inference signature continues to compare the unchanged parallel
+producer, request client, environment server, interpreter, spawn helper,
+generated assets and generation profile. The deferred zero-epoch base does not
+need to execute a restore entry. Direct entry/provider identity is reported
+separately under `direct_checkpoint_restore_evidence`; this exception permits
+the verified operational composition only, not arbitrary profile migrations.
+
 ## Backend evidence tiers
 
 A genuine owned vLLM Worker kernel-selection line is direct log evidence. When
@@ -222,4 +269,5 @@ engineering evidence, not actual ALFWorld results:
 ```bash
 python examples/skill_self_evolve/tests/test_compare_official_runs.py -q
 python examples/skill_self_evolve/tests/test_compare_parallel_profile.py -q
+python examples/skill_self_evolve/tests/test_compare_direct_checkpoint.py -q
 ```
