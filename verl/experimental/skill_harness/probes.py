@@ -10,6 +10,7 @@ All generated token trajectories and failed branches remain experiment artifacts
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import inspect
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .alfworld.accounts import POLICY_VERSION as ACCOUNT_POLICY_VERSION
+from .alfworld.accounts import AccountIsolationError, AccountPool
 from .alfworld.terminal_guard import _validated_state
 from .context import CONTEXT_BUILDER_VERSION, _local_tokenizer, _skill_block, _user_index, pin_prompt_group
 from .credit import CreditProtocol, EvaluationOutcome, UsageEvent
@@ -354,14 +357,19 @@ def probe_physical_id(request):
     return "probe_" + hashlib.sha256(identity.encode()).hexdigest()
 
 
-def probe_group_id(request):
-    return probe_physical_id(request).removeprefix("probe_")
+def probe_group_id(request, run_root=None):
+    physical = probe_physical_id(request).removeprefix("probe_")
+    if run_root is None:
+        return physical
+    return hashlib.sha256(
+        json.dumps([str(Path(run_root).resolve()), physical], separators=(",", ":")).encode()
+    ).hexdigest()
 
 
-def _verify_paired_workdir(capture, request, *, loaded, output):
+def _verify_paired_workdir(capture, request, *, loaded, output, run_root=None):
     info = capture.get("extra_info", {})
     manifest = info.get("paired_workdir", {})
-    group = probe_group_id(request)
+    group = probe_group_id(request, run_root)
     variant = "with_skill" if loaded else "without_skill"
     workdir = str(Path("/tmp/alfworld-skill-episodes") / ("credit_" + group))
     if (
@@ -538,7 +546,7 @@ async def native_probe_branch(
             await gateway_manager.abort_session(session_id)
 
 
-def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, frozen_attestation):
+def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, frozen_attestation, expected_account):
     task_id, metadata = _task_identity(sample_fields)
     if capture.get("finished") is not True or capture.get("reward") not in (0.0, 1.0):
         raise ProbeNotObserved("Probe did not finish with an authoritative binary environment result")
@@ -563,6 +571,16 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
         raise ProbeNotObserved("Native Gateway returned no token trajectory")
     if not _backend_drained(capture):
         raise ProbeNotObserved("Counterfactual backend drain is unknown, pending, or not bound to this exact attempt")
+    account = info.get("account_isolation", {})
+    if (
+        not isinstance(account, dict)
+        or account.get("policy_version") != ACCOUNT_POLICY_VERSION
+        or account.get("status") != "attempt_closed"
+        or any(account.get(key) != expected_account.get(key) for key in ("lease_id", "uid", "gid", "name", "owner"))
+        or account.get("backend_drained") is not True
+        or account.get("uid_drained") is not True
+    ):
+        raise ProbeNotObserved("A native pair lacks its exact successfully closed UID isolation lease")
     attestation = validate_frozen_attestation(
         capture.get("policy_attestation"), evaluator_version=request.evaluator_version
     )
@@ -572,7 +590,7 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     output = Path(info["episode_output_dir"]).resolve()
     if not output.is_relative_to(Path(artifact_root).resolve()):
         raise ValueError("Probe episode artifacts escaped this experiment")
-    _verify_paired_workdir(capture, request, loaded=loaded, output=output)
+    _verify_paired_workdir(capture, request, loaded=loaded, output=output, run_root=metadata["run_dir"])
     engine = json.loads((output / "engine-result.json").read_text())
     if (
         engine["game_sha256"] != metadata["game_sha256"]
@@ -604,6 +622,48 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     )
 
 
+class _PairAccountScope:
+    def __init__(self, pool, ref, public):
+        self.pool, self.ref, self.public = pool, ref, public
+        self.closed = ref is None
+
+    def complete(self):
+        if not self.closed:
+            self.pool.finish(self.ref)
+            self.closed = True
+
+
+@contextlib.contextmanager
+def _pair_account_scope(root, *, request, run_root, pool):
+    group = probe_group_id(request, run_root)
+    paths = [root / name / "native-capture.json" for name in ("with_skill", "without_skill")]
+    existing = [path.is_file() for path in paths]
+    if all(existing):
+        identities = [_read_payload(path).get("extra_info", {}).get("account_isolation", {}) for path in paths]
+        keys = ("lease_id", "uid", "gid", "name", "owner")
+        if any(identities[0].get(key) != identities[1].get(key) for key in keys):
+            raise ProbeNotObserved("Cached pair branches used different UID leases")
+        try:
+            pool.historical_pair(identities[0], run_root=run_root, group=group)
+        except (AccountIsolationError, KeyError, OSError, ValueError) as error:
+            raise ProbeNotObserved("Cached native pair has no complete historical UID isolation proof") from error
+        scope = _PairAccountScope(pool, None, {key: identities[0].get(key) for key in keys})
+    elif any(existing) or any((root / name / "started.json").exists() for name in ("with_skill", "without_skill")):
+        raise ProbeNotObserved("A partial UID pair requires explicit host reconciliation; never silently resample")
+    else:
+        ref = pool.acquire(run_root=run_root, scope_id=group, kind="pair")
+        scope = _PairAccountScope(pool, ref, pool.public(ref))
+    try:
+        yield scope
+    finally:
+        if not scope.closed:
+            # This includes failure in the first variant: safely closed started
+            # attempts can release without waiting for an unstarted second one.
+            # Any missing drain/archive evidence quarantines and raises instead.
+            pool.finish(scope.ref, abandoned=True)
+            scope.closed = True
+
+
 async def collect_counterfactual_probe(
     *,
     request: ProbeRequest,
@@ -616,6 +676,7 @@ async def collect_counterfactual_probe(
     frozen_attestation,
     run_branch=native_probe_branch,
     decode_prompt_ids=None,
+    _account_pool=None,
 ):
     """Return one paired event; the ledger performs durable causal settlement.
 
@@ -648,7 +709,7 @@ async def collect_counterfactual_probe(
         "physical_probe_id": physical_id,
         "policy_attestation": frozen_attestation,
         "paired_workdir_protocol": "paired_empty_workdir_v1",
-        "credit_probe_group": probe_group_id(request),
+        "credit_probe_group": probe_group_id(request, artifact_root),
     }
     # The lock is acquired nonblocking: a duplicated orchestrator must not hang
     # its event loop behind another in-flight copy of the same native session.
@@ -673,105 +734,113 @@ async def collect_counterfactual_probe(
                 pair_attestation = previous_attestation
                 intent["policy_attestation"] = previous_attestation
         _publish_immutable(intent_path, intent)
-        outcomes, captures = {}, {}
-        observed_clocks = {}
-        workspace_provenance = {}
-        order = [True, False]
-        if int(hashlib.sha256(request.probe_id.encode()).hexdigest()[:2], 16) % 2:
-            order.reverse()
-        for loaded in order:
-            name = "with_skill" if loaded else "without_skill"
-            branch_root = root / name
-            branch_root.mkdir(exist_ok=True, mode=0o700)
-            captured = branch_root / "native-capture.json"
-            if captured.exists():
-                capture = _read_payload(captured)
-            else:
-                started = branch_root / "started.json"
-                if started.exists():
-                    raise ProbeNotObserved("An uncaptured native branch requires explicit reconciliation")
-                fields = copy.deepcopy(sample_fields)
-                fields["uid"] = physical_id + "_" + name
-                fields["tools_kwargs"]["task"]["metadata"].update(
-                    role="counterfactual_probe",
-                    credit_probe_group=probe_group_id(request),
-                    credit_probe_variant=name,
+        with _pair_account_scope(
+            root, request=request, run_root=artifact_root, pool=_account_pool or AccountPool()
+        ) as account_scope:
+            outcomes, captures = {}, {}
+            observed_clocks = {}
+            workspace_provenance = {}
+            order = [True, False]
+            if int(hashlib.sha256(request.probe_id.encode()).hexdigest()[:2], 16) % 2:
+                order.reverse()
+            for loaded in order:
+                name = "with_skill" if loaded else "without_skill"
+                branch_root = root / name
+                branch_root.mkdir(exist_ok=True, mode=0o700)
+                captured = branch_root / "native-capture.json"
+                if captured.exists():
+                    capture = _read_payload(captured)
+                else:
+                    started = branch_root / "started.json"
+                    if started.exists():
+                        raise ProbeNotObserved("An uncaptured native branch requires explicit reconciliation")
+                    fields = copy.deepcopy(sample_fields)
+                    fields["uid"] = physical_id + "_" + name
+                    fields["tools_kwargs"]["task"]["metadata"].update(
+                        role="counterfactual_probe",
+                        credit_probe_group=probe_group_id(request, artifact_root),
+                        host_account_lease=account_scope.ref,
+                        credit_probe_variant=name,
+                    )
+                    settings = dict(loading, enabled=True)
+                    settings["snapshot_id"] = request.with_snapshot_id if loaded else request.without_snapshot_id
+                    fields = pin_prompt_group(
+                        fields,
+                        loading=settings,
+                        store_root=store.root,
+                        global_step=request.global_step,
+                        partition_id="credit",
+                        pin_directory=Path(artifact_root) / "context_groups",
+                    )
+                    _publish_immutable(started, {"started_at": time.time(), "session_id": fields["uid"]})
+                    capture = await run_branch(
+                        gateway_manager=gateway_manager,
+                        session_id=fields["uid"],
+                        sample_fields=fields,
+                        artifact_dir=branch_root,
+                        task_config_path=task_config_path,
+                        frozen_attestation=frozen_attestation,
+                    )
+                    _publish_immutable(captured, capture)
+                outcomes[name] = _verify_branch(
+                    capture,
+                    request=request,
+                    sample_fields=sample_fields,
+                    loaded=loaded,
+                    artifact_root=artifact_root,
+                    frozen_attestation=pair_attestation,
+                    expected_account=account_scope.public,
                 )
-                settings = dict(loading, enabled=True)
-                settings["snapshot_id"] = request.with_snapshot_id if loaded else request.without_snapshot_id
-                fields = pin_prompt_group(
-                    fields,
-                    loading=settings,
-                    store_root=store.root,
-                    global_step=request.global_step,
-                    partition_id="credit",
-                    pin_directory=Path(artifact_root) / "context_groups",
-                )
-                _publish_immutable(started, {"started_at": time.time(), "session_id": fields["uid"]})
-                capture = await run_branch(
-                    gateway_manager=gateway_manager,
-                    session_id=fields["uid"],
-                    sample_fields=fields,
-                    artifact_dir=branch_root,
-                    task_config_path=task_config_path,
-                    frozen_attestation=frozen_attestation,
-                )
-                _publish_immutable(captured, capture)
-            outcomes[name] = _verify_branch(
-                capture,
-                request=request,
-                sample_fields=sample_fields,
-                loaded=loaded,
-                artifact_root=artifact_root,
-                frozen_attestation=pair_attestation,
+                captures[name] = capture
+                observed_clocks[name] = _observed_frozen_clock(capture)
+                workspace_provenance[name] = capture["extra_info"]["paired_workdir"]
+            if observed_clocks["with_skill"] != observed_clocks["without_skill"]:
+                raise ValueError("Paired branches changed the frozen evaluator's observed weight clock")
+            with_workdir, without_workdir = (workspace_provenance[name] for name in ("with_skill", "without_skill"))
+            if (
+                with_workdir["workdir"] != without_workdir["workdir"]
+                or with_workdir["codex_homes"] == without_workdir["codex_homes"]
+                or any(with_workdir[key] != without_workdir[key] for key in ("host_uid", "agent_uid", "agent_gid"))
+            ):
+                raise ValueError("Counterfactual branches must share an empty cwd and use distinct native Codex homes")
+            _publish_immutable(
+                root / "paired-workdirs.json",
+                {
+                    "schema_version": 1,
+                    "credit_probe_group": probe_group_id(request, artifact_root),
+                    "physical_probe_id": physical_id,
+                    "branches": workspace_provenance,
+                },
             )
-            captures[name] = capture
-            observed_clocks[name] = _observed_frozen_clock(capture)
-            workspace_provenance[name] = capture["extra_info"]["paired_workdir"]
-        if observed_clocks["with_skill"] != observed_clocks["without_skill"]:
-            raise ValueError("Paired branches changed the frozen evaluator's observed weight clock")
-        with_workdir, without_workdir = (workspace_provenance[name] for name in ("with_skill", "without_skill"))
-        if (
-            with_workdir["workdir"] != without_workdir["workdir"]
-            or with_workdir["codex_homes"] == without_workdir["codex_homes"]
-            or any(with_workdir[key] != without_workdir[key] for key in ("host_uid", "agent_uid", "agent_gid"))
-        ):
-            raise ValueError("Counterfactual branches must share an empty cwd and use distinct native Codex homes")
-        _publish_immutable(
-            root / "paired-workdirs.json",
-            {
-                "schema_version": 1,
-                "credit_probe_group": probe_group_id(request),
-                "physical_probe_id": physical_id,
-                "branches": workspace_provenance,
-            },
-        )
-        try:
-            input_audit = verify_pair_inputs(
-                captures,
-                request=request,
-                store=store,
-                loading=loading,
-                decode_prompt_ids=decode_prompt_ids,
+            try:
+                input_audit = verify_pair_inputs(
+                    captures,
+                    request=request,
+                    store=store,
+                    loading=loading,
+                    decode_prompt_ids=decode_prompt_ids,
+                )
+            except ProbeNotObserved as error:
+                _publish_immutable(root / "paired-input-audit.json", error.input_audit)
+                raise
+            _publish_immutable(root / "paired-input-audit.json", input_audit)
+            if outcomes["with_skill"].environment_state_hash != outcomes["without_skill"].environment_state_hash:
+                raise ProbeNotObserved("Paired native branches started from different environment states")
+            account_scope.complete()  # No UsageEvent exists until UID/file/backend closure is durable.
+            completed = root / "paired-event.json"
+            previous = _read_payload(completed) if completed.exists() else None
+            event = UsageEvent(
+                event_id="event_" + physical_id,
+                window_id=request.window_id,
+                curate_record_id=request.curate_record_id,
+                skill_ref=request.skill_ref,
+                probe_id=request.probe_id,
+                protocol_id=request.protocol.protocol_id,
+                with_skill=outcomes["with_skill"],
+                without_skill=outcomes["without_skill"],
+                occurred_at=previous["occurred_at"] if previous else time.time(),
             )
-        except ProbeNotObserved as error:
-            _publish_immutable(root / "paired-input-audit.json", error.input_audit)
-            raise
-        _publish_immutable(root / "paired-input-audit.json", input_audit)
-        completed = root / "paired-event.json"
-        previous = _read_payload(completed) if completed.exists() else None
-        event = UsageEvent(
-            event_id="event_" + physical_id,
-            window_id=request.window_id,
-            curate_record_id=request.curate_record_id,
-            skill_ref=request.skill_ref,
-            probe_id=request.probe_id,
-            protocol_id=request.protocol.protocol_id,
-            with_skill=outcomes["with_skill"],
-            without_skill=outcomes["without_skill"],
-            occurred_at=previous["occurred_at"] if previous else time.time(),
-        )
-        if event.with_skill.environment_state_hash != event.without_skill.environment_state_hash:
-            raise ProbeNotObserved("Paired native branches started from different environment states")
-        _publish_immutable(root / "paired-event.json", event.to_dict())
-        return event
+            if event.with_skill.environment_state_hash != event.without_skill.environment_state_hash:
+                raise ProbeNotObserved("Paired native branches started from different environment states")
+            _publish_immutable(root / "paired-event.json", event.to_dict())
+            return event

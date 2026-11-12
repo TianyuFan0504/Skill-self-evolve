@@ -10,6 +10,8 @@ import asyncio
 import importlib.util
 import json
 import os
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -17,9 +19,10 @@ import tempfile
 import time
 import types
 import unittest
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 @dataclass
@@ -38,7 +41,13 @@ def load_capture_class():
     sys.modules[spec.name] = guard
     spec.loader.exec_module(guard)
     node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "AlfworldUserSandbox")
+    account_spec = importlib.util.spec_from_file_location("_capture_accounts_cpu", path.with_name("accounts.py"))
+    accounts = importlib.util.module_from_spec(account_spec)
+    account_spec.loader.exec_module(accounts)
     namespace = {
+        "AccountIsolationError": accounts.AccountIsolationError,
+        "decode_launcher_proof": accounts.decode_launcher_proof,
+        "record_isolation_incident": Mock(),
         "asyncio": asyncio,
         "json": json,
         "os": os,
@@ -68,6 +77,15 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         self.sandbox = object.__new__(Sandbox)
         self.sandbox.output = self.root
         self.sandbox.session_url = "http://127.0.0.1/unused"
+        self.sandbox.account = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        self.sandbox.account_pool = types.SimpleNamespace(register_resource=Mock(), mark_launcher=Mock())
+        self.sandbox.account_lease = {"lease_id": "cpu-only", "owner": {"run_root": str(self.root)}}
+        self.sandbox.attempt_id = "cpu-attempt"
+        self.sandbox.native_model_catalogs = []
+        self.sandbox.native_started = False
+        self.sandbox.launcher_proofs = []
+        self.sandbox.terminal_stop_evidence = []
+        self.sandbox.private_tmp_identity = None
         self.sandbox.CAPTURE_DRAIN_TIMEOUT_SECONDS = 0.08
         self.sandbox.TERMINATION_TIMEOUT_SECONDS = 0.08
         self.sandbox.TERMINAL_GRACE_SECONDS = 0.04
@@ -85,19 +103,43 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         self.loop.set_exception_handler(lambda _loop, context: self.loop_errors.append(context))
         original = asyncio.create_subprocess_exec
 
+        def fake_launcher(account, argv, *, home, cwd, ready_fd, **kwargs):
+            # This fixture exercises capture/drain only. The real kernel launcher
+            # has separate OS acceptance; no setpriv/Landlock runs on the Mac.
+            self.assertEqual(Path(cwd), self.root)
+            self.assertTrue(Path(home).is_dir())
+            proof = {
+                "policy_version": "alfworld-uid-landlock-v1",
+                "uid": account.pw_uid,
+                "euid": account.pw_uid,
+                "gid": account.pw_gid,
+                "groups": [],
+                "resuid": [account.pw_uid] * 3,
+                "resgid": [account.pw_gid] * 3,
+                "no_new_privs": 1,
+                "capabilities_zero": True,
+                "landlock_abi": 1,
+                "landlock_applied": True,
+                "seccomp_guard": "abi1-truncate-x86_64-v1",
+            }
+            os.write(ready_fd, json.dumps(proof).encode())
+            return argv, {}, None
+
         async def direct_exec(*argv, **kwargs):
-            self.assertEqual(argv[:4], ("/usr/sbin/runuser", "-u", "alfworld_eval", "--"))
-            # The capture implementation is unchanged; only the test-user switch
-            # is removed, allowing the same real child test on macOS and Linux.
-            process = await original(*argv[4:], **kwargs)
+            process = await original(*argv, **kwargs)
             self.created.append(process)
             return process
 
+        self.launch_patcher = patch.dict(Sandbox._exec.__globals__, {"launch_arguments": fake_launcher})
+        self.launch_patcher.start()
         self.patcher = patch.object(asyncio, "create_subprocess_exec", side_effect=direct_exec)
         self.patcher.start()
 
     async def asyncTearDown(self):
         self.patcher.stop()
+        self.launch_patcher.stop()
+        for home in getattr(self.sandbox, "native_codex_homes", ()):
+            shutil.rmtree(home, ignore_errors=True)
         for process in self.created:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -113,7 +155,9 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         return json.loads((self.root / "native-capture-diagnostics.jsonl").read_text().splitlines()[-1])
 
     async def execute(self, script, *, timeout=5):
-        return await self.sandbox._exec([sys.executable, "-c", script], timeout=timeout, workdir=str(self.root))
+        home = "/tmp/codex-home-" + uuid.uuid4().hex
+        command = "env CODEX_HOME=" + home + " " + shlex.join([sys.executable, "-c", script])
+        return await self.sandbox._exec(["bash", "-c", command], timeout=timeout, workdir=str(self.root))
 
     async def wait_file(self, path):
         async def available():

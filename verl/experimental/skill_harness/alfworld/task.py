@@ -7,7 +7,6 @@ import fcntl
 import hashlib
 import json
 import os
-import pwd
 import re
 import shutil
 import signal
@@ -23,6 +22,14 @@ from uni_agent.sandbox.local import LocalSandbox
 from uni_agent.tasks.base import Task, TaskConfig, TaskResult
 from uni_agent.tasks.registry import register_task
 
+from .accounts import (
+    POLICY_VERSION,
+    AccountIsolationError,
+    AccountPool,
+    decode_launcher_proof,
+    launch_arguments,
+    record_isolation_incident,
+)
 from .data import TASK_NAME
 from .protocol import (
     agent_messages,
@@ -51,7 +58,9 @@ class PairedWorkspace:
         self.group, self.variant = group, variant
         self.work_root, self.output = Path(work_root), Path(output)
         if (
-            not self.work_root.is_absolute() or self.work_root.is_symlink() or not self.work_root.is_dir()
+            not self.work_root.is_absolute()
+            or self.work_root.is_symlink()
+            or not self.work_root.is_dir()
             or self.work_root.stat().st_uid != os.geteuid()
             or self.output.resolve().is_relative_to(self.work_root.resolve())
         ):
@@ -64,10 +73,17 @@ class PairedWorkspace:
         self.lock = None
         self.active = False
         self.provenance = {
-            "schema_version": 1, "kind": "paired_empty_workdir", "credit_probe_group": group,
-            "variant": variant, "workdir": str(self.workdir), "host_uid": self.host_uid,
-            "agent_uid": agent_uid, "agent_gid": agent_gid, "empty_before_run": False,
-            "cleanup_completed": False, "archives": [],
+            "schema_version": 1,
+            "kind": "paired_empty_workdir",
+            "credit_probe_group": group,
+            "variant": variant,
+            "workdir": str(self.workdir),
+            "host_uid": self.host_uid,
+            "agent_uid": agent_uid,
+            "agent_gid": agent_gid,
+            "empty_before_run": False,
+            "cleanup_completed": False,
+            "archives": [],
         }
 
     @staticmethod
@@ -111,8 +127,12 @@ class PairedWorkspace:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.marker_path = control / (self.group + ".json")
             expected = {
-                "schema_version": 1, "group": self.group, "host_uid": self.host_uid,
-                "agent_uid": self.agent_uid, "agent_gid": self.agent_gid, "workdir": str(self.workdir),
+                "schema_version": 1,
+                "group": self.group,
+                "host_uid": self.host_uid,
+                "agent_uid": self.agent_uid,
+                "agent_gid": self.agent_gid,
+                "workdir": str(self.workdir),
             }
             exists = self.marker_path.exists() or self.marker_path.is_symlink()
             if exists:
@@ -132,9 +152,15 @@ class PairedWorkspace:
                 if self.workdir.stat().st_uid not in (self.host_uid, self.agent_uid) or any(self.workdir.iterdir()):
                     raise ValueError("A paired branch must start with an owned, completely empty workspace")
             self.marker = expected
-            self._json(self.marker_path, {
-                **expected, "status": "active", "variant": self.variant, "used_codex_homes": self.used_codex_homes,
-            })
+            self._json(
+                self.marker_path,
+                {
+                    **expected,
+                    "status": "active",
+                    "variant": self.variant,
+                    "used_codex_homes": self.used_codex_homes,
+                },
+            )
             marker_written = True
             self.workdir.mkdir(mode=0o700, exist_ok=True)
             os.chmod(self.workdir, 0o700)
@@ -170,12 +196,22 @@ class PairedWorkspace:
         shutil.rmtree(path)
         record["removed"] = True
 
-    def finish(self, codex_homes=()):
+    def retain(self, reason):
+        """Unlock host control without reading/removing a possibly live writer's files."""
+        if not self.active:
+            return
+        try:
+            self.provenance.update(cleanup_completed=False, cleanup_error=str(reason), sources_retained=True)
+            self._json(self.output / "paired-workdir.json", self.provenance)
+            self._json(self.marker_path, {**self.marker, "status": "failed", "variant": self.variant})
+        finally:
+            self.active = False
+            self._release()
+
+    def finish(self, codex_homes=(), *, model_catalogs=(), account_lease_id=None):
         if not self.active:
             raise RuntimeError("A paired workspace must be acquired before cleanup")
         try:
-            os.chown(self.workdir, self.host_uid, self.host_gid)
-            os.chmod(self.workdir, 0o700)
             homes = list(dict.fromkeys(str(path) for path in codex_homes))
             self.provenance["codex_homes"] = homes
             if len(homes) != 1:
@@ -188,19 +224,39 @@ class PairedWorkspace:
                     raise ValueError("Refusing a Codex home outside the native per-episode home namespace")
                 if path.is_symlink() or not path.is_dir() or path.stat().st_uid not in (self.host_uid, self.agent_uid):
                     raise ValueError("The native Codex home has an unexpected owner or file identity")
-                # Quarantine both resources before any archive/delete can fail.
-                os.chown(path, self.host_uid, self.host_gid)
-                os.chmod(path, 0o700)
-            self._archive_remove(self.workdir, "paired-workspace.tar")
-            for index, value in enumerate(homes):
-                path = Path(value)
-                self._archive_remove(path, f"paired-codex-home-{index}.tar", codex_home=True)
-            self.provenance.update(cleanup_completed=True, codex_homes=homes)
+            from .native_files import archive_native_files
+
+            native = archive_native_files(
+                self.output,
+                codex_homes=homes,
+                model_catalogs=model_catalogs,
+                workspace=self.workdir,
+                workspace_root=self.work_root,
+                paired_group=self.group,
+                agent_uid=self.agent_uid,
+                account_lease_id=account_lease_id,
+            )
+            self.provenance["archives"] = [
+                {
+                    "source": row["path"],
+                    "path": native["archive_path"],
+                    "sha256": native["archive_sha256"],
+                    "removed": row["removed"],
+                }
+                for row in native["sources"]
+                if row["kind"] in ("workspace", "codex_home")
+            ]
+            self.provenance.update(cleanup_completed=True, codex_homes=homes, native_files=native)
             self._json(self.output / "paired-workdir.json", self.provenance)
-            self._json(self.marker_path, {
-                **self.marker, "status": "idle", "last_variant": self.variant,
-                "used_codex_homes": [*self.used_codex_homes, *homes],
-            })
+            self._json(
+                self.marker_path,
+                {
+                    **self.marker,
+                    "status": "idle",
+                    "last_variant": self.variant,
+                    "used_codex_homes": [*self.used_codex_homes, *homes],
+                },
+            )
             return json.loads(json.dumps(self.provenance))
         except BaseException as exc:
             self.provenance["cleanup_error"] = f"{type(exc).__name__}: {exc}"
@@ -213,7 +269,7 @@ class PairedWorkspace:
 
 
 class AlfworldUserSandbox(LocalSandbox):
-    """Use the existing non-root benchmark account and retain partial Codex logs."""
+    """Apply one exclusive host UID/kernel boundary and retain partial Codex logs."""
 
     CAPTURE_DRAIN_TIMEOUT_SECONDS = 10.0
     TERMINATION_TIMEOUT_SECONDS = 10.0
@@ -221,10 +277,14 @@ class AlfworldUserSandbox(LocalSandbox):
     TERMINAL_POLL_SECONDS = 0.25
     TERMINAL_OBSERVATION_TIMEOUT_SECONDS = 2.0
 
-    def __init__(self, session_url: str, output: Path):
+    def __init__(self, session_url: str, output: Path, *, account, account_pool, account_lease, attempt_id):
         self.session_url = session_url
         self.output = output
-        self.account = pwd.getpwnam("alfworld_eval")
+        self.account = account
+        self.account_pool, self.account_lease, self.attempt_id = account_pool, account_lease, attempt_id
+        self.native_started = False
+        self.launcher_proofs = []
+        self.private_tmp_identity = None
         self.native_codex_homes = []
         self.native_model_catalogs = []
         self.terminal_stop_evidence = []
@@ -238,28 +298,56 @@ class AlfworldUserSandbox(LocalSandbox):
                 return await response.json()
 
     async def write_file(self, path, content):
-        if re.fullmatch(r"/tmp/codex-model-catalog-[0-9a-f]{32}\.json", str(path)):
-            if not hasattr(self, "native_model_catalogs"):
-                self.native_model_catalogs = []
+        try:
+            if not re.fullmatch(r"/tmp/codex-model-catalog-[0-9a-f]{32}\.json", str(path)):
+                raise AccountIsolationError("Native host writes require the exact catalog UUID namespace")
             if str(path) not in self.native_model_catalogs:
                 self.native_model_catalogs.append(str(path))
-        await super().write_file(path, content)
-        os.chown(path, self.account.pw_uid, self.account.pw_gid)
-        os.chmod(path, 0o600)
+            if Path(path).exists() or Path(path).is_symlink():
+                raise AccountIsolationError("A native catalog must have a fresh file identity")
+            await super().write_file(path, content)
+            # Root owns immutable catalog contents; only this private GID may read.
+            os.chown(path, os.geteuid(), self.account.pw_gid)
+            os.chmod(path, 0o440)
+            self.account_pool.register_resource(self.account_lease, self.attempt_id, path, "model_catalog")
+        except Exception as error:
+            record_isolation_incident(
+                self.account_lease["owner"]["run_root"],
+                error,
+                lease_id=self.account_lease["lease_id"],
+                attempt_id=self.attempt_id,
+            )
+            raise AccountIsolationError("Native immutable catalog preparation failed") from error
 
     async def _exec(self, argv, *, timeout=None, workdir=None, env=None):
-        if argv[:2] == ["bash", "-c"]:
-            import re
-            import shlex
+        try:
+            homes = []
+            if argv[:2] == ["bash", "-c"]:
+                import re
+                import shlex
 
-            for token in shlex.split(argv[-1]):
-                if re.fullmatch(r"CODEX_HOME=/tmp/codex-home-[0-9a-f]{32}", token):
-                    home = token.split("=", 1)[1]
-                    if Path(home).exists() or Path(home).is_symlink():
-                        raise ValueError("Native Codex must start with a fresh per-episode home")
-                    if not hasattr(self, "native_codex_homes"):
-                        self.native_codex_homes = []
-                    self.native_codex_homes.append(home)
+                for token in shlex.split(argv[-1]):
+                    if re.fullmatch(r"CODEX_HOME=/tmp/codex-home-[0-9a-f]{32}", token):
+                        home = token.split("=", 1)[1]
+                        if Path(home).exists() or Path(home).is_symlink():
+                            raise AccountIsolationError("Native Codex must start with a fresh per-episode home")
+                        if not hasattr(self, "native_codex_homes"):
+                            self.native_codex_homes = []
+                        self.native_codex_homes.append(home)
+                        Path(home).mkdir(mode=0o700)
+                        os.chown(home, self.account.pw_uid, self.account.pw_gid)
+                        self.account_pool.register_resource(self.account_lease, self.attempt_id, home, "codex_home")
+                        homes.append(home)
+            if len(homes) != 1 or not workdir:
+                raise AccountIsolationError("A native launch requires one fresh host-recorded HOME and controlled cwd")
+        except Exception as error:
+            record_isolation_incident(
+                self.account_lease["owner"]["run_root"],
+                error,
+                lease_id=self.account_lease["lease_id"],
+                attempt_id=self.attempt_id,
+            )
+            raise AccountIsolationError("Native launch resource preparation failed") from error
         process_env = {
             "PATH": "/opt/alfworld-tools:/usr/local/bin:/usr/bin:/bin",
             "LANG": "C.UTF-8",
@@ -279,21 +367,48 @@ class AlfworldUserSandbox(LocalSandbox):
         # Uni-Agent supplies the isolated CODEX_HOME and local gateway bindings.
         # The environment service administration capability must remain host-only.
         for name, value in (env or {}).items():
-            if name not in ("ALFWORLD_SERVER_CONFIG", "ALFWORLD_ADMIN_TOKEN"):
+            if name not in (
+                "ALFWORLD_SERVER_CONFIG",
+                "ALFWORLD_ADMIN_TOKEN",
+                "BASH_ENV",
+                "ENV",
+            ) and not name.startswith(("LD_", "PYTHON")):
                 process_env[name] = value
-        proc = await asyncio.create_subprocess_exec(
-            "/usr/sbin/runuser",
-            "-u",
-            "alfworld_eval",
-            "--",
-            *argv,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=workdir,
-            env=process_env,
-            start_new_session=True,
-        )
+        ready_read, ready_write = os.pipe()
+        try:
+            child, controlled_env, self.private_tmp_identity = launch_arguments(
+                self.account,
+                argv,
+                home=homes[0],
+                cwd=workdir,
+                catalogs=self.native_model_catalogs,
+                ready_fd=ready_write,
+                expected_tmp=self.private_tmp_identity,
+            )
+            process_env.update(controlled_env)
+            proc = await asyncio.create_subprocess_exec(
+                *child,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=workdir,
+                env=process_env,
+                start_new_session=True,
+                close_fds=True,
+                pass_fds=(ready_write,),
+            )
+            self.native_started = True
+        except BaseException as error:
+            os.close(ready_read)
+            record_isolation_incident(
+                self.account_lease["owner"]["run_root"],
+                error,
+                lease_id=self.account_lease["lease_id"],
+                attempt_id=self.attempt_id,
+            )
+            raise AccountIsolationError("Native isolation launcher failed before execution") from error
+        finally:
+            os.close(ready_write)
 
         started = time.time()
         buffers = {"stdout": bytearray(), "stderr": bytearray()}
@@ -356,16 +471,39 @@ class AlfworldUserSandbox(LocalSandbox):
                 stream.write(json.dumps(value, sort_keys=True) + "\n")
                 stream.flush()
 
-        monitor = asyncio.create_task(monitor_terminal_process(
-            self._observe_terminal_state, lambda: proc.returncode is None, terminate, process_id=proc.pid,
-            grace_seconds=self.TERMINAL_GRACE_SECONDS, poll_seconds=self.TERMINAL_POLL_SECONDS,
-            observation_timeout_seconds=self.TERMINAL_OBSERVATION_TIMEOUT_SECONDS,
-            on_evidence=preserve_terminal_evidence,
-        ))
+        monitor = asyncio.create_task(
+            monitor_terminal_process(
+                self._observe_terminal_state,
+                lambda: proc.returncode is None,
+                terminate,
+                process_id=proc.pid,
+                grace_seconds=self.TERMINAL_GRACE_SECONDS,
+                poll_seconds=self.TERMINAL_POLL_SECONDS,
+                observation_timeout_seconds=self.TERMINAL_OBSERVATION_TIMEOUT_SECONDS,
+                on_evidence=preserve_terminal_evidence,
+            )
+        )
 
         timed_out = False
         cancelled = False
         drain_timed_out = False
+        isolation_error = None
+        try:
+            raw = await asyncio.wait_for(asyncio.to_thread(os.read, ready_read, 65536), timeout=10)
+            proof = decode_launcher_proof(raw, uid=self.account.pw_uid, gid=self.account.pw_gid)
+            self.account_pool.mark_launcher(self.account_lease, self.attempt_id, proof)
+            self.launcher_proofs.append(proof)
+        except BaseException as error:
+            isolation_error = error
+            record_isolation_incident(
+                self.account_lease["owner"]["run_root"],
+                error,
+                lease_id=self.account_lease["lease_id"],
+                attempt_id=self.attempt_id,
+            )
+            await terminate()
+        finally:
+            os.close(ready_read)
         try:
             await asyncio.wait_for(wait_for_parent_exit(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -391,8 +529,9 @@ class AlfworldUserSandbox(LocalSandbox):
             monitor.cancel()
         monitor_result = (await asyncio.gather(monitor, return_exceptions=True))[0]
         terminal_monitor_error = (
-            type(monitor_result).__name__ if isinstance(monitor_result, BaseException)
-            and not isinstance(monitor_result, asyncio.CancelledError) else None
+            type(monitor_result).__name__
+            if isinstance(monitor_result, BaseException) and not isinstance(monitor_result, asyncio.CancelledError)
+            else None
         )
         diagnostics = {
             "schema_version": 1,
@@ -415,6 +554,10 @@ class AlfworldUserSandbox(LocalSandbox):
             stream.write(json.dumps(diagnostics, sort_keys=True) + "\n")
         if cancelled:
             raise asyncio.CancelledError
+        if isolation_error is not None:
+            raise AccountIsolationError(
+                "Native kernel isolation was not attested; learner must stop"
+            ) from isolation_error
         return ExecResult(
             exit_code=-1 if timed_out else proc.returncode,
             stdout=bytes(buffers["stdout"]).decode(errors="replace"),
@@ -426,7 +569,37 @@ class AlfworldUserSandbox(LocalSandbox):
 class AlfworldSkillTrainingTask(Task):
     config_model = TaskConfig
 
+    @staticmethod
+    def _trusted_run_root():
+        # These values come from the trusted launcher/Ray runtime environment,
+        # never task messages or model-generated metadata.
+        declared = os.environ.get("SKILL_RUN_DIR")
+        if declared:
+            root = Path(declared)
+        else:
+            settings = Path(os.environ.get("ALFWORLD_SERVER_CONFIG", ""))
+            if settings.name != "environment.json" or settings.parent.name != "runtime":
+                raise AccountIsolationError("A trusted host SKILL_RUN_DIR is required for Task failure evidence")
+            root = settings.parent.parent
+        if not root.is_absolute() or root.is_symlink():
+            raise AccountIsolationError("The trusted host run root must be an absolute non-symlink directory")
+        return root.resolve(strict=True)
+
     async def run(self):
+        trusted_root = self._trusted_run_root()
+        try:
+            if Path(self.config.metadata["run_dir"]).resolve() != trusted_root:
+                raise AccountIsolationError("Task metadata run_dir differs from the trusted host run root")
+            return await self._run_episode()
+        except asyncio.CancelledError:
+            raise  # Cancellation retains the existing owned-resource finally path.
+        except Exception as error:
+            # The official adapter may filter a failed Task. A durable host
+            # barrier must survive that filtering and forbid learner updates.
+            record_isolation_incident(trusted_root, f"Task host exception: {type(error).__name__}: {error}")
+            raise
+
+    async def _run_episode(self):
         settings_path = Path(os.environ["ALFWORLD_SERVER_CONFIG"])
         settings = json.loads(settings_path.read_text())
         base = validate_loopback_url(settings["url"])
@@ -435,7 +608,6 @@ class AlfworldSkillTrainingTask(Task):
             raise ValueError("Task data and ALFWorld service catalogs differ")
         if metadata.get("split") not in settings.get("allowed_splits", []):
             raise ValueError("The environment service excludes this official task split")
-        account = pwd.getpwnam("alfworld_eval")
         attempt_id, output = new_attempt_directory(Path(metadata["run_dir"]), metadata["game_id"])
         started = time.time()
         identity = {
@@ -496,9 +668,51 @@ class AlfworldSkillTrainingTask(Task):
             backend_binding = backend_receipt = None
             backend_error = None
             gateway_session_id = None
+            account = account_pool = account_lease = None
+            account_summary = None
+            isolation_error = None
+            agent_started = False
+            uid_drained = False
             try:
                 if created.get("catalog_digest") != metadata["catalog_digest"]:
                     raise ValueError("The environment response has a different catalog digest")
+                account_pool = AccountPool()
+                if metadata.get("role") == "counterfactual_probe":
+                    candidate_lease = metadata.get("host_account_lease")
+                    if (
+                        not isinstance(candidate_lease, dict)
+                        or not all(
+                            key in candidate_lease for key in ("lease_id", "token", "uid", "gid", "name", "owner")
+                        )
+                        or candidate_lease.get("owner")
+                        != {
+                            "run_root": str(Path(metadata["run_dir"]).resolve()),
+                            "scope_id": metadata.get("credit_probe_group"),
+                            "kind": "pair",
+                        }
+                    ):
+                        raise AccountIsolationError("A paired Task requires its coordinator's exclusive UID lease")
+                    variant = metadata.get("credit_probe_variant")
+                    if variant not in ("with_skill", "without_skill"):
+                        raise AccountIsolationError("A paired Task requires an explicit valid variant")
+                    account_lease = candidate_lease
+                else:
+                    account_lease = account_pool.acquire(
+                        run_root=metadata["run_dir"],
+                        scope_id=attempt_id,
+                        kind="ordinary",
+                    )
+                    variant = "ordinary"
+                account_pool.begin_attempt(account_lease, attempt_id=attempt_id, output=output, variant=variant)
+                account = account_pool.account(account_lease)
+                PairedWorkspace._json(
+                    output / "account-lease.json",
+                    {
+                        "policy_version": POLICY_VERSION,
+                        **account_pool.public(account_lease),
+                        "attempt_id": attempt_id,
+                    },
+                )
                 work_root = Path("/tmp/alfworld-skill-episodes")
                 work_root.mkdir(mode=0o711, exist_ok=True)
                 if work_root.is_symlink() or work_root.stat().st_uid != os.geteuid():
@@ -509,8 +723,12 @@ class AlfworldSkillTrainingTask(Task):
                 )
                 if metadata.get("role") == "counterfactual_probe":
                     paired_workspace = PairedWorkspace(
-                        group=metadata.get("credit_probe_group"), variant=metadata.get("credit_probe_variant"),
-                        work_root=work_root, output=output, agent_uid=account.pw_uid, agent_gid=account.pw_gid,
+                        group=metadata.get("credit_probe_group"),
+                        variant=metadata.get("credit_probe_variant"),
+                        work_root=work_root,
+                        output=output,
+                        agent_uid=account.pw_uid,
+                        agent_gid=account.pw_gid,
                     )
                     workdir = paired_workspace.acquire()
                 elif controlled:
@@ -519,9 +737,8 @@ class AlfworldSkillTrainingTask(Task):
                     workdir = work_root / uuid.uuid4().hex
                     workdir.mkdir(mode=0o700)
                     os.chown(workdir, account.pw_uid, account.pw_gid)
-                messages = agent_messages(
-                    self.config.prompt, created["state"], instruction=metadata.get("instruction")
-                )
+                account_pool.register_resource(account_lease, attempt_id, workdir, "workspace")
+                messages = agent_messages(self.config.prompt, created["state"], instruction=metadata.get("instruction"))
                 if metadata.get("skill_context_options", {}).get("enabled") is True:
                     from ..context import enrich_task_messages
 
@@ -530,7 +747,14 @@ class AlfworldSkillTrainingTask(Task):
                     (output / "skill-context.json").write_text(json.dumps(skill_context, indent=2) + "\n")
                 (output / "agent-messages.json").write_text(json.dumps(messages, indent=2) + "\n")
                 (output / "agent-prompt.txt").write_text("\n\n".join(m["content"] for m in messages) + "\n")
-                sandbox = AlfworldUserSandbox(base + "/session/" + session_id, output)
+                sandbox = AlfworldUserSandbox(
+                    base + "/session/" + session_id,
+                    output,
+                    account=account,
+                    account_pool=account_pool,
+                    account_lease=account_lease,
+                    attempt_id=attempt_id,
+                )
                 agent = self.build_agent()
                 from urllib.parse import urlsplit
 
@@ -540,16 +764,49 @@ class AlfworldSkillTrainingTask(Task):
                 parts = urlsplit(gateway_url).path.split("/")
                 gateway_session_id = parts[parts.index("sessions") + 1]
                 backend_binding = bind_episode(
-                    Path(metadata["run_dir"]) / "terminal_bindings", gateway_base_url=gateway_url,
-                    environment_session_url=base + "/session/" + session_id, attempt_id=attempt_id,
+                    Path(metadata["run_dir"]) / "terminal_bindings",
+                    gateway_base_url=gateway_url,
+                    environment_session_url=base + "/session/" + session_id,
+                    attempt_id=attempt_id,
                 )
+                agent_started = True
                 agent_result = await agent.run(sandbox=sandbox, messages=messages, workdir=str(workdir))
                 agent_info = agent_result.info or {}
+            except AccountIsolationError as exc:
+                isolation_error = exc
+                error = f"{type(exc).__name__}: {exc}"
+                record_isolation_incident(
+                    metadata["run_dir"],
+                    error,
+                    lease_id=account_lease.get("lease_id") if account_lease else None,
+                    attempt_id=attempt_id,
+                )
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
+                phase = "execution" if agent_started else "boundary setup"
+                isolation_error = AccountIsolationError("Host attempt " + phase + " failed: " + error)
+                record_isolation_incident(
+                    metadata["run_dir"],
+                    isolation_error,
+                    lease_id=account_lease.get("lease_id") if account_lease else None,
+                    attempt_id=attempt_id,
+                )
             finally:
                 try:
                     try:
+                        if account_pool is not None and account_lease is not None:
+                            try:
+                                drained = await asyncio.to_thread(account_pool.drain, account_lease)
+                                uid_drained = (
+                                    isinstance(drained, dict)
+                                    and drained.get("drained") is True
+                                    and drained.get("uid") == account_lease["uid"]
+                                    and drained.get("remaining_pids") == []
+                                )
+                                if not uid_drained:
+                                    raise AccountIsolationError("The UID drain returned no positive closure proof")
+                            except Exception as exc:
+                                isolation_error = AccountIsolationError("Native UID process drain failed: " + str(exc))
                         if backend_binding is not None:
                             from .backend_terminal import wait_for_terminal_drain
 
@@ -565,16 +822,48 @@ class AlfworldSkillTrainingTask(Task):
                             response.raise_for_status()
                             engine = await response.json()
                 finally:
+                    bound = backend_binding
+                    raw_drained = bool(
+                        isinstance(backend_receipt, dict)
+                        and bound is not None
+                        and backend_receipt.get("backend_stop_confirmed") is True
+                        and backend_receipt.get("active_requests") == 0
+                        and backend_receipt.get("attempt_id") == attempt_id
+                        and backend_receipt.get("gateway_session_id") == gateway_session_id
+                        and backend_receipt.get("environment_session_id") == session_id
+                        and backend_receipt.get("binding_sha256")
+                        == (
+                            bound.get("binding_sha256")
+                            if isinstance(bound, dict)
+                            else getattr(bound, "binding_sha256", None)
+                        )
+                    )
+                    backend_safe = raw_drained or not agent_started
+                    if account_lease is not None and not backend_safe:
+                        isolation_error = AccountIsolationError("Native backend drain is unconfirmed; retain sources")
+                    sources_safe = uid_drained and backend_safe
                     # Completed workspaces must not become memory for later runs.
                     normal_workspace = None
                     if paired_workspace is not None and paired_workspace.active:
                         try:
-                            workspace_provenance = paired_workspace.finish(
-                                getattr(sandbox, "native_codex_homes", ()) if sandbox is not None else ()
-                            )
+                            if not sources_safe:
+                                paired_workspace.retain(
+                                    "Process/backend drain is unconfirmed; retain every native source"
+                                )
+                                workspace_provenance = paired_workspace.provenance
+                            else:
+                                workspace_provenance = paired_workspace.finish(
+                                    getattr(sandbox, "native_codex_homes", ()) if sandbox is not None else (),
+                                    model_catalogs=getattr(sandbox, "native_model_catalogs", ()) if sandbox else (),
+                                    account_lease_id=account_lease["lease_id"],
+                                )
+                                native_files = workspace_provenance["native_files"]
                         except Exception as exc:
                             error = (error + "; " if error else "") + f"Paired workspace cleanup failed: {exc}"
                             workspace_provenance = paired_workspace.provenance
+                            isolation_error = AccountIsolationError(
+                                "Paired native resource archive failed: " + str(exc)
+                            )
                     elif paired_workspace is None and workdir is not None:
                         if workdir.is_dir() and not workdir.is_symlink():
                             normal_workspace = workdir
@@ -583,17 +872,47 @@ class AlfworldSkillTrainingTask(Task):
                     try:
                         from .native_files import archive_native_files
 
-                        native_files = archive_native_files(
-                            output,
-                            codex_homes=(getattr(sandbox, "native_codex_homes", ())
-                                         if sandbox is not None and paired_workspace is None else ()),
-                            model_catalogs=getattr(sandbox, "native_model_catalogs", ()) if sandbox is not None else (),
-                            workspace=normal_workspace, agent_uid=account.pw_uid,
-                        )
+                        if account is not None and paired_workspace is None and sources_safe:
+                            native_files = archive_native_files(
+                                output,
+                                codex_homes=getattr(sandbox, "native_codex_homes", ()) if sandbox else (),
+                                model_catalogs=getattr(sandbox, "native_model_catalogs", ()) if sandbox else (),
+                                workspace=normal_workspace,
+                                agent_uid=account.pw_uid,
+                                account_lease_id=account_lease["lease_id"],
+                            )
                     except Exception as exc:
                         # Preserve the primary execution/ENOSPC error and every
                         # unarchived source; cleanup never invents a task reward.
                         error = (error + "; " if error else "") + f"Native file archival failed: {exc}"
+                        isolation_error = AccountIsolationError("Native file archival failed: " + str(exc))
+                    if account_pool is not None and account_lease is not None:
+                        try:
+                            if isolation_error is not None:
+                                account_pool.quarantine(account_lease, isolation_error, attempt_id=attempt_id)
+                            else:
+                                if native_files and native_files.get("status") == "archived_and_removed":
+                                    account_summary = account_pool.close_attempt(
+                                        account_lease,
+                                        attempt_id,
+                                        receipt_path=output / "native-files.json",
+                                        backend_drained=backend_safe,
+                                        native_started=bool(sandbox is not None and sandbox.native_started),
+                                    )
+                                else:
+                                    account_pool.close_empty_attempt(
+                                        account_lease,
+                                        attempt_id,
+                                        backend_drained=backend_safe,
+                                    )
+                        except Exception as exc:
+                            isolation_error = AccountIsolationError("Native account closure failed: " + str(exc))
+                            record_isolation_incident(
+                                metadata["run_dir"],
+                                isolation_error,
+                                lease_id=account_lease["lease_id"],
+                                attempt_id=attempt_id,
+                            )
             validate_game_reference(engine, metadata, metadata["catalog_digest"])
             reward = authoritative_reward(engine)
             terminal_stop = (getattr(sandbox, "terminal_stop_evidence", []) or [None])[-1]
@@ -606,7 +925,9 @@ class AlfworldSkillTrainingTask(Task):
             if terminal_stop:
                 observed = _validated_state(terminal_stop.get("terminal_state"))
                 expected_terminal_stop = bool(
-                    observed and (observed[0]["done"] or observed[0]["won"]) and private_done
+                    observed
+                    and (observed[0]["done"] or observed[0]["won"])
+                    and private_done
                     and terminal_stop.get("status") == "terminal_stop"
                     and terminal_stop.get("termination_requested") is True
                     and terminal_stop.get("termination_completed") is True
@@ -615,6 +936,7 @@ class AlfworldSkillTrainingTask(Task):
                     and observed[0]["won"] == engine["won"]
                     and all(observed[0].get(key) == engine.get(key) for key in ("steps", "max_steps"))
                 )
+
             def bound_field(key):
                 if isinstance(backend_binding, dict):
                     return backend_binding.get(key)
@@ -632,20 +954,28 @@ class AlfworldSkillTrainingTask(Task):
                     and bound_field("binding_sha256") is not None
                     and all(backend_receipt.get(key) == bound_field(key) for key in ("binding_id", "binding_sha256"))
                     and backend_receipt.get("active_requests") == 0
-                    and (backend_receipt.get("fenced") is True or (
-                        backend_receipt.get("status") == "drained" and agent_info.get("ok") is True
-                        and agent_info.get("error") is None and agent_info.get("exit_code") == 0
-                        and not expected_terminal_stop
-                    ))
+                    and (
+                        backend_receipt.get("fenced") is True
+                        or (
+                            backend_receipt.get("status") == "drained"
+                            and agent_info.get("ok") is True
+                            and agent_info.get("error") is None
+                            and agent_info.get("exit_code") == 0
+                            and not expected_terminal_stop
+                        )
+                    )
                 )
                 if (
-                    bound and backend_receipt.get("backend_stop_confirmed") is True
+                    bound
+                    and backend_receipt.get("backend_stop_confirmed") is True
                     and backend_receipt.get("status") in ("drained", "terminal_refused", "terminal_aborted")
                 ):
                     backend_confirmed = True
                     observed = _validated_state(backend_receipt.get("terminal_state"))
                     expected_backend_stop = bool(
-                        observed and private_done and (observed[0]["done"] or observed[0]["won"])
+                        observed
+                        and private_done
+                        and (observed[0]["done"] or observed[0]["won"])
                         and backend_receipt.get("expected_backend_terminal_stop") is True
                         and backend_receipt.get("fenced") is True
                         and backend_receipt.get("status") in ("terminal_refused", "terminal_aborted")
@@ -665,19 +995,35 @@ class AlfworldSkillTrainingTask(Task):
                 "agent_exit_status": agent_info.get("exit_status"),
                 "wall_seconds_total": time.time() - started,
                 "workdir": str(workdir) if workdir is not None else None,
-                "terminal_stop": terminal_stop, "expected_host_terminal_stop": expected_terminal_stop,
-                "backend_terminal": backend_receipt, "backend_terminal_error": backend_error,
-                "backend_stop_confirmed": backend_confirmed, "expected_backend_terminal_stop": expected_backend_stop,
-                "backend_binding": {key: bound_field(key) for key in (
-                    "binding_id", "binding_sha256", "attempt_id", "gateway_session_id", "environment_session_id"
-                )} if backend_binding is not None else None,
+                "terminal_stop": terminal_stop,
+                "expected_host_terminal_stop": expected_terminal_stop,
+                "backend_terminal": backend_receipt,
+                "backend_terminal_error": backend_error,
+                "backend_stop_confirmed": backend_confirmed,
+                "expected_backend_terminal_stop": expected_backend_stop,
+                "backend_binding": {
+                    key: bound_field(key)
+                    for key in (
+                        "binding_id",
+                        "binding_sha256",
+                        "attempt_id",
+                        "gateway_session_id",
+                        "environment_session_id",
+                    )
+                }
+                if backend_binding is not None
+                else None,
                 "environment_session_id": session_id,
+                "account_isolation": account_summary,
+                "account_isolation_error": str(isolation_error) if isolation_error is not None else None,
                 **({"skill_context": skill_context} if skill_context is not None else {}),
                 **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                 **({"native_files": native_files} if native_files is not None else {}),
             }
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print("ALFWORLD_EPISODE_RESULT " + json.dumps(result), flush=True)
+            if isolation_error is not None:
+                raise isolation_error
             return TaskResult(
                 reward=reward,
                 accuracy=reward,
@@ -694,11 +1040,15 @@ class AlfworldSkillTrainingTask(Task):
                     "error": result["agent_error"] or backend_error,
                     "eval_completed": error is None,
                     "eval_execution_time": result["wall_seconds_total"],
-                    "terminal_stop": terminal_stop, "expected_host_terminal_stop": expected_terminal_stop,
-                    "backend_terminal": backend_receipt, "backend_terminal_error": backend_error,
+                    "terminal_stop": terminal_stop,
+                    "expected_host_terminal_stop": expected_terminal_stop,
+                    "backend_terminal": backend_receipt,
+                    "backend_terminal_error": backend_error,
                     "backend_stop_confirmed": backend_confirmed,
                     "expected_backend_terminal_stop": expected_backend_stop,
-                    "backend_binding": result["backend_binding"], "environment_session_id": session_id,
+                    "backend_binding": result["backend_binding"],
+                    "environment_session_id": session_id,
+                    "account_isolation": account_summary,
                     **({"skill_context": skill_context} if skill_context is not None else {}),
                     **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                     **({"native_files": native_files} if native_files is not None else {}),

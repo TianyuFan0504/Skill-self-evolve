@@ -24,6 +24,8 @@ def archive_native_files(
     curator_workdir=None,
     curator_root=None,
     curator_collection_id=None,
+    paired_group=None,
+    account_lease_id=None,
 ):
     """Keep raw files in one private durable archive; delete only after fsync.
 
@@ -46,7 +48,12 @@ def archive_native_files(
             rows.append({"kind": kind, "path": path})
     if workspace is not None:
         path = Path(workspace)
-        if path.parent != Path(workspace_root) or not re.fullmatch(r"[0-9a-f]{32}", path.name):
+        paired = (
+            isinstance(paired_group, str)
+            and re.fullmatch(r"[0-9a-f]{64}", paired_group)
+            and path.name == "credit_" + paired_group
+        )
+        if path.parent != Path(workspace_root) or not (re.fullmatch(r"[0-9a-f]{32}", path.name) or paired):
             raise ValueError("Normal workspace escaped its host-owned episode parent")
         rows.append({"kind": "workspace", "path": path})
     if curator_workdir is not None:
@@ -185,6 +192,8 @@ def archive_native_files(
         "source_entry_count": len(contents),
         "source_stats_stable": True,
         "sources": [{**row, "path": str(row["path"])} for row in rows],
+        "agent_uid": agent_uid,
+        "account_lease_id": account_lease_id,
     }
     receipt_path = output / "native-files.json"
 

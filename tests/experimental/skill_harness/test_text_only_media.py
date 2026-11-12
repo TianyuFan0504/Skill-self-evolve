@@ -180,7 +180,11 @@ class TextOnlyBoundaryTest(unittest.TestCase):
             node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SkillJointSyncTrainer"
         )
         node = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "_update_actor")
-        scope = {"assert_no_nontext_incidents": self.module.assert_no_nontext_incidents}
+        scope = {
+            "assert_no_nontext_incidents": self.module.assert_no_nontext_incidents,
+            # Filesystem incidents have their own actual-host-guard regression.
+            "assert_no_isolation_incidents": Mock(),
+        }
         exec(compile(ast.Module(body=[node], type_ignores=[]), str(TRAINER_PATH), "exec"), scope)
         holder = SimpleNamespace(
             _joint_lock=nullcontext(),

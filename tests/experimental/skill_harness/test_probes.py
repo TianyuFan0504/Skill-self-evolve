@@ -24,11 +24,48 @@ credit = importlib.import_module(PACKAGE + ".credit")
 context = importlib.import_module(PACKAGE + ".context")
 
 
+class FakeAccountPool:
+    """Replace OS lease allocation only; the real branch proof verifier still runs."""
+
+    def __init__(self):
+        self.leases, self.finished = {}, {}
+
+    def acquire(self, *, run_root, scope_id, kind):
+        identity = f"{len(self.leases) + 1:032x}"
+        ref = {
+            "lease_id": identity, "token": "CPU-lease-fence-" + identity,
+            "uid": 1001, "gid": 1001, "name": "CPU-pair-account",
+            "owner": {"run_root": str(Path(run_root).resolve()), "scope_id": scope_id, "kind": kind},
+        }
+        self.leases[identity] = copy.deepcopy(ref)
+        return ref
+
+    @staticmethod
+    def public(ref):
+        return {key: copy.deepcopy(ref[key]) for key in ("lease_id", "uid", "gid", "name", "owner")}
+
+    def finish(self, ref, *, abandoned=False):
+        if self.leases[ref["lease_id"]] != ref:
+            raise probes.AccountIsolationError("CPU lease fence differs")
+        self.finished[ref["lease_id"]] = bool(abandoned)
+
+    def historical_pair(self, public, *, run_root, group):
+        ref = self.leases[public["lease_id"]]
+        if (
+            self.public(ref) != {key: public[key] for key in ("lease_id", "uid", "gid", "name", "owner")}
+            or self.finished.get(ref["lease_id"], True)
+            or ref["owner"] != {"run_root": str(Path(run_root).resolve()), "scope_id": group, "kind": "pair"}
+        ):
+            raise probes.AccountIsolationError("CPU cached pair has no complete historical lease")
+        return ref
+
+
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.account_pool = FakeAccountPool()
         self.store = store_module.SkillStore(self.root / "store")
         self.base = self.store.head()
         self.store.create_branch("probe", from_snapshot=self.base)
@@ -73,6 +110,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                         "stable_game_id": "original_b",
                         "game_sha256": "a" * 64,
                         "task_type": "pick_heat_then_place_in_recep",
+                        "run_dir": str(self.root),
                     },
                 }
             },
@@ -217,6 +255,11 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 "backend_binding": binding,
                 "backend_terminal": receipt,
                 "backend_stop_confirmed": True,
+                "account_isolation": {
+                    **self.account_pool.public(metadata["host_account_lease"]),
+                    "policy_version": probes.ACCOUNT_POLICY_VERSION,
+                    "status": "attempt_closed", "backend_drained": True, "uid_drained": True,
+                },
                 "paired_workdir": {
                     "schema_version": 1,
                     "kind": "paired_empty_workdir",
@@ -252,6 +295,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             frozen_attestation=self.attestation,
             run_branch=self.branch,
             decode_prompt_ids=lambda ids: bytes(ids).decode(),
+            _account_pool=self.account_pool,
         )
         kwargs.update(changes)
         return await probes.collect_counterfactual_probe(**kwargs)

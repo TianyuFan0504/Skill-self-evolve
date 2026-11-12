@@ -19,21 +19,36 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import types
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 def load_workspace_class():
     path = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/task.py"
     tree = ast.parse(path.read_text())
     node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "PairedWorkspace")
+    native_spec = importlib.util.spec_from_file_location("_paired_cpu.native_files", path.with_name("native_files.py"))
+    native = importlib.util.module_from_spec(native_spec)
+    native_spec.loader.exec_module(native)
+    package = types.ModuleType("_paired_cpu")
+    package.__path__ = []
+    sys.modules["_paired_cpu"] = package
+    sys.modules["_paired_cpu.native_files"] = native
     scope = {
-        "fcntl": fcntl, "hashlib": hashlib, "json": json, "os": os, "re": re, "shutil": shutil,
-        "stat": stat, "tarfile": tarfile, "uuid": uuid, "Path": Path,
+        "__package__": "_paired_cpu",
+        "fcntl": fcntl,
+        "hashlib": hashlib,
+        "json": json,
+        "os": os,
+        "re": re,
+        "shutil": shutil,
+        "stat": stat,
+        "tarfile": tarfile,
+        "uuid": uuid,
+        "Path": Path,
     }
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
     return scope["PairedWorkspace"]
@@ -43,20 +58,9 @@ Workspace = load_workspace_class()
 
 
 def load_sandbox_class():
-    path = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/task.py"
-    tree = ast.parse(path.read_text())
-    spec = importlib.util.spec_from_file_location("_paired_capture_guard", path.with_name("terminal_guard.py"))
-    guard = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = guard
-    spec.loader.exec_module(guard)
-    node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "AlfworldUserSandbox")
-    scope = {
-        "asyncio": asyncio, "json": json, "os": os, "signal": __import__("signal"), "time": time, "Path": Path,
-        "LocalSandbox": object, "ExecResult": types.SimpleNamespace,
-        "monitor_terminal_process": guard.monitor_terminal_process,
-    }
-    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), scope)
-    return scope["AlfworldUserSandbox"]
+    from test_native_capture import Sandbox
+
+    return Sandbox
 
 
 class PairedWorkdirTest(unittest.TestCase):
@@ -77,8 +81,12 @@ class PairedWorkdirTest(unittest.TestCase):
         output = self.root / (variant + "_" + uuid.uuid4().hex)
         output.mkdir(mode=0o700)
         return Workspace(
-            group=group or self.group, variant=variant, work_root=self.work_root, output=output,
-            agent_uid=os.geteuid(), agent_gid=os.getegid(),
+            group=group or self.group,
+            variant=variant,
+            work_root=self.work_root,
+            output=output,
+            agent_uid=os.geteuid(),
+            agent_gid=os.getegid(),
         )
 
     def native_home(self):
@@ -96,7 +104,11 @@ class PairedWorkdirTest(unittest.TestCase):
             "(root/sys.argv[1]).write_text('generated branch file')\n"
         )
         result = subprocess.run(
-            [sys.executable, "-c", script, name], cwd=workdir, capture_output=True, text=True, check=True,
+            [sys.executable, "-c", script, name],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return json.loads(result.stdout)
 
@@ -125,8 +137,22 @@ class PairedWorkdirTest(unittest.TestCase):
             for archive in manifest["archives"]:
                 self.assertTrue(archive["removed"])
                 self.assertEqual(hashlib.sha256(Path(archive["path"]).read_bytes()).hexdigest(), archive["sha256"])
-        with tarfile.open(first.output / "paired-workspace.tar") as archive:
-            self.assertIn("workspace/skill-canary.txt", archive.getnames())
+        with tarfile.open(first.output / "native-files.tar.gz") as archive:
+            self.assertIn("workspace-1/skill-canary.txt", archive.getnames())
+
+    def test_unconfirmed_drain_releases_only_control_lock_and_retains_sources(self):
+        workspace = self.workspace()
+        workspace.acquire()
+        self.child(workspace.workdir, "still-writing.txt")
+        home = self.native_home()
+        workspace.retain("UID drain is unconfirmed")
+        self.assertFalse(workspace.active)
+        self.assertTrue((workspace.workdir / "still-writing.txt").is_file())
+        self.assertTrue((home / "native-state.json").is_file())
+        self.assertFalse((workspace.output / "native-files.tar.gz").exists())
+        self.assertEqual(json.loads(workspace.marker_path.read_text())["status"], "failed")
+        with self.assertRaisesRegex(RuntimeError, "reconciliation"):
+            self.workspace("without_skill").acquire()
 
     def test_other_pairs_are_isolated_and_concurrent_same_pair_is_rejected(self):
         first = self.workspace()
@@ -174,7 +200,7 @@ class PairedWorkdirTest(unittest.TestCase):
                 workspace.finish([home])
         manifest = json.loads((workspace.output / "paired-workdir.json").read_text())
         self.assertFalse(manifest["cleanup_completed"])
-        self.assertTrue((workspace.output / "paired-workspace.tar").is_file())
+        self.assertTrue((workspace.output / "native-files.tar.gz").is_file())
         self.assertEqual(workspace.workdir.stat().st_uid, os.geteuid())
         self.assertEqual(stat.S_IMODE(workspace.workdir.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
@@ -188,9 +214,9 @@ class PairedWorkdirTest(unittest.TestCase):
         secret.write_text("DO_NOT_DEREFERENCE_SECRET")
         (workspace.workdir / "link").symlink_to(secret)
         workspace.finish([self.native_home()])
-        archive_path = workspace.output / "paired-workspace.tar"
+        archive_path = workspace.output / "native-files.tar.gz"
         with tarfile.open(archive_path) as archive:
-            self.assertTrue(archive.getmember("workspace/link").issym())
+            self.assertTrue(archive.getmember("workspace-1/link").issym())
         self.assertNotIn(b"DO_NOT_DEREFERENCE_SECRET", archive_path.read_bytes())
 
     def test_native_home_path_cannot_be_reused_by_the_other_branch(self):
@@ -220,26 +246,55 @@ class NativeHomeTrackingTest(unittest.IsolatedAsyncioTestCase):
         home = Path("/tmp") / ("codex-home-" + uuid.uuid4().hex)
         original = asyncio.create_subprocess_exec
 
+        def fake_launcher(account, argv, *, home, cwd, ready_fd, **kwargs):
+            proof = {
+                "policy_version": "alfworld-uid-landlock-v1",
+                "uid": account.pw_uid,
+                "euid": account.pw_uid,
+                "gid": account.pw_gid,
+                "groups": [],
+                "resuid": [account.pw_uid] * 3,
+                "resgid": [account.pw_gid] * 3,
+                "no_new_privs": 1,
+                "capabilities_zero": True,
+                "landlock_abi": 1,
+                "landlock_applied": True,
+                "seccomp_guard": "abi1-truncate-x86_64-v1",
+            }
+            os.write(ready_fd, json.dumps(proof).encode())
+            return argv, {}, None
+
         async def direct_exec(*argv, **kwargs):
-            return await original(*argv[4:], **kwargs)
+            return await original(*argv, **kwargs)
 
         try:
             with tempfile.TemporaryDirectory() as directory:
                 sandbox.output = Path(directory)
+                sandbox.account = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+                sandbox.account_pool = types.SimpleNamespace(register_resource=Mock(), mark_launcher=Mock())
+                sandbox.account_lease = {"lease_id": "cpu-only", "owner": {"run_root": directory}}
+                sandbox.attempt_id = "cpu-attempt"
+                sandbox.native_model_catalogs = []
+                sandbox.private_tmp_identity = None
+                sandbox.launcher_proofs = []
+                sandbox.terminal_stop_evidence = []
                 sandbox.session_url = "http://127.0.0.1/unused"
 
                 async def nonterminal():
                     return {"done": False, "won": False}
 
                 sandbox._observe_terminal_state = nonterminal
-                sandbox.TERMINAL_POLL_SECONDS = .005
+                sandbox.TERMINAL_POLL_SECONDS = 0.005
                 command = f"mkdir -p {home} && env CODEX_HOME={home} /usr/bin/printf 'native-output\\n'"
-                with patch.object(asyncio, "create_subprocess_exec", side_effect=direct_exec):
+                with (
+                    patch.object(asyncio, "create_subprocess_exec", side_effect=direct_exec),
+                    patch.dict(sandbox_class._exec.__globals__, {"launch_arguments": fake_launcher}),
+                ):
                     result = await sandbox._exec(["bash", "-c", command], timeout=2, workdir=directory)
                     self.assertEqual(result.exit_code, 0)
                     self.assertEqual(result.stdout, "native-output\n")
                     self.assertEqual(sandbox.native_codex_homes, [str(home)])
-                    with self.assertRaisesRegex(ValueError, "fresh per-episode home"):
+                    with self.assertRaisesRegex(RuntimeError, "resource preparation failed"):
                         await sandbox._exec(["bash", "-c", command], timeout=2, workdir=directory)
         finally:
             shutil.rmtree(home, ignore_errors=True)

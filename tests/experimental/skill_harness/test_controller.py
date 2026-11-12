@@ -40,6 +40,42 @@ data_module = importlib.import_module(PACKAGE + ".alfworld.data")
 batcher = importlib.import_module(PACKAGE + ".replay_batch")
 
 
+class FakeAccountPool:
+    """Replace OS lease allocation only; the real branch proof verifier still runs."""
+
+    def __init__(self):
+        self.leases, self.finished = {}, {}
+
+    def acquire(self, *, run_root, scope_id, kind):
+        identity = f"{len(self.leases) + 1:032x}"
+        ref = {
+            "lease_id": identity, "token": "CPU-lease-fence-" + identity,
+            "uid": 1001, "gid": 1001, "name": "CPU-pair-account",
+            "owner": {"run_root": str(Path(run_root).resolve()), "scope_id": scope_id, "kind": kind},
+        }
+        self.leases[identity] = copy.deepcopy(ref)
+        return ref
+
+    @staticmethod
+    def public(ref):
+        return {key: copy.deepcopy(ref[key]) for key in ("lease_id", "uid", "gid", "name", "owner")}
+
+    def finish(self, ref, *, abandoned=False):
+        if self.leases[ref["lease_id"]] != ref:
+            raise probes.AccountIsolationError("CPU lease fence differs")
+        self.finished[ref["lease_id"]] = bool(abandoned)
+
+    def historical_pair(self, public, *, run_root, group):
+        ref = self.leases[public["lease_id"]]
+        if (
+            self.public(ref) != {key: public[key] for key in ("lease_id", "uid", "gid", "name", "owner")}
+            or self.finished.get(ref["lease_id"], True)
+            or ref["owner"] != {"run_root": str(Path(run_root).resolve()), "scope_id": group, "kind": "pair"}
+        ):
+            raise probes.AccountIsolationError("CPU cached pair has no complete historical lease")
+        return ref
+
+
 class FakeActor:
     world_size = 4
 
@@ -216,6 +252,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.actor, self.gateways, self.probe_calls, self.curate_calls = FakeActor(), [], [], []
         self.negative_probe = False
         self.unknown_backend = False
+        self.account_pool = FakeAccountPool()
         self.cf_input_attack = None
         self.curate_bad_content = {}
         self.curate_bad_fields = {}
@@ -434,6 +471,12 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                     "backend_binding": binding,
                     "backend_terminal": receipt,
                     "backend_stop_confirmed": not self.unknown_backend,
+                    "account_isolation": {
+                        **self.account_pool.public(metadata["host_account_lease"]),
+                        "policy_version": probes.ACCOUNT_POLICY_VERSION,
+                        "status": "attempt_closed", "backend_drained": not self.unknown_backend,
+                        "uid_drained": True,
+                    },
                     "role": "counterfactual_probe",
                     "credit_probe_group": group,
                     "credit_probe_variant": variant,
@@ -467,6 +510,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
             **kwargs,
             run_branch=branch,
             decode_prompt_ids=lambda ids: bytes(ids).decode(),
+            _account_pool=self.account_pool,
         )
 
     async def update(self, controller, data, step):

@@ -13,8 +13,8 @@ import os
 import pwd
 import subprocess
 import sys
-import tempfile
 import urllib.request
+import uuid
 from pathlib import Path
 
 RECIPE = Path(__file__).resolve().parents[1]
@@ -83,6 +83,110 @@ def native_tmp_storage_preflight(*, environ=None):
 def check(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+def restricted_native_preflight(run, executable):
+    """Exercise the production kernel launcher without contacting a model.
+
+    The roster must already be provisioned and initialized by an operator. A
+    failed launch/closure leaves a quarantined lease and sticky run incident.
+    """
+    from verl.experimental.skill_harness.alfworld.accounts import (
+        POLICY_VERSION,
+        WORK_ROOT,
+        AccountIsolationError,
+        AccountPool,
+        decode_launcher_proof,
+        landlock_abi,
+        launch_arguments,
+    )
+    from verl.experimental.skill_harness.alfworld.native_files import archive_native_files
+
+    pool = AccountPool()
+    available, abi = pool.available(), landlock_abi()
+    check(available >= 64, "Fewer than 64 clean private attempt accounts are available")
+    scope, attempt = uuid.uuid4().hex, uuid.uuid4().hex
+    output = Path(run) / "diagnostics" / ("account_preflight_" + scope)
+    output.mkdir(parents=True, mode=0o700)
+    lease = pool.acquire(run_root=run, scope_id=scope)
+    reader = writer = None
+    try:
+        pool.begin_attempt(lease, attempt_id=attempt, output=output)
+        account = pool.account(lease)
+        WORK_ROOT.mkdir(mode=0o711, exist_ok=True)
+        check(not WORK_ROOT.is_symlink() and WORK_ROOT.stat().st_uid == os.geteuid(), "Unsafe episode parent")
+        WORK_ROOT.chmod(0o711)
+        cwd, home = WORK_ROOT / uuid.uuid4().hex, Path("/tmp") / ("codex-home-" + uuid.uuid4().hex)
+        for path, kind in ((cwd, "workspace"), (home, "codex_home")):
+            path.mkdir(mode=0o700)
+            os.chown(path, account.pw_uid, account.pw_gid)
+            pool.register_resource(lease, attempt, path, kind)
+        reader, writer = os.pipe()
+        argv, controlled, _ = launch_arguments(
+            account, [str(executable), "--version"], home=home, cwd=cwd, ready_fd=writer
+        )
+        env = {
+            "PATH": "/opt/alfworld-tools:/usr/local/bin:/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "CODEX_HOME": str(home),
+            **controlled,
+        }
+        for name in ("CODEX_NATIVE_BIN", "ALFWORLD_SOLVER_INSTRUCTIONS_FILE"):
+            env[name] = os.environ[name]
+        if os.environ.get("ALFWORLD_CODEX_PACKAGE_ROOT"):
+            env["CODEX_MANAGED_PACKAGE_ROOT"] = os.environ["ALFWORLD_CODEX_PACKAGE_ROOT"]
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            pass_fds=(writer,),
+            start_new_session=True,
+            text=True,
+        )
+        os.close(writer)
+        writer = None
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+        except BaseException:
+            pool.drain(lease)
+            process.communicate(timeout=5)
+            raise
+        proof = decode_launcher_proof(os.read(reader, 65536), uid=account.pw_uid, gid=account.pw_gid)
+        pool.mark_launcher(lease, attempt, proof)
+        check(process.returncode == 0, "Restricted native Codex version check failed: " + stderr.strip())
+        pool.drain(lease)
+        (output / "native-version.json").write_text(
+            json.dumps({"stdout": stdout, "stderr": stderr, "returncode": process.returncode}) + "\n"
+        )
+        receipt = archive_native_files(
+            output, codex_homes=[home], workspace=cwd, agent_uid=account.pw_uid, account_lease_id=lease["lease_id"]
+        )
+        summary = pool.close_attempt(
+            lease, attempt, receipt_path=output / "native-files.json", backend_drained=True, native_started=True
+        )
+        return {
+            "policy_version": POLICY_VERSION,
+            "pool_size": len(pool.roster),
+            "available_before": available,
+            "landlock_abi": abi,
+            "launcher": proof,
+            "native_version": stdout.strip(),
+            "closure": summary,
+            "archive_sha256": receipt["archive_sha256"],
+        }
+    except BaseException as error:
+        # A failed probe must never return the account to the free list.
+        pool.quarantine(lease, error, attempt_id=attempt)
+        if isinstance(error, AccountIsolationError):
+            raise
+        raise AccountIsolationError("Private-account native preflight failed; retained for reconciliation") from error
+    finally:
+        for fd in (reader, writer):
+            if fd is not None:
+                os.close(fd)
 
 
 def main() -> int:
@@ -156,43 +260,9 @@ def main() -> int:
     check(Path(os.environ["CODEX_NATIVE_BIN"]).is_file(), "Native Codex executable is missing")
     check(os.access(os.environ["CODEX_NATIVE_BIN"], os.X_OK), "Native Codex executable is not executable")
     check(Path(os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"]).is_file(), "Solver instructions are missing")
-    account = pwd.getpwnam("alfworld_eval")
-    report["agent_user"] = {"name": account.pw_name, "uid": account.pw_uid}
     check(os.access("/opt/alfworld-tools/alfworld-step", os.X_OK), "The game tool is missing")
     task_config = json.loads(Path(os.environ["ALFWORLD_TASK_CONFIG"]).read_text())
-    work_root = Path("/tmp/alfworld-skill-episodes")
-    work_root.mkdir(mode=0o711, exist_ok=True)
-    check(not work_root.is_symlink() and work_root.stat().st_uid == os.geteuid(), "Unsafe episode work parent")
-    work_root.chmod(0o711)
-    with tempfile.TemporaryDirectory(prefix="preflight-", dir=work_root) as directory:
-        os.chown(directory, account.pw_uid, account.pw_gid)
-        os.chmod(directory, 0o700)
-        native_check = subprocess.run(
-            [
-                "/usr/sbin/runuser",
-                "-u",
-                account.pw_name,
-                "--",
-                "/bin/sh",
-                "-c",
-                'cd "$1" && shift && exec "$@"',
-                "native-check",
-                directory,
-                task_config[0]["agent"]["codex_bin"],
-                "--version",
-            ],
-            env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
-                "LANG": "C.UTF-8",
-                "CODEX_NATIVE_BIN": os.environ["CODEX_NATIVE_BIN"],
-                "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": os.environ["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"],
-            },
-            text=True,
-            capture_output=True,
-            timeout=15,
-        )
-    check(native_check.returncode == 0, f"Restricted native Codex launch failed: {native_check.stderr.strip()}")
-    report["restricted_native_codex_version"] = native_check.stdout.strip()
+    report["account_isolation"] = restricted_native_preflight(run, task_config[0]["agent"]["codex_bin"])
 
     from hydra import compose, initialize_config_dir
     from omegaconf import OmegaConf

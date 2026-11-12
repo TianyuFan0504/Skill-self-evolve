@@ -19,12 +19,15 @@ import types
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 DIRECTORY = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld"
 SPEC = importlib.util.spec_from_file_location("_native_files_cpu", DIRECTORY / "native_files.py")
 FILES = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(FILES)
+ACCOUNT_SPEC = importlib.util.spec_from_file_location("_native_files_accounts_cpu", DIRECTORY / "accounts.py")
+ACCOUNTS = importlib.util.module_from_spec(ACCOUNT_SPEC)
+ACCOUNT_SPEC.loader.exec_module(ACCOUNTS)
 
 
 class NativeFilesTest(unittest.TestCase):
@@ -166,11 +169,25 @@ class NativeFilesTest(unittest.TestCase):
 
         tree = ast.parse((DIRECTORY / "task.py").read_text())
         node = next(x for x in tree.body if isinstance(x, ast.ClassDef) and x.name == "AlfworldUserSandbox")
-        scope = {"LocalSandbox": LocalWriter, "Path": Path, "re": re, "os": os}
+        incident = Mock()
+        scope = {
+            "LocalSandbox": LocalWriter,
+            "Path": Path,
+            "re": re,
+            "os": os,
+            "AccountIsolationError": ACCOUNTS.AccountIsolationError,
+            "record_isolation_incident": incident,
+        }
         exec(compile(ast.Module(body=[node], type_ignores=[]), "actual_catalog_write_hook", "exec"), scope)
         sandbox = object.__new__(scope["AlfworldUserSandbox"])
-        with self.assertRaisesRegex(OSError, "primary catalog disk full"):
+        sandbox.native_model_catalogs = []
+        sandbox.account_lease = {"lease_id": "cpu", "owner": {"run_root": str(self.output)}}
+        sandbox.attempt_id = "cpu"
+        self.catalog.unlink()
+        with self.assertRaisesRegex(ACCOUNTS.AccountIsolationError, "catalog preparation failed") as raised:
             asyncio.run(sandbox.write_file(str(self.catalog), b"original catalog bytes"))
+        self.assertIn("primary catalog disk full", str(raised.exception.__cause__))
+        incident.assert_called_once()
         self.assertEqual(sandbox.native_model_catalogs, [str(self.catalog)])
         result = FILES.archive_native_files(
             self.output, model_catalogs=sandbox.native_model_catalogs, agent_uid=os.geteuid()
@@ -193,6 +210,18 @@ class NativeFilesTest(unittest.TestCase):
 
 class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
     async def test_enospc_mkdir_retains_primary_error_and_writes_raw_result(self):
+        await self._task_case()
+
+    async def test_unconfirmed_uid_drain_preserves_sources_and_never_archives(self):
+        await self._task_case(drain_failure=True)
+
+    async def test_early_admin_create_python_error_is_sticky_before_any_lease(self):
+        await self._task_case(host_failure="early_create")
+
+    async def test_post_start_sdk_python_error_is_fatal_after_raw_result(self):
+        await self._task_case(host_failure="sdk")
+
+    async def _task_case(self, *, drain_failure=False, host_failure=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output, work = root / "attempt", root / "work"
@@ -219,7 +248,8 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                     return False
 
                 def raise_for_status(self):
-                    pass
+                    if host_failure == "early_create" and getattr(self, "url", "").endswith("/create"):
+                        raise OSError("injected admin create transport failure")
 
                 async def json(self):
                     return self.payload
@@ -227,6 +257,7 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             class Client(Response):
                 def post(self, url, **_):
                     response = Response()
+                    response.url = url
                     response.payload = (
                         {"session_id": "session", "catalog_digest": "catalog", "state": {}}
                         if url.endswith("/create")
@@ -253,7 +284,7 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             real_mkdir = Path.mkdir
 
             def full_disk(path, *args, **kwargs):
-                if path.parent == work:
+                if path.parent == work and not drain_failure and host_failure is None:
                     raise OSError(errno.ENOSPC, "primary episode disk full")
                 return real_mkdir(path, *args, **kwargs)
 
@@ -263,9 +294,37 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 if isinstance(x, ast.ClassDef) and x.name == "AlfworldSkillTrainingTask"
             )
             package = "_task_enospc_cpu"
+            lease = {
+                "lease_id": "cpu",
+                "uid": os.getuid(),
+                "gid": os.getgid(),
+                "name": "cpu",
+                "owner": {"run_root": str(root)},
+            }
+            pool = types.SimpleNamespace(
+                acquire=Mock(return_value=lease),
+                begin_attempt=Mock(),
+                account=Mock(return_value=types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())),
+                public=lambda ref: ref,
+                drain=Mock(
+                    side_effect=OSError("injected residual UID process") if drain_failure else None,
+                    return_value={"uid": os.getuid(), "remaining_pids": [], "drained": True},
+                ),
+                register_resource=Mock(),
+                quarantine=Mock(),
+                close_attempt=Mock(),
+                close_empty_attempt=Mock(),
+            )
+            incidents = Mock()
             scope = {
                 "__package__": package,
                 "Task": object,
+                "AccountPool": lambda: pool,
+                "AccountIsolationError": ACCOUNTS.AccountIsolationError,
+                "POLICY_VERSION": ACCOUNTS.POLICY_VERSION,
+                "record_isolation_incident": incidents,
+                "asyncio": asyncio,
+                "PairedWorkspace": types.SimpleNamespace(_json=lambda path, value: path.write_text(json.dumps(value))),
                 "TaskConfig": object,
                 "TASK_NAME": "fixture",
                 "register_task": lambda _: lambda cls: cls,
@@ -283,10 +342,53 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 "validate_game_reference": lambda *_: None,
                 "authoritative_reward": lambda _: 0.0,
                 "TaskResult": lambda **kwargs: types.SimpleNamespace(**kwargs),
+                "agent_messages": lambda *args, **kwargs: [],
+                "_validated_state": lambda value: None,
+                "AlfworldUserSandbox": lambda *args, **kwargs: sandbox,
             }
             exec(compile(ast.Module(body=[node], type_ignores=[]), "actual_enospc_task", "exec"), scope)
             task = scope["AlfworldSkillTrainingTask"]()
+            native_home = Path("/tmp") / ("codex-home-" + uuid.uuid4().hex)
+            sandbox = types.SimpleNamespace(
+                native_codex_homes=[], native_model_catalogs=[], native_started=False, terminal_stop_evidence=[]
+            )
+
+            async def run_agent(**kwargs):
+                native_home.mkdir(mode=0o700)
+                (native_home / "inflight.txt").write_text("must survive unconfirmed drain")
+                (Path(kwargs["workdir"]) / "inflight.txt").write_text("must remain")
+                sandbox.native_codex_homes.append(str(native_home))
+                if host_failure == "sdk":
+                    raise OSError("injected SDK stream transport failure")
+                return types.SimpleNamespace(info={"ok": True, "exit_code": 0})
+
+            agent = types.SimpleNamespace(
+                config=types.SimpleNamespace(
+                    model=types.SimpleNamespace(base_url="http://127.0.0.1/sessions/gateway/v1")
+                ),
+                run=run_agent,
+            )
+            task.build_agent = lambda: agent
+            binding = types.SimpleNamespace(binding_sha256="sha", binding_id="binding")
+            backend = types.ModuleType(package + ".backend_terminal")
+            backend.bind_episode = lambda *args, **kwargs: binding
+
+            async def wait_for_drain(*args, **kwargs):
+                return {
+                    "schema_version": 1,
+                    "binding_id": "binding",
+                    "binding_sha256": "sha",
+                    "attempt_id": "attempt",
+                    "gateway_session_id": "gateway",
+                    "environment_session_id": "session",
+                    "active_requests": 0,
+                    "backend_stop_confirmed": True,
+                    "status": "drained",
+                }
+
+            backend.wait_for_terminal_drain = wait_for_drain
             task.config = types.SimpleNamespace(
+                prompt=[],
                 metadata={
                     "run_dir": str(root),
                     "game_id": "game",
@@ -298,20 +400,66 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                     "relative_game_path": "game.tw-pddl",
                     "game_sha256": "sha",
                     "catalog_digest": "catalog",
-                }
+                },
             )
-            with (
-                patch.dict(os.environ, {"ALFWORLD_SERVER_CONFIG": str(settings)}),
-                patch.object(Path, "mkdir", full_disk),
-            ):
-                with patch.dict(sys.modules, {package + ".native_files": FILES}):
-                    result = await task.run()
-            saved = json.loads((output / "result.json").read_text())
-            self.assertIn("primary episode disk full", saved["agent_error"])
-            self.assertIn("Native workspace missing during cleanup", saved["agent_error"])
-            self.assertNotIn("FileNotFoundError", saved["agent_error"])
-            self.assertFalse(result.extra_info["eval_completed"])
-            self.assertEqual(saved["reward"], 0.0)  # The explicit CPU fixture engine outcome, not a fallback.
+            original_archive = FILES.archive_native_files
+
+            def fixture_archive(*args, **kwargs):
+                return original_archive(*args, workspace_root=work, **kwargs)
+
+            try:
+                with (
+                    patch.dict(os.environ, {"ALFWORLD_SERVER_CONFIG": str(settings), "SKILL_RUN_DIR": str(root)}),
+                    patch.object(Path, "mkdir", full_disk),
+                    patch.object(FILES, "archive_native_files", side_effect=fixture_archive) as archived,
+                ):
+                    with patch.dict(
+                        sys.modules, {package + ".native_files": FILES, package + ".backend_terminal": backend}
+                    ):
+                        if host_failure == "early_create":
+                            with self.assertRaisesRegex(OSError, "admin create transport failure"):
+                                await task.run()
+                            self.assertFalse((output / "result.json").exists())
+                            pool.begin_attempt.assert_not_called()
+                            pool.quarantine.assert_not_called()
+                            archived.assert_not_called()
+                            incidents.assert_called_once()
+                            self.assertEqual(Path(incidents.call_args.args[0]), root.resolve())
+                            return
+                        message = (
+                            "Host attempt execution failed"
+                            if host_failure == "sdk"
+                            else "UID process drain failed"
+                            if drain_failure
+                            else "boundary setup failed"
+                        )
+                        with self.assertRaisesRegex(ACCOUNTS.AccountIsolationError, message):
+                            await task.run()
+                    if drain_failure:
+                        archived.assert_not_called()
+                saved = json.loads((output / "result.json").read_text())
+                if drain_failure:
+                    self.assertTrue((native_home / "inflight.txt").is_file())
+                    self.assertTrue((Path(saved["workdir"]) / "inflight.txt").is_file())
+                elif host_failure == "sdk":
+                    self.assertIn("injected SDK stream transport failure", saved["agent_error"])
+                    self.assertIn("Host attempt execution failed", saved["account_isolation_error"])
+                    archived.assert_called_once()
+                    self.assertFalse(native_home.exists())
+                    self.assertTrue((output / "native-files.json").is_file())
+                    self.assertGreaterEqual(incidents.call_count, 2)
+                    self.assertEqual(Path(incidents.call_args.args[0]), root.resolve())
+                else:
+                    self.assertIn("primary episode disk full", saved["agent_error"])
+                    self.assertIn("Native workspace missing during cleanup", saved["agent_error"])
+                    self.assertNotIn("FileNotFoundError", saved["agent_error"])
+                    self.assertGreaterEqual(incidents.call_count, 2)
+                pool.quarantine.assert_called_once()
+                pool.close_attempt.assert_not_called()
+                pool.close_empty_attempt.assert_not_called()
+                self.assertEqual(saved["reward"], 0.0)  # Fixture engine outcome, not fallback training data.
+            finally:
+                shutil.rmtree(native_home, ignore_errors=True)
 
 
 if __name__ == "__main__":

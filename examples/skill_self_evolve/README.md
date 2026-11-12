@@ -219,6 +219,9 @@ runs, which do not establish improved test performance.
 
 ## Joint native skill training
 
+Complete the one-time [private account setup](ACCOUNT_ISOLATION.md) and
+[host acceptance](ACCOUNT_ISOLATION_ACCEPTANCE.md) before starting the recipe.
+
 On the eight-H100 host, start the full solver/curate harness with:
 
 ```bash

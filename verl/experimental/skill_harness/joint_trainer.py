@@ -37,6 +37,7 @@ from verl.utils import tensordict_utils as tu
 from verl.utils.metric import Metric
 from verl.utils.transferqueue_utils import tq
 
+from .alfworld.accounts import assert_no_isolation_incidents
 from .controller import SkillJointController, preflight_controller_identity
 from .framework import (
     TEXT_ONLY_MEDIA_FIELDS,
@@ -311,11 +312,13 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
 
     def _update_actor(self, batch, metrics):
         with self._joint_lock:
+            assert_no_isolation_incidents(self.config.skill_harness.artifact_root)
             assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             if self._joint_controller is None:
                 raise RuntimeError("Joint controller must be initialized before any optimizer update")
             source = self._materialize_solver(batch)
             prepared = self._await(self._joint_controller.prepare_update(source, self.global_steps))
+            assert_no_isolation_incidents(self.config.skill_harness.artifact_root)
             assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             output = self._await(self.actor_rollout_wg.update_actor(prepared.data))
             actual = self._ema_clock()
