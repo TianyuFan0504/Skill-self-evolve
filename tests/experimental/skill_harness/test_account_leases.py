@@ -64,6 +64,56 @@ class AccountLeaseTests(unittest.TestCase):
             kind="pair" if pair else "ordinary",
         )
 
+    def test_default_pool_is_host_local_and_disjoint_from_retained_v1_identities(self):
+        roster = self.module.expected_roster()
+        self.assertEqual(self.module.POOL_ROOT, Path("/var/lib/alfworld-skill-harness/account_pool_v2"))
+        self.assertEqual(len(roster), 128)
+        self.assertEqual({item["uid"] for item in roster}, set(range(20000, 20128)))
+        self.assertEqual({item["gid"] for item in roster}, set(range(20000, 20128)))
+        self.assertEqual({item["name"] for item in roster}, {f"alfworld_ep2_{i:03d}" for i in range(128)})
+        self.assertTrue({item["uid"] for item in roster}.isdisjoint(range(19000, 19128)))
+        self.assertTrue({item["name"] for item in roster}.isdisjoint(f"alfworld_ep_{i:03d}" for i in range(128)))
+        self.assertEqual(self.module.POLICY_VERSION, "alfworld-uid-landlock-v1")
+        with (
+            mock.patch.object(Path, "open", side_effect=AssertionError("Constructor must not open any registry")),
+            mock.patch.object(Path, "mkdir", side_effect=AssertionError("Constructor must not create a registry")),
+        ):
+            pool = self.module.AccountPool()
+        self.assertEqual(pool.root, self.module.POOL_ROOT)
+        self.assertEqual(pool.roster, roster)
+
+    def test_fresh_registry_keeps_retained_old_lock_state_and_quarantine_untouched(self):
+        old = self.root / "retained-nas-pool-v1"
+        (old / "quarantined-uids").mkdir(parents=True)
+        (old / ".lock").write_bytes(b"Retained old distributed-lock inode fixture; never open it during new init")
+        (old / "state.json").write_text(json.dumps({"slots": {"19001": "retained-old-lease"}}))
+        (old / "quarantined-uids/19001").write_text("Uncertain old lease remains quarantined\n")
+        before = {str(path): path.read_bytes() for path in old.rglob("*") if path.is_file()}
+        new = self.module.AccountPool(
+            self.root / "host-local-pool-v2",
+            processes=lambda _uid: [],
+            validate=lambda roster: roster,
+            signal_process=self.signals,
+        )
+        original_open = Path.open
+
+        def no_old_registry_access(path, *args, **kwargs):
+            if Path(path).is_relative_to(old):
+                raise AssertionError("Fresh pool must never open the retained old registry or its lock")
+            return original_open(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "open", no_old_registry_access):
+            new.initialize()
+            self.assertEqual(new.available(), 128)
+            ref = new.acquire(run_root=self.run, scope_id=uuid.uuid4().hex)
+            self.assertEqual(ref["uid"], 20000)
+            self.assertEqual(ref["gid"], 20000)
+            self.assertEqual(ref["name"], "alfworld_ep2_000")
+            self.assertEqual(new.available(), 127)
+            self.assertEqual(set(new.public(ref)), {"lease_id", "uid", "gid", "name", "owner"})
+        self.assertEqual(before, {str(path): path.read_bytes() for path in old.rglob("*") if path.is_file()})
+        self.signals.assert_not_called()
+
     def state(self, ref):
         return json.loads((self.pool.root / "leases" / (ref["lease_id"] + ".json")).read_text())
 

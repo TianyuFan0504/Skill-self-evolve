@@ -1,8 +1,8 @@
 # Private ALFWorld attempt identities
 
 ALFWorld native solver and counterfactual episodes use a fixed roster of 128
-non-login users, `alfworld_ep_000` through `alfworld_ep_127`, each with a private
-UID/GID in `19000..19127`. There is no shared `alfworld_eval` fallback. Account
+non-login users, `alfworld_ep2_000` through `alfworld_ep2_127`, each with a private
+UID/GID in `20000..20127`. There is no shared `alfworld_eval` fallback. Account
 creation is an explicit operator action, never a Task or import side effect.
 
 ## Provisioning and preflight
@@ -20,7 +20,37 @@ python3 verl/experimental/skill_harness/alfworld/accounts.py check
 attributes is an error; the module does not repair or modify it. All identities
 must have the exact marker comment, `/nonexistent` home, nologin shell, locked
 password and no supplementary memberships. The registry is host-private under
-`/root/nas_chaohuang/skill_training/account_pool_v1`.
+`/var/lib/alfworld-skill-harness/account_pool_v2` on the host's local
+filesystem. UID ownership and process signalling are local to this host; their
+control lock must not depend on the NAS distributed-lock service. Trajectories,
+archives, checkpoints and other training artifacts continue to use the NAS.
+
+The new registry is empty until explicitly provisioned and initialized. It uses
+a disjoint roster rather than importing old slot state. The retained NAS
+`/root/nas_chaohuang/skill_training/account_pool_v1`, its `19000..19127` identities,
+leases, lock, quarantine markers and any older waiting administration processes
+remain untouched. Creating the new registry does not release or reconcile an
+old UID. Lease/proof schemas, the `alfworld-uid-landlock-v1` kernel policy and
+the account marker comment remain unchanged; `v2` names the fresh registry and
+roster generation.
+
+Before a new training run, validate the new 128 OS identities, initialize the
+local registry, and repeat actual owned-process drain and production Native
+preflight checks. CPU fixtures do not provision accounts or establish those
+runtime results. Historical acceptance reports retain their original roster
+and source identity.
+
+The production Conda interpreter subsequently passed 23 actual checks using
+the new local registry: a leased UID 20000 child was drained through the real
+pidfd compatibility path and its scope released; an unrelated owned control
+remained alive at the measurement point. The existing restricted Native
+preflight then passed for UID 20001 with Landlock, seccomp, empty groups, zero
+capabilities, Codex 0.167.0, archival and release. Availability returned to 128.
+The acceptance artifact is
+`/root/nas_chaohuang/skill_training/diagnostics/module65_pool_acceptance_1794457900/acceptance.json`,
+SHA256 `c54eb4b9869eb2737c1bcf6b5d3ae28fd53657c44a81a6536494916a974d2078`.
+This is host/Native lifecycle evidence; no model, benchmark reward or optimizer
+was created by that probe.
 
 The normal recipe preflight requires at least 64 clean available identities,
 Linux Landlock ABI1 or newer, and the supported Linux x86_64 syscall guard. It

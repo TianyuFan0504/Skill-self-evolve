@@ -30,10 +30,10 @@ from types import SimpleNamespace
 
 POLICY_VERSION = "alfworld-uid-landlock-v1"
 SECCOMP_GUARD = "abi1-truncate-x86_64-v1"
-POOL_ROOT = Path("/root/nas_chaohuang/skill_training/account_pool_v1")
-UID_BASE = 19000
+POOL_ROOT = Path("/var/lib/alfworld-skill-harness/account_pool_v2")
+UID_BASE = 20000
 POOL_SIZE = 128
-ACCOUNT_PREFIX = "alfworld_ep_"
+ACCOUNT_PREFIX = "alfworld_ep2_"
 ACCOUNT_COMMENT = "ALFWorld private attempt account v1"
 INCIDENT_DIRECTORY = "diagnostics/account_isolation_incidents"
 WORK_ROOT = Path("/tmp/alfworld-skill-episodes")
