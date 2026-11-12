@@ -81,6 +81,16 @@ request result and retain the same action ID. The launcher refuses an existing
 legacy service rather than silently changing a live service. Resume requires
 the same profile and the separately reconciled service transition.
 
+For `--parallel-environment --resume`, the launcher automatically selects
+`train_direct_checkpoint.py`. Its coordinator reuses one full checkpoint
+validation and reads model, optimizer, EMA and dataloader files directly from
+the original immutable checkpoint. Only writable skill/replay/ledger state
+and small JSON metadata get independent working copies. Fresh parallel starts
+keep their existing entry. See [DIRECT_CHECKPOINT_READ.md](DIRECT_CHECKPOINT_READ.md)
+and [DIRECT_CHECKPOINT_ENTRY.md](DIRECT_CHECKPOINT_ENTRY.md) for the source
+guards and explicitly recorded outer-entry/component provenance. This choice
+does not restart an already running experiment.
+
 Training and actor/reference logprob microbatch sizes remain explicit Hydra
 overrides. Choose them from the isolated memory, throughput and numerical
 checks for the actual model and trajectory lengths; process parallelism alone

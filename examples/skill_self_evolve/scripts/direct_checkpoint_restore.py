@@ -97,6 +97,10 @@ def coordinator_class(core=None):
                 (checkpoint.checkpoint_dir, checkpoint.manifest_id),
                 after,
             )
+            # Only the latest successful selection can be restored. Inherited
+            # saves also validate, so do not retain every historical inventory.
+            self._proofs.clear()
+            self._selected.clear()
             self._proofs[id(checkpoint)] = proof
             self._selected[str(root)] = checkpoint
             return checkpoint

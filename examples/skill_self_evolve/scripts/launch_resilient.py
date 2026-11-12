@@ -180,6 +180,12 @@ def launch_receipt(launcher, run, command, *, fresh_manifest, args):
             "environment_launcher": RECIPE / "scripts/parallel_environment_launcher.py",
             "environment_request_client": RECIPE / "scripts/alfworld_request_client.py",
         })
+        if args.resume:
+            assets.update({
+                "driver": RECIPE / "scripts/train_direct_checkpoint.py",
+                "parallel_component": RECIPE / "scripts/train_parallel_client.py",
+                "checkpoint_coordinator": RECIPE / "scripts/direct_checkpoint_restore.py",
+            })
     folder = run / "launcher_runs"
     folder.mkdir(exist_ok=True, mode=0o700)
     path = folder / (str(time.time_ns()) + ".resilient.json")
@@ -187,6 +193,7 @@ def launch_receipt(launcher, run, command, *, fresh_manifest, args):
         "schema_version": 1, "kind": "public_resilient_joint_launch",
         "native_spawn_extension": getattr(args, "spawn_safe", False),
         "parallel_environment_extension": getattr(args, "parallel_environment", False),
+        "direct_checkpoint_read": getattr(args, "parallel_environment", False) and args.resume,
         "command": command, "run_dir": str(run), "resume_requested": args.resume,
         "fresh_training_manifest_created": fresh_manifest,
         "original_training_manifest_preserved": (run / "training-manifest.json").exists() and not fresh_manifest,
@@ -219,7 +226,8 @@ def main(argv=None):
     original = json.loads((run / "launch_manifest.json").read_bytes())["command"]
     if original[1:3] != ["-m", "verl.experimental.skill_harness.train"]:
         raise ValueError("Unexpected existing preparation command")
-    driver = ("train_parallel_client.py" if args.parallel_environment else
+    driver = ("train_direct_checkpoint.py" if args.parallel_environment and args.resume else
+              "train_parallel_client.py" if args.parallel_environment else
               "train_spawn_safe.py" if args.spawn_safe else "train_resilient_setup.py")
     command = [original[0], str(RECIPE / "scripts" / driver), *original[3:]]
     if args.prepare_only:

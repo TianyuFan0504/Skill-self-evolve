@@ -135,6 +135,19 @@ class LaunchTests(unittest.TestCase):
         self.assertIn("parallel-service", self.events)
         self.assertNotIn("service", self.events)
 
+    def test_parallel_resume_selects_direct_checkpoint_reader(self):
+        spawn_module = types.ModuleType("skill_harness_examples.native_posix_spawn")
+        spawn_module.NativeSpawnPolicy = lambda _: None
+        service_module = types.ModuleType("skill_harness_examples.parallel_environment_launcher")
+        service_module.start_environment = lambda *args: (56789, False)
+        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, service_module.__name__: service_module}), \
+                patch.object(module, "launch_receipt", return_value=self.run / "receipt.json"), \
+                patch.object(module.subprocess, "Popen", return_value=types.SimpleNamespace(pid=1234)) as spawn:
+            self.assertEqual(self.execute("--parallel-environment", "--resume"), 0)
+        payload = json.loads(Path(spawn.call_args.args[0][3]).read_text())
+        self.assertTrue(payload["command"][1].endswith("train_direct_checkpoint.py"))
+        self.assertEqual(payload["environment_pid"], 56789)
+
     def test_spawn_helper_failure_precedes_preparation(self):
         fake = types.ModuleType("skill_harness_examples.native_posix_spawn")
 

@@ -183,6 +183,20 @@ class DirectReadTests(unittest.TestCase):
                     coordinator.restore_verified(selected, **self.arguments(destination=changed, load_online=loader))
                 loader.assert_not_called()
 
+    def test_latest_selection_invalidates_prior_proof_and_save_cache_stays_bounded(self):
+        saved = self.save()
+        coordinator = DirectCoordinator()
+        first = coordinator.validate(saved.checkpoint_dir, expected=self.spec.compatibility())
+        latest = coordinator.validate(saved.checkpoint_dir, expected=self.spec.compatibility())
+        with self.assertRaises(core.JointCheckpointError):
+            coordinator.restore_verified(first, **self.arguments())
+        coordinator.restore_verified(latest, **self.arguments())
+        self.coordinator = coordinator
+        for index in range(3):
+            self.save("later_save_" + str(index))
+            self.assertEqual(len(coordinator._proofs), 1)
+            self.assertEqual(len(coordinator._selected), 1)
+
     def test_changed_actor_ema_or_data_after_validation_fails_before_loaders(self):
         for relative in ("actor/optim_world_size_2_rank_0.pt", "joint_state/ema/ema_rank_00000.pt", "data.pt"):
             with self.subTest(relative=relative):
