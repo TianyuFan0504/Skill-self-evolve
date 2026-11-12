@@ -5,8 +5,10 @@ from __future__ import annotations
 import ast
 import asyncio
 import errno
+import gzip
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -107,12 +109,12 @@ class NativeFilesTest(unittest.TestCase):
         original_open = tarfile.open
 
         def corrupt(path, mode, *args, **kwargs):
-            if mode == "r:gz":
+            if mode == "r|":
                 Path(path).write_bytes(b"corrupt archive bytes")
             return original_open(path, mode, *args, **kwargs)
 
         with patch.object(FILES.tarfile, "open", side_effect=corrupt):
-            with self.assertRaises(tarfile.TarError):
+            with self.assertRaises((tarfile.TarError, gzip.BadGzipFile)):
                 self.archive()
         self.assertTrue(self.home.exists())
         self.assertTrue(self.catalog.exists())
@@ -134,7 +136,7 @@ class NativeFilesTest(unittest.TestCase):
         original = tarfile.open
 
         def changed(path, mode, *args, **kwargs):
-            if mode == "r:gz":
+            if mode == "r|":
                 self.catalog.write_bytes(b"changed native source")
             return original(path, mode, *args, **kwargs)
 
@@ -156,6 +158,99 @@ class NativeFilesTest(unittest.TestCase):
             self.assertTrue(member.issym())
             self.assertEqual(member.linkname, str(victim))
         self.assertEqual(victim.read_bytes(), b"not part of the native archive")
+
+    def test_many_reverse_created_members_verify_once_without_random_seeks(self):
+        scratch = self.output / "scratch"
+        scratch.mkdir()
+        work = scratch / uuid.uuid4().hex
+        work.mkdir()
+        for index in reversed(range(512)):
+            (work / f"package-{index:04d}.bin").write_bytes(hashlib.sha256(str(index).encode()).digest() * 4)
+        original_verify, original_read = FILES.verify_native_archive, gzip.GzipFile.read
+        observed = {"bytes": 0, "read_calls": 0}
+
+        def counted_read(stream, size=-1):
+            value = original_read(stream, size)
+            observed["bytes"] += len(value)
+            observed["read_calls"] += 1
+            return value
+
+        def verify(archive, contents, manifest):
+            # Dict traversal order is deliberately different from archive order.
+            reversed_contents = dict(reversed(list(contents.items())))
+            with (
+                patch.object(gzip.GzipFile, "read", counted_read),
+                patch.object(gzip.GzipFile, "seek", side_effect=AssertionError("gzip seek is forbidden")),
+                patch.object(tarfile.TarFile, "getmember", side_effect=AssertionError("linear lookup is forbidden")),
+                patch.object(tarfile.TarFile, "getmembers", side_effect=AssertionError("inventory scan is forbidden")),
+            ):
+                result = original_verify(archive, reversed_contents, manifest)
+            expected_data = sum(item.get("size", 0) for item in contents.values()) + len(manifest)
+            self.assertLessEqual(observed["bytes"], expected_data + (len(contents) + 1) * 4096 + 10240)
+            self.assertEqual(result["verified_entries"], len(contents) + 1)
+            self.assertGreater(observed["read_calls"], 0)
+            return result
+
+        with patch.object(FILES, "verify_native_archive", side_effect=verify):
+            result = self.archive(workspace=work, workspace_root=scratch)
+        self.assertEqual(result["status"], "archived_and_removed")
+        self.assertFalse(work.exists())
+
+    def test_streaming_hardlinks_require_prior_verified_matching_content(self):
+        payload = b"original hardlink bytes"
+        expected = {"kind": "file", "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        contents = {"source": expected, "linked": dict(expected)}
+        manifest = json.dumps(contents, sort_keys=True).encode()
+        for order in (("source", "linked"), ("linked", "source")):
+            archive = self.output / (order[0] + ".tar.gz")
+            with tarfile.open(archive, "w:gz") as target:
+                for name in order:
+                    entry = tarfile.TarInfo(name)
+                    if name == "source":
+                        entry.size = len(payload)
+                        target.addfile(entry, io.BytesIO(payload))
+                    else:
+                        entry.type, entry.linkname = tarfile.LNKTYPE, "source"
+                        target.addfile(entry)
+                entry = tarfile.TarInfo("native-source-manifest.json")
+                entry.size = len(manifest)
+                target.addfile(entry, io.BytesIO(manifest))
+            if order[0] == "source":
+                self.assertEqual(FILES.verify_native_archive(archive, contents, manifest)["verified_files"], 2)
+                wrong = {**contents, "linked": {**expected, "sha256": "0" * 64}}
+                with self.assertRaisesRegex(ValueError, "Archive content differs"):
+                    FILES.verify_native_archive(archive, wrong, manifest)
+            else:
+                with self.assertRaisesRegex(ValueError, "prior hardlink"):
+                    FILES.verify_native_archive(archive, contents, manifest)
+
+    def test_streaming_verifier_rejects_content_manifest_and_inventory_corruption(self):
+        payload = b"retained bytes"
+        contents = {"source": {"kind": "file", "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}}
+        manifest = json.dumps(contents).encode()
+        for fault in ("content", "manifest", "duplicate", "unexpected", "gzip_crc", "gzip_truncated"):
+            archive = self.output / (fault + ".tar.gz")
+            with tarfile.open(archive, "w:gz") as target:
+                entry = tarfile.TarInfo("source")
+                value = b"corrupt bytes!" if fault == "content" else payload
+                entry.size = len(value)
+                target.addfile(entry, io.BytesIO(value))
+                if fault in ("duplicate", "unexpected"):
+                    extra = tarfile.TarInfo("source" if fault == "duplicate" else "unexpected")
+                    extra.size = len(payload)
+                    target.addfile(extra, io.BytesIO(payload))
+                value = manifest[:-1] + b"x" if fault == "manifest" else manifest
+                entry = tarfile.TarInfo("native-source-manifest.json")
+                entry.size = len(value)
+                target.addfile(entry, io.BytesIO(value))
+            if fault == "gzip_crc":
+                corrupt = bytearray(archive.read_bytes())
+                corrupt[-8] ^= 1
+                archive.write_bytes(corrupt)
+            elif fault == "gzip_truncated":
+                archive.write_bytes(archive.read_bytes()[:-4])
+            with self.subTest(fault=fault), self.assertRaises((ValueError, gzip.BadGzipFile, EOFError)):
+                FILES.verify_native_archive(archive, contents, manifest)
 
     def test_unregistered_path_or_symlink_never_removes_other_files(self):
         victim = self.output / "unrelated"

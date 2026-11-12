@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import json
@@ -11,6 +12,59 @@ import shutil
 import stat
 import tarfile
 from pathlib import Path
+
+
+def verify_native_archive(archive, contents, manifest):
+    """Verify every member in physical order without seeking through gzip.
+
+    Hardlinks may reference only a previously verified regular file or hardlink.
+    No source path is opened, changed or removed by this verification helper.
+    """
+    seen, verified_files = set(), {}
+    manifest_name = "native-source-manifest.json"
+    with gzip.open(archive, "rb") as decoded:
+        with tarfile.open(archive, "r|", fileobj=decoded) as check:
+            for entry in check:
+                name = entry.name
+                if name in seen or (name not in contents and name != manifest_name):
+                    raise ValueError("Archive entry inventory differs from the original native files")
+                seen.add(name)
+                if name == manifest_name:
+                    if not entry.isfile() or entry.size != len(manifest):
+                        raise ValueError("Archive source manifest differs from the original native files")
+                    with check.extractfile(entry) as source:
+                        if source.read() != manifest:
+                            raise ValueError("Archive source manifest differs from the original native files")
+                    continue
+                expected = contents[name]
+                if expected["kind"] == "file":
+                    if entry.isfile():
+                        hasher, size = hashlib.sha256(), 0
+                        with check.extractfile(entry) as source:
+                            while chunk := source.read(1 << 20):
+                                hasher.update(chunk)
+                                size += len(chunk)
+                        actual = {"size": size, "sha256": hasher.hexdigest()}
+                    elif entry.islnk() and entry.size == 0 and entry.linkname in verified_files:
+                        actual = verified_files[entry.linkname]
+                    else:
+                        raise ValueError("Archive file or prior hardlink target differs; preserving sources")
+                    valid = actual["size"] == expected["size"] and actual["sha256"] == expected["sha256"]
+                    if valid:
+                        verified_files[name] = actual
+                elif expected["kind"] == "symlink":
+                    valid = entry.issym() and entry.linkname == expected["target"]
+                else:
+                    valid = expected["kind"] == "directory" and entry.isdir()
+                if not valid:
+                    raise ValueError("Archive content differs from the original native files; preserving sources")
+        # Consume through gzip EOF so its CRC/trailer is checked too. Tar itself
+        # stops at its zero blocks and may leave padding buffered in the stream.
+        while decoded.read(1 << 20):
+            pass
+    if seen != set(contents) | {manifest_name}:
+        raise ValueError("Archive entry inventory differs from the original native files")
+    return {"verified_entries": len(seen), "verified_files": len(verified_files)}
 
 
 def archive_native_files(
@@ -149,28 +203,7 @@ def archive_native_files(
         entry = tarfile.TarInfo("native-source-manifest.json")
         entry.size, entry.mode = len(manifest), 0o600
         target.addfile(entry, io.BytesIO(manifest))
-    with tarfile.open(archive, "r:gz") as check:
-        if set(check.getnames()) != set(contents) | {"native-source-manifest.json"}:
-            raise ValueError("Archive entry inventory differs from the original native files")
-        if check.extractfile("native-source-manifest.json").read() != manifest:
-            raise ValueError("Archive source manifest differs from the original native files")
-        for name, expected in contents.items():
-            entry = check.getmember(name)
-            if expected["kind"] == "file":
-                hasher = hashlib.sha256()
-                size = 0
-                with check.extractfile(entry) as source:
-                    while chunk := source.read(1 << 20):
-                        hasher.update(chunk)
-                        size += len(chunk)
-                valid = (entry.isfile() or entry.islnk()) and size == expected["size"]
-                valid = valid and hasher.hexdigest() == expected["sha256"]
-            elif expected["kind"] == "symlink":
-                valid = entry.issym() and entry.linkname == expected["target"]
-            else:
-                valid = entry.isdir()
-            if not valid:
-                raise ValueError("Archive content differs from the original native files; preserving sources")
+    verify_native_archive(archive, contents, manifest)
 
     def verify_source_stability():
         if any(signature(path) != expected for path, expected in source_stats.items()):
