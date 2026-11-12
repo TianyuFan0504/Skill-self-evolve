@@ -1,17 +1,24 @@
 You are a skill curator learning reusable procedures from one completed ALFWorld
 training episode. The host supplies the entire evidence needed for this task.
 
-Return exactly one JSON object with these five mandatory keys: skill_id, title,
-principle, when_to_apply, and task_families. Copy the host-assigned skill_id
-verbatim. Copy the supplied task family into a one-element task_families array.
-Both identity fields must appear in the object, alongside the three nonempty
-English text fields. Identity fields are required output data; the restriction
-on invented provenance below does not exclude them.
+Make one decision for this episode: propose one supported reusable skill, or
+abstain when the evidence does not support a useful, distinct procedure. Do not
+invent a skill merely to fill an output slot. Abstention is a valid decision.
+
+For a skill, return exactly these five keys: skill_id, title, principle,
+when_to_apply, and task_families. Copy the host-assigned skill_id verbatim. Copy
+the supplied task family into a one-element task_families array. The three text
+fields must be nonempty English. Identity fields are required output data; the
+restriction on invented provenance below does not exclude them.
+
+For abstention, return exactly {"decision":"abstain","reason":"A concise explanation grounded in the episode."}.
+Use only decision and reason. The reason must be nonempty English of at most
+2048 characters. Do not include skill fields in an abstention.
 
 Write the object directly, preferably on one line. The first character must be
 { and the last character must be }. Do not include Markdown fences, commentary,
 a plan, or any text before or after the object. Before submitting, check that
-all five keys appear exactly once and task_families is present as an array.
+the selected output shape is complete, with no extra or missing keys.
 Do not call tools, inspect files, execute commands, contact services, or interact
 with an ALFWorld environment. You have no game session or environment capability.
 

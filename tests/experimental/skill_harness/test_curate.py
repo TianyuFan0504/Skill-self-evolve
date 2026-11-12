@@ -193,7 +193,7 @@ class CurateTest(unittest.TestCase):
 
         return Agent()
 
-    def collect(self, **kwargs):
+    def collection_arguments(self, **kwargs):
         arguments = dict(
             gateway_manager=self.gateway,
             behavior=self.behavior,
@@ -207,7 +207,90 @@ class CurateTest(unittest.TestCase):
             _sandbox_factory=FakeSandbox,
         )
         arguments.update(kwargs)
-        return asyncio.run(curate.collect_curate_candidate(**arguments))
+        return arguments
+
+    def collect(self, **kwargs):
+        return asyncio.run(curate.collect_curate_candidate(**self.collection_arguments(**kwargs)))
+
+    def completed_source_files(self, *, steps=1, trace_present=True):
+        directory = self.root / ("completed-" + uuid.uuid4().hex)
+        directory.mkdir()
+        result = {
+            key: copy.deepcopy(value)
+            for key, value in self.source.items()
+            if key not in {"finished", "initial_state", "transitions"}
+        }
+        result.update(
+            steps=steps, won=bool(steps), done=bool(steps), reward=float(bool(steps)), accuracy=float(bool(steps))
+        )
+        initial = {"observation": "A mug is on the counter.", "steps": 0, "max_steps": 50, "won": False, "done": False}
+        for name in ("result.json", "engine-result.json"):
+            (directory / name).write_text(json.dumps(result))
+        (directory / "initial-state.json").write_text(json.dumps(initial))
+        if trace_present:
+            (directory / "environment-trace.jsonl").write_text(
+                "" if not steps else json.dumps(self.source["transitions"][0]) + "\n"
+            )
+        return directory
+
+    def test_completed_zero_action_source_is_censored_without_rewriting_artifacts(self):
+        for trace_present in (False, True):
+            with self.subTest(trace_present=trace_present):
+                directory = self.completed_source_files(steps=0, trace_present=trace_present)
+                original = {path.name: path.read_bytes() for path in directory.iterdir()}
+                with self.assertRaises(curate.CurateSourceCensored) as caught:
+                    curate.load_completed_solver_episode(directory)
+                self.assertEqual(caught.exception.reason, "source_has_no_environment_actions")
+                self.assertEqual(caught.exception.evidence["steps"], 0)
+                self.assertEqual(caught.exception.evidence["trace_present"], trace_present)
+                self.assertEqual(set(caught.exception.evidence["artifact_sha256"]), set(original))
+                self.assertEqual(original, {path.name: path.read_bytes() for path in directory.iterdir()})
+        self.assertEqual(self.gateway.created, [])
+
+    def test_source_redaction_still_requires_a_nonempty_action_sequence(self):
+        source = {**self.source, "steps": 0, "won": False, "reward": 0.0, "accuracy": 0.0, "transitions": []}
+        with self.assertRaisesRegex(curate.CurateProtocolError, "nonempty"):
+            curate.redact_completed_episode(source)
+
+    def test_completed_nonzero_source_missing_trace_remains_fatal(self):
+        directory = self.completed_source_files(trace_present=False)
+        with self.assertRaises(FileNotFoundError):
+            curate.load_completed_solver_episode(directory)
+
+    def test_zero_action_source_corruption_is_not_censorship(self):
+        corruptions = (
+            "engine_identity", "train_phase", "initial_world", "invalid_budget", "trace_entries", "trace_json"
+        )
+        for corruption in corruptions:
+            with self.subTest(corruption=corruption):
+                directory = self.completed_source_files(steps=0, trace_present=False)
+                if corruption == "engine_identity":
+                    path = directory / "engine-result.json"
+                    value = json.loads(path.read_text())
+                    value["game_sha256"] = "c" * 64
+                    path.write_text(json.dumps(value))
+                elif corruption == "train_phase":
+                    path = directory / "result.json"
+                    value = json.loads(path.read_text())
+                    value["dataset_phase"] = "dev"
+                    path.write_text(json.dumps(value))
+                elif corruption == "initial_world":
+                    path = directory / "initial-state.json"
+                    value = json.loads(path.read_text())
+                    value["steps"] = 1
+                    path.write_text(json.dumps(value))
+                elif corruption == "invalid_budget":
+                    for name in ("result.json", "engine-result.json", "initial-state.json"):
+                        path = directory / name
+                        value = json.loads(path.read_text())
+                        value["max_steps"] = 0
+                        path.write_text(json.dumps(value))
+                else:
+                    (directory / "environment-trace.jsonl").write_text(
+                        json.dumps(self.source["transitions"][0]) if corruption == "trace_entries" else "{"
+                    )
+                with self.assertRaises(curate.CurateProtocolError):
+                    curate.load_completed_solver_episode(directory)
 
     def test_exact_native_tito_old_mu_retained_with_train_identity(self):
         self.gateway.trajectories[0].extra_fields["native_position_ids"] = [[0, 1, 2, 3, 4, 5]] * 4
@@ -230,6 +313,176 @@ class CurateTest(unittest.TestCase):
         self.assertNotIn("PRIVATE", self.agent_calls[0][0]["content"])
         self.assertEqual(self.gateway.created[0][1]["sampling_params"], curate.SAMPLING)
         self.assertTrue(FakeSandbox.instances[0].closed)
+
+    def test_explicit_abstention_retains_actual_action_without_skill_or_fake_label(self):
+        reason = "  The failed feedback does not establish a distinct reusable procedure.  "
+        self.content = json.dumps({"decision": "abstain", "reason": reason})
+        self.gateway.trajectories[0].extra_fields["native_position_ids"] = [[0, 1, 2, 3, 4, 5]] * 4
+        baseline = self.store.head()
+        result = self.collect()
+        self.assertIsInstance(result, curate.CurateAbstention)
+        self.assertEqual(result.reason, reason)
+        self.assertFalse(result.credit_registration_required)
+        record = curate._read_immutable(Path(result.action_record_path))
+        captured = curate._read_immutable(Path(result.output_dir) / "generated.json")
+        self.assertEqual(record["content"], self.content)
+        self.assertEqual(record["trajectory"], captured["trajectories"][0])
+        self.assertEqual(record["trajectory"]["prompt_ids"], [101, 102, 103])
+        self.assertEqual(record["trajectory"]["action_ids"], [501, 502, 503])
+        self.assertEqual(record["trajectory"]["curate_mask"], [1, 0, 1])
+        self.assertEqual(record["trajectory"]["behavior_logprobs"], [-0.3, 0.0, -0.7])
+        self.assertEqual(record["behavior"]["policy_version"], "ema:3")
+        self.assertEqual(record["context_snapshot"]["task_metadata"]["game_id"], self.source["game_id"])
+        self.assertEqual(record["context_snapshot"]["native_position_ids"], [[0, 1, 2, 3, 4, 5]] * 4)
+        self.assertFalse(record["reward_event_created"])
+        self.assertFalse(record["training_label_created"])
+        self.assertNotIn("skill_ref", record)
+        self.assertNotIn("candidate_id", record)
+        self.assertEqual(result.action_record_sha256, curate._file_hash(result.action_record_path))
+        self.assertEqual(self.store.head(), baseline)
+        self.assertEqual(list((self.store.root / "candidates").glob("*.json")), [])
+        self.assertEqual(list((self.replay.root / "records").glob("*.json")), [])
+        complete = curate._read_immutable(Path(result.output_dir) / "complete.json")
+        self.assertEqual(complete["decision"], "abstain")
+        self.assertNotIn("replay_ref", complete)
+
+    def test_completed_abstention_retry_is_readonly_and_never_resamples(self):
+        self.content = json.dumps({"decision": "abstain", "reason": "The observed evidence is insufficient."})
+        first = self.collect()
+
+        def no_writes():
+            raise AssertionError("A completed retry must not enter the commit gate")
+
+        self.assertEqual(self.collect(before_commit=no_writes), first)
+        self.assertEqual(len(self.agent_calls), 1)
+        self.assertEqual(len(self.gateway.created), 1)
+        self.assertEqual(list((self.store.root / "candidates").glob("*.json")), [])
+
+    def test_abstention_recovers_interrupted_acknowledgement_without_new_generation(self):
+        self.content = json.dumps({"decision": "abstain", "reason": "The observation does not support a stable rule."})
+        write = curate._write_immutable
+
+        def interrupted(path, payload):
+            if path.name == "complete.json":
+                raise OSError("abstention acknowledgement interrupted")
+            return write(path, payload)
+
+        with patch.object(curate, "_write_immutable", side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, "acknowledgement interrupted"):
+                self.collect()
+        directory = self.root / "collections" / self.request.collection_id
+        self.assertTrue((directory / "abstention.json").is_file())
+        self.assertIsInstance(self.collect(), curate.CurateAbstention)
+        self.assertEqual(len(self.agent_calls), 1)
+        self.assertEqual(list((self.replay.root / "records").glob("*.json")), [])
+
+    def test_abstention_acknowledgement_detects_changed_action_record(self):
+        self.content = json.dumps({"decision": "abstain", "reason": "No transferable procedure was established."})
+        result = self.collect()
+        path = Path(result.action_record_path)
+        value = json.loads(path.read_text())
+        value["payload"]["trajectory"]["behavior_logprobs"][0] = -9.0
+        path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(curate.CurateProtocolError, "durable action record"):
+            self.collect()
+        self.assertEqual(len(self.agent_calls), 1)
+
+    def test_malformed_abstentions_are_not_valid_decisions_or_skill_candidates(self):
+        values = [
+            {"decision": "abstain"},
+            {"decision": "abstain", "reason": ""},
+            {"decision": "abstain", "reason": "   "},
+            {"decision": "abstain", "reason": None},
+            {"decision": "abstain", "reason": "x" * 2049},
+            {"decision": "abstain", "reason": "Inspect /tmp/private/file"},
+            {"decision": "abstain", "reason": "Consult http://127.0.0.1/service"},
+            {"decision": "abstain", "reason": "No reusable evidence.", "skill_id": "invented"},
+        ]
+        for index, value in enumerate(values):
+            with self.subTest(value=value):
+                self.request = replace(self.request, candidate_group_id="invalid-abstention:" + str(index))
+                self.content = json.dumps(value)
+                with self.assertRaises(curate.CurateProtocolError):
+                    self.collect()
+                directory = self.root / "collections" / self.request.collection_id
+                self.assertTrue((directory / "generated.json").is_file())
+                self.assertFalse((directory / "abstention.json").exists())
+                self.assertFalse((directory / "complete.json").exists())
+        self.assertEqual(list((self.store.root / "candidates").glob("*.json")), [])
+        self.assertEqual(list((self.replay.root / "records").glob("*.json")), [])
+
+    def test_abstention_requires_real_aligned_processed_mu_and_observed_EMA_version(self):
+        self.content = json.dumps({"decision": "abstain", "reason": "Insufficient observed evidence."})
+        original = copy.deepcopy(self.gateway.trajectories)
+        cases = ("missing_mu", "unaligned_mu", "positive_mu", "context_mu", "mixed_version")
+        for name in cases:
+            with self.subTest(case=name):
+                self.request = replace(self.request, candidate_group_id="abstention-" + name)
+                self.gateway.trajectories = copy.deepcopy(original)
+                row = self.gateway.trajectories[0]
+                if name == "missing_mu":
+                    row.response_logprobs = None
+                elif name == "unaligned_mu":
+                    row.response_logprobs = [-0.3, 0.0]
+                elif name == "positive_mu":
+                    row.response_logprobs[0] = 0.3
+                elif name == "context_mu":
+                    row.response_logprobs[1] = -0.1
+                else:
+                    row.extra_fields["max_global_steps"] = 4
+                with self.assertRaises(curate.CurateProtocolError):
+                    self.collect()
+                directory = self.root / "collections" / self.request.collection_id
+                self.assertFalse((directory / "abstention.json").exists())
+        self.assertEqual(list((self.replay.root / "records").glob("*.json")), [])
+
+    def test_commit_gate_holds_skill_and_abstention_writes_after_generation_capture(self):
+        async def scenario(abstain):
+            entered, release = asyncio.Event(), asyncio.Event()
+            self.request = replace(self.request, candidate_group_id="commit-gate:" + str(abstain))
+            self.content = (
+                json.dumps({"decision": "abstain", "reason": "No distinct reusable evidence."}) if abstain else None
+            )
+            before_candidates = set((self.store.root / "candidates").glob("*.json"))
+            before_replay = set((self.replay.root / "records").glob("*.json"))
+
+            async def gate():
+                entered.set()
+                await release.wait()
+
+            task = asyncio.create_task(
+                curate.collect_curate_candidate(**self.collection_arguments(before_commit=gate))
+            )
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=2)
+                directory = self.root / "collections" / self.request.collection_id
+                self.assertTrue((directory / "generated.json").is_file())
+                self.assertFalse((directory / "complete.json").exists())
+                self.assertFalse((directory / "abstention.json").exists())
+                self.assertEqual(set((self.store.root / "candidates").glob("*.json")), before_candidates)
+                self.assertEqual(set((self.replay.root / "records").glob("*.json")), before_replay)
+            finally:
+                release.set()
+                result = await task
+            self.assertIsInstance(result, curate.CurateAbstention if abstain else curate.CurateCollection)
+
+        for abstain in (False, True):
+            with self.subTest(abstain=abstain):
+                asyncio.run(scenario(abstain))
+
+    def test_failed_commit_gate_preserves_capture_for_retry_without_resampling(self):
+        self.content = json.dumps({"decision": "abstain", "reason": "No reliable generalization is supported."})
+
+        async def unavailable():
+            raise OSError("checkpoint commit gate unavailable")
+
+        with self.assertRaisesRegex(OSError, "commit gate unavailable"):
+            self.collect(before_commit=unavailable)
+        directory = self.root / "collections" / self.request.collection_id
+        self.assertTrue((directory / "generated.json").is_file())
+        self.assertFalse((directory / "complete.json").exists())
+        self.assertIsInstance(self.collect(), curate.CurateAbstention)
+        self.assertEqual(len(self.agent_calls), 1)
 
     def test_completed_retry_is_idempotent_without_another_native_call(self):
         first, again = self.collect(), self.collect()
@@ -401,6 +654,7 @@ class CurateTest(unittest.TestCase):
         self.assertIn("--ignore-user-config", wrapper)
         self.assertIn("CURATOR_CODEX_HOME", wrapper)
         self.assertNotIn("--output-schema", wrapper)
+        self.assertEqual(json.loads(Path(runtime.schema_path).read_text()), curate.CURATE_ACTION_SCHEMA)
         model = json.loads(Path(runtime.model_catalog_path).read_text())["models"][0]
         self.assertTrue(model["supports_parallel_tool_calls"])
         self.assertIn("skill curator", model["base_instructions"])

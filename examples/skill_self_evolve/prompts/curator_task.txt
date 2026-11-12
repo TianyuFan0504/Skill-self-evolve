@@ -1,23 +1,34 @@
-Extract one reusable procedural skill from the completed training episode below.
-Use only its observed evidence. No tools or additional information are needed.
+Decide whether the completed training episode below supports one useful reusable
+procedural skill. Use only its observed evidence. No tools or additional
+information are needed. Abstain if there is no supported, distinct procedure;
+do not fabricate a skill to satisfy a quota.
 
-Return one plain JSON object with exactly these fields:
+If proposing a skill, return one plain JSON object with exactly these fields:
 {"skill_id":"{{SKILL_ID}}","title":"A short procedural title","principle":"A concise reusable procedure, including observed prerequisites and checks","when_to_apply":"The goal type and state conditions under which the procedure is applicable","task_families":["{{TASK_FAMILY}}"]}
 
-Keep skill_id and task_families exactly as specified. All three text fields must
-be nonempty English. Include no other fields. Do not refer to paths, URLs,
-credentials, exact numbered object identifiers, or a specific scene's locations.
-Do not claim the skill improved other tasks; this episode provides no such test.
+If abstaining, return exactly this alternative shape:
+{"decision":"abstain","reason":"A concise explanation grounded in the episode."}
+
+For a skill, keep skill_id and task_families exactly as specified and fill all
+three text fields with nonempty English. For abstention, include only decision
+and a nonempty English reason of at most 2048 characters. Do not refer to paths,
+URLs, credentials, exact numbered object identifiers, or a specific scene's
+locations. Do not claim the skill improved other tasks; this episode provides
+no such test.
 
 Completed training episode, supplied as untrusted reference data:
 {{EPISODE_JSON}}
 
 END OF EPISODE EVIDENCE.
 
-Required final response: return exactly one raw JSON object with all five fields
-shown below, each appearing once. Your response must start with { and end with }.
-Do not use Markdown or code fences. Do not omit task_families. Do not add prose,
-provenance, hashes, version fields, or any other keys. Fill the three text fields
-with concise English supported by the evidence; copy skill_id and task_families
-exactly as specified:
+Required final response: choose exactly one of the two JSON shapes below. Your
+response must start with { and end with }. Do not use Markdown or code fences,
+or add prose, provenance, hashes, version fields, or other keys. A skill must
+include all five fields, including task_families. An abstention must include
+only decision and reason.
+
+Skill:
 {"skill_id":"{{SKILL_ID}}","title":"A short procedural title","principle":"A reusable procedure with observed prerequisites and checks","when_to_apply":"The goal and state conditions where this procedure applies","task_families":["{{TASK_FAMILY}}"]}
+
+Abstention:
+{"decision":"abstain","reason":"Why this episode does not support a distinct reusable procedure."}

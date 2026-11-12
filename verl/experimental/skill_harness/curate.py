@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import copy
 import hashlib
+import inspect
 import ipaddress
 import json
 import math
@@ -39,7 +40,7 @@ from .alfworld.data import TASK_TYPES, validate_relative_game_path
 from .replay import CurateReplay, CurateReplayRecord, ReplayRef
 from .store import SkillArtifact, SkillCandidate, SkillStore
 
-COLLECTOR_VERSION = "native-codex-curate-v2"
+COLLECTOR_VERSION = "native-codex-curate-v3"
 EVENT_CLASSIFIER_VERSION = "codex-startup-diagnostics-v1"
 NATIVE_CODEX_VERSION = "0.167.0"
 NATIVE_CONFIG_OVERRIDES = (
@@ -89,12 +90,33 @@ SKILL_SCHEMA = {
         "task_families": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string"}},
     },
 }
+ABSTENTION_REASON_MAX_CHARS = 2048
+ABSTENTION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["decision", "reason"],
+    "properties": {
+        "decision": {"const": "abstain"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": ABSTENTION_REASON_MAX_CHARS},
+    },
+}
+CURATE_ACTION_SCHEMA = {"oneOf": [SKILL_SCHEMA, ABSTENTION_SCHEMA]}
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class CurateProtocolError(ValueError):
     """The observed generation cannot safely enter the current curate objective."""
+
+
+class CurateSourceCensored(RuntimeError):
+    """A consistent completed source has no environment actions to summarize."""
+
+    reason = "source_has_no_environment_actions"
+
+    def __init__(self, evidence):
+        super().__init__("Completed solver source has zero observed environment actions")
+        self.evidence = evidence
 
 
 class CurateRecoveryRequired(RuntimeError):
@@ -277,9 +299,8 @@ def _redact_text(value):
     )
 
 
-def redact_completed_episode(source):
-    """Copy only observed train actions/states/outcomes, never expert/private data."""
-    source = json.loads(_canonical(source))
+def _completed_episode_identity(source):
+    """Validate the shared source identity before action or censorship checks."""
     if source.get("split") != "train" or source.get("dataset_phase") != "train" or source.get("finished") is not True:
         raise CurateProtocolError("Curator generation accepts completed official training episodes only")
     family = source.get("task_type")
@@ -298,6 +319,13 @@ def redact_completed_episode(source):
     won = source.get("won")
     if type(won) is not bool or source.get("reward") != float(won) or source.get("accuracy") != float(won):
         raise CurateProtocolError("Source reward/accuracy must match the authoritative boolean environment outcome")
+    return family, won
+
+
+def redact_completed_episode(source):
+    """Copy only observed train actions/states/outcomes, never expert/private data."""
+    source = json.loads(_canonical(source))
+    family, won = _completed_episode_identity(source)
     initial = source.get("initial_state", {})
     steps = []
     for index, entry in enumerate(source.get("transitions", []), 1):
@@ -347,9 +375,37 @@ def load_completed_solver_episode(directory):
         )
     ]
     result, engine, initial = [json.loads(path.read_text()) for path in paths[:3]]
-    for key in ("game_id", "catalog_digest", "split", "won", "reward", "steps", "max_steps"):
+    for key in ("game_id", "game_sha256", "catalog_digest", "split", "won", "done", "reward", "steps", "max_steps"):
         if result.get(key) != engine.get(key):
             raise CurateProtocolError("Completed solver artifacts disagree with the authoritative engine result")
+    if type(result.get("steps")) is int and result["steps"] == 0:
+        source = json.loads(_canonical({**result, "finished": True, "initial_state": initial}))
+        _completed_episode_identity(source)
+        if (
+            type(engine.get("steps")) is not int
+            or type(engine.get("max_steps")) is not int
+            or engine["max_steps"] < 1
+            or type(engine.get("done")) is not bool
+            or not isinstance(initial, dict)
+            or any(
+                type(initial.get(key)) is not type(engine.get(key)) or initial.get(key) != engine.get(key)
+                for key in ("steps", "max_steps", "won", "done")
+            )
+        ):
+            raise CurateProtocolError("Zero-action source must preserve its authoritative initial world state")
+        _redact_text(initial.get("observation"))
+        trace_present = os.path.lexists(paths[3])
+        if trace_present and any(line.strip() for line in paths[3].read_text().splitlines()):
+            raise CurateProtocolError("Zero-action source cannot contain environment trace entries")
+        raise CurateSourceCensored(
+            {
+                "game_id": result["game_id"],
+                "attempt_id": result["attempt_id"],
+                "steps": 0,
+                "trace_present": trace_present,
+                "artifact_sha256": {path.name: _file_hash(path) for path in paths if path != paths[3] or trace_present},
+            }
+        )
     source = {
         **result,
         "finished": True,
@@ -559,7 +615,7 @@ def provision_native_curator_runtime(
         {
             "system": system,
             "task": task,
-            "schema": SKILL_SCHEMA,
+            "schema": CURATE_ACTION_SCHEMA,
             "model": model,
             "native_version": native_version,
             "disabled_features": DISABLED_FEATURES,
@@ -578,7 +634,7 @@ def provision_native_curator_runtime(
     catalog_path, wrapper_path = public / "model_catalog.json", public / "codex-curator"
     _public_file(instructions, system)
     _public_file(task_path, task)
-    _public_file(schema_path, json.dumps(SKILL_SCHEMA, indent=2) + "\n")
+    _public_file(schema_path, json.dumps(CURATE_ACTION_SCHEMA, indent=2) + "\n")
     _public_file(catalog_path, json.dumps({"models": [model]}, indent=2) + "\n")
     command = [
         str(native_bin),
@@ -858,6 +914,43 @@ def _validate_capture(tokens, behavior):
         raise CurateProtocolError("Actual processed behavior logprobs are required; recomputation is forbidden")
     if not tokens["prompt_ids"] or not tokens["action_ids"] or not any(tokens["curate_mask"]):
         raise CurateProtocolError("Initial role loss requires a complete nonempty authored curate action")
+    prompt, actions, mask, probabilities = (
+        tokens[key] for key in ("prompt_ids", "action_ids", "curate_mask", "behavior_logprobs")
+    )
+    if (
+        len(actions) != len(mask)
+        or len(actions) != len(probabilities)
+        or any(type(token) is not int or token < 0 for token in [*prompt, *actions])
+        or any(type(selected) is not int or selected not in (0, 1) for selected in mask)
+        or any(
+            type(probability) not in (int, float)
+            or not math.isfinite(probability)
+            or probability > 0
+            or (not selected and probability != 0)
+            for selected, probability in zip(mask, probabilities, strict=True)
+        )
+    ):
+        raise CurateProtocolError(
+            "Curator action tokens, masks and processed behavior logprobs must be aligned and valid"
+        )
+
+
+def _parse_abstention(content):
+    """Recognize a valid model abstention without inventing a SkillArtifact."""
+    try:
+        value = json.loads(content)
+    except ValueError:
+        return None  # The existing skill parser supplies the malformed-JSON error.
+    if not isinstance(value, dict) or value.get("decision") != "abstain":
+        return None
+    if set(value) != {"decision", "reason"}:
+        raise CurateProtocolError("Curator abstention must contain only decision and reason")
+    reason = value["reason"]
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > ABSTENTION_REASON_MAX_CHARS:
+        raise CurateProtocolError("Curator abstention reason must be nonempty text of at most 2048 characters")
+    if re.search(r"https?://|(?<!\w)/(?:\w+/)+", reason):
+        raise CurateProtocolError("Curator abstention reason must not contain host paths or network endpoints")
+    return reason
 
 
 def _parse_artifact(content, *, request, family, provenance):
@@ -902,10 +995,59 @@ class CurateCollection:
     credit_registration_required: bool = True
 
 
+@dataclass(frozen=True)
+class CurateAbstention:
+    """A retained neutral model action, without a candidate or skill replay ref."""
+
+    collection_id: str
+    session_id: str
+    reason: str
+    action_record_path: str
+    action_record_sha256: str
+    output_dir: str
+    credit_registration_required: bool = False
+
+
+def _completed_abstention(path, value, *, input_hash):
+    action_path = path.parent / "abstention.json"
+    if (
+        value.get("action_record_path") != str(action_path)
+        or value.get("action_record_sha256") != _file_hash(action_path)
+        or value.get("credit_registration_required") is not False
+    ):
+        raise CurateProtocolError("Completed abstention acknowledgement disagrees with its durable action record")
+    record = _read_immutable(action_path)
+    capture_path = path.parent / "generated.json"
+    captured = _read_immutable(capture_path)
+    if (
+        record.get("kind") != "curate_abstention_action"
+        or record.get("input_hash") != input_hash
+        or record.get("collection_id") != value["collection_id"]
+        or record.get("session_id") != value["session_id"]
+        or record.get("reason") != value["reason"]
+        or record.get("decision") != "abstain"
+        or record.get("generated_capture_sha256") != _file_hash(capture_path)
+        or captured.get("input_hash") != input_hash
+        or captured.get("trajectories") != [record.get("trajectory")]
+        or captured.get("content") != record.get("content")
+        or _parse_abstention(record.get("content", "")) != record.get("reason")
+        or record.get("reward_event_created") is not False
+        or record.get("training_label_created") is not False
+    ):
+        raise CurateProtocolError("Completed abstention differs from the retained native capture")
+    _validate_capture(record["trajectory"], CuratorBehavior(**record["behavior"]))
+    return CurateAbstention(
+        value["collection_id"], value["session_id"], value["reason"], str(action_path),
+        value["action_record_sha256"], str(path.parent),
+    )
+
+
 def _completed_collection(path, *, input_hash, store, replay):
     value = _read_immutable(path)
     if value["input_hash"] != input_hash:
         raise CurateProtocolError("Completed curate identity does not match the requested source/behavior")
+    if value.get("decision") == "abstain":
+        return _completed_abstention(path, value, input_hash=input_hash)
     candidate = store.get_candidate(value["candidate_id"])
     artifact = store.load_artifact(candidate.artifact)
     ref = replay.get_ref(value["record_id"])
@@ -929,8 +1071,9 @@ async def collect_curate_candidate(
     output_root,
     _agent_factory=None,
     _sandbox_factory=None,
+    before_commit=None,
 ):
-    """Run actual native EMA Codex, retain exact old mu, and stage one candidate.
+    """Retain one actual native EMA skill or abstention action and its old mu.
 
     The underscore factories exist for offline protocol tests. Production uses
     unchanged Uni-Agent CodexAgent and the dedicated non-root transport above.
@@ -1062,9 +1205,7 @@ async def collect_curate_candidate(
             "prompt_token_ids_sha256": _digest(tokens["prompt_ids"]),
             "action_token_ids_sha256": _digest(tokens["action_ids"]),
         }
-        artifact = _parse_artifact(
-            captured["content"], request=request, family=redacted["task_family"], provenance=provenance
-        )
+        abstention_reason = _parse_abstention(captured["content"])
         context_snapshot = {
             "collector_version": COLLECTOR_VERSION,
             "input_hash": input_hash,
@@ -1101,27 +1242,75 @@ async def collect_curate_candidate(
             },
             **({"native_position_ids": tokens["native_position_ids"]} if "native_position_ids" in tokens else {}),
         }
-        record = CurateReplayRecord(
-            record_id=request.record_id,
-            producer_uid=request.producer_uid,
-            skill_ref=artifact.ref,
-            prompt_ids=tokens["prompt_ids"],
-            action_ids=tokens["action_ids"],
-            curate_mask=tokens["curate_mask"],
-            behavior_logprobs=tokens["behavior_logprobs"],
-            behavior_policy_version=behavior.policy_version,
-            sampling_config=behavior.sampling_config(),
-            tokenizer_version=behavior.tokenizer_version,
-            template_version=behavior.template_version,
-            context_snapshot=context_snapshot,
-            skill_snapshot_id=request.skill_snapshot_id,
-            candidate_group_id=request.candidate_group_id,
-            candidate_index=request.candidate_index,
-            candidate_group_size=request.candidate_group_size,
-            created_at=request.created_at,
-            trajectory_index=0,
-            trajectory_count=1,
-        )
+        if abstention_reason is not None:
+            action_record = {
+                "schema_version": 1,
+                "kind": "curate_abstention_action",
+                "decision": "abstain",
+                "reason": abstention_reason,
+                "input_hash": input_hash,
+                "collection_id": request.collection_id,
+                "session_id": request.session_id,
+                "request": asdict(request),
+                "behavior": asdict(behavior),
+                "sampling_config": behavior.sampling_config(),
+                "context_snapshot": context_snapshot,
+                "trajectory": tokens,
+                "content": captured["content"],
+                "generated_capture_sha256": _file_hash(captured_path),
+                "reward_event_created": False,
+                "training_label_created": False,
+                "credit_registration_required": False,
+            }
+        else:
+            artifact = _parse_artifact(
+                captured["content"], request=request, family=redacted["task_family"], provenance=provenance
+            )
+            record = CurateReplayRecord(
+                record_id=request.record_id,
+                producer_uid=request.producer_uid,
+                skill_ref=artifact.ref,
+                prompt_ids=tokens["prompt_ids"],
+                action_ids=tokens["action_ids"],
+                curate_mask=tokens["curate_mask"],
+                behavior_logprobs=tokens["behavior_logprobs"],
+                behavior_policy_version=behavior.policy_version,
+                sampling_config=behavior.sampling_config(),
+                tokenizer_version=behavior.tokenizer_version,
+                template_version=behavior.template_version,
+                context_snapshot=context_snapshot,
+                skill_snapshot_id=request.skill_snapshot_id,
+                candidate_group_id=request.candidate_group_id,
+                candidate_index=request.candidate_index,
+                candidate_group_size=request.candidate_group_size,
+                created_at=request.created_at,
+                trajectory_index=0,
+                trajectory_count=1,
+            )
+        if before_commit is not None:
+            permission = before_commit()
+            if inspect.isawaitable(permission):
+                await permission
+        # No await after the gate: a checkpoint cannot interleave with this
+        # synchronous store/replay or neutral-action acknowledgement commit.
+        if abstention_reason is not None:
+            action_path = directory / "abstention.json"
+            _write_immutable(action_path, action_record)
+            acknowledgment = {
+                "decision": "abstain",
+                "input_hash": input_hash,
+                "collection_id": request.collection_id,
+                "session_id": request.session_id,
+                "reason": abstention_reason,
+                "action_record_path": str(action_path),
+                "action_record_sha256": _file_hash(action_path),
+                "credit_registration_required": False,
+            }
+            _write_immutable(complete, acknowledgment)
+            return CurateAbstention(
+                request.collection_id, request.session_id, abstention_reason, str(action_path),
+                acknowledgment["action_record_sha256"], str(directory),
+            )
         candidate = _find_or_stage(store, artifact, "curate-" + request.collection_id, request.skill_snapshot_id)
         ref = replay.append(record)
         _write_immutable(
