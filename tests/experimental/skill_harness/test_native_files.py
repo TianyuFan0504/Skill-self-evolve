@@ -28,6 +28,13 @@ SPEC.loader.exec_module(FILES)
 ACCOUNT_SPEC = importlib.util.spec_from_file_location("_native_files_accounts_cpu", DIRECTORY / "accounts.py")
 ACCOUNTS = importlib.util.module_from_spec(ACCOUNT_SPEC)
 ACCOUNT_SPEC.loader.exec_module(ACCOUNTS)
+BUDGET_SPEC = importlib.util.spec_from_file_location("_native_files_budget_cpu", DIRECTORY / "budget.py")
+BUDGET = importlib.util.module_from_spec(BUDGET_SPEC)
+BUDGET_SPEC.loader.exec_module(BUDGET)
+GUARD_SPEC = importlib.util.spec_from_file_location("_native_files_guard_cpu", DIRECTORY / "terminal_guard.py")
+GUARD = importlib.util.module_from_spec(GUARD_SPEC)
+sys.modules[GUARD_SPEC.name] = GUARD
+GUARD_SPEC.loader.exec_module(GUARD)
 
 
 class NativeFilesTest(unittest.TestCase):
@@ -221,7 +228,10 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
     async def test_post_start_sdk_python_error_is_fatal_after_raw_result(self):
         await self._task_case(host_failure="sdk")
 
-    async def _task_case(self, *, drain_failure=False, host_failure=None):
+    async def test_proven_mdp_stop_closes_task_without_rewriting_raw_native_finish(self):
+        await self._task_case(completed_native_stop=True)
+
+    async def _task_case(self, *, drain_failure=False, host_failure=None, completed_native_stop=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output, work = root / "attempt", root / "work"
@@ -239,6 +249,9 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 )
             )
             engine = {"won": False, "steps": 0, "invalid_actions": 0, "max_steps": 50, "step_limit": False}
+            terminal_state = {"won": True, "done": True, "steps": 3, "max_steps": 50}
+            if completed_native_stop:
+                engine.update(terminal_state)
 
             class Response:
                 async def __aenter__(self):
@@ -284,7 +297,7 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             real_mkdir = Path.mkdir
 
             def full_disk(path, *args, **kwargs):
-                if path.parent == work and not drain_failure and host_failure is None:
+                if path.parent == work and not drain_failure and host_failure is None and not completed_native_stop:
                     raise OSError(errno.ENOSPC, "primary episode disk full")
                 return real_mkdir(path, *args, **kwargs)
 
@@ -312,7 +325,9 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 register_resource=Mock(),
                 quarantine=Mock(),
-                close_attempt=Mock(),
+                close_attempt=Mock(
+                    return_value={"status": "attempt_closed", "uid_drained": True, "backend_drained": True}
+                ),
                 close_empty_attempt=Mock(),
             )
             incidents = Mock()
@@ -340,10 +355,10 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 "validate_loopback_url": lambda value: value,
                 "new_attempt_directory": lambda *_: ("attempt", output),
                 "validate_game_reference": lambda *_: None,
-                "authoritative_reward": lambda _: 0.0,
+                "authoritative_reward": lambda state: float(state["won"]),
                 "TaskResult": lambda **kwargs: types.SimpleNamespace(**kwargs),
                 "agent_messages": lambda *args, **kwargs: [],
-                "_validated_state": lambda value: None,
+                "_validated_state": GUARD._validated_state,
                 "AlfworldUserSandbox": lambda *args, **kwargs: sandbox,
             }
             exec(compile(ast.Module(body=[node], type_ignores=[]), "actual_enospc_task", "exec"), scope)
@@ -360,6 +375,11 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 sandbox.native_codex_homes.append(str(native_home))
                 if host_failure == "sdk":
                     raise OSError("injected SDK stream transport failure")
+                if completed_native_stop:
+                    return types.SimpleNamespace(
+                        finished=False,
+                        info={"ok": False, "exit_code": -1, "error": "agent process stopped after terminal"},
+                    )
                 return types.SimpleNamespace(info={"ok": True, "exit_code": 0})
 
             agent = types.SimpleNamespace(
@@ -375,7 +395,7 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             backend.fence_host_stop = Mock()
 
             async def wait_for_drain(*args, **kwargs):
-                return {
+                receipt = {
                     "schema_version": 1,
                     "binding_id": "binding",
                     "binding_sha256": "sha",
@@ -386,6 +406,16 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                     "backend_stop_confirmed": True,
                     "status": "drained",
                 }
+                if completed_native_stop:
+                    receipt.update(
+                        status="terminal_aborted",
+                        fenced=True,
+                        stop_kind="mdp_terminal",
+                        expected_backend_terminal_stop=True,
+                        terminal_state=terminal_state,
+                        terminal_state_hash=GUARD._validated_state(terminal_state)[1],
+                    )
+                return receipt
 
             backend.wait_for_terminal_drain = wait_for_drain
             task.config = types.SimpleNamespace(
@@ -415,7 +445,12 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                     patch.object(FILES, "archive_native_files", side_effect=fixture_archive) as archived,
                 ):
                     with patch.dict(
-                        sys.modules, {package + ".native_files": FILES, package + ".backend_terminal": backend}
+                        sys.modules,
+                        {
+                            package + ".native_files": FILES,
+                            package + ".backend_terminal": backend,
+                            package + ".budget": BUDGET,
+                        },
                     ):
                         if host_failure == "early_create":
                             with self.assertRaisesRegex(OSError, "admin create transport failure"):
@@ -426,6 +461,18 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                             archived.assert_not_called()
                             incidents.assert_called_once()
                             self.assertEqual(Path(incidents.call_args.args[0]), root.resolve())
+                            return
+                        if completed_native_stop:
+                            result = await task.run()
+                            saved = json.loads((output / "result.json").read_text())
+                            self.assertIs(result.finished, True)
+                            self.assertIs(result.extra_info["native_finished"], False)
+                            self.assertIs(saved["native_finished"], False)
+                            self.assertEqual(result.reward, 1.0)
+                            self.assertIs(result.extra_info["expected_backend_terminal_stop"], True)
+                            incidents.assert_not_called()
+                            self.assertFalse(native_home.exists())
+                            archived.assert_called_once()
                             return
                         message = (
                             "Host attempt execution failed"

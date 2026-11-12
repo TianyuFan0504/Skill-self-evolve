@@ -193,6 +193,19 @@ class ValidationCaseAudit:
                     ):
                         raise ValueError("Raw Task does not match the submitted evaluation identity")
                     won = engine["won"]
+                    budget_proof = None
+                    if any(
+                        task.get(name) is True
+                        for name in ("budget_exhausted", "expected_budget_failure", "budget_reward_eligible")
+                    ):
+                        from .alfworld.budget import verify_budget_failure
+
+                        budget_proof = verify_budget_failure(task=task, engine=engine, output_dir=directory)
+                        if (
+                            task.get("budget_reward_eligible") is not True
+                            or task.get("budget_failure_proof") != budget_proof
+                        ):
+                            raise ValueError("Task budget admission differs from the independently verified proof")
                     case.update(
                         engine_won=won,
                         authoritative_reward=float(won),
@@ -204,6 +217,8 @@ class ValidationCaseAudit:
                         expected_backend_terminal_stop=task.get("expected_backend_terminal_stop") is True,
                         backend_stop_confirmed=task.get("backend_stop_confirmed"),
                         terminal_stop=task.get("terminal_stop"),
+                        observed_budget_failure=budget_proof is not None,
+                        **({"budget_failure_proof": budget_proof} if budget_proof is not None else {}),
                     )
                     if task.get("reward") != float(won) or task.get("accuracy") != float(won):
                         case["reasons"].append("Task reward/accuracy differs from authoritative engine won")
@@ -284,10 +299,12 @@ class ValidationCaseAudit:
             "expected_backend_terminal_stop_cases": sum(
                 case.get("expected_backend_terminal_stop", False) for case in cases
             ),
+            "observed_budget_failure_cases": sum(case.get("observed_budget_failure", False) for case in cases),
             "backend_unconfirmed_cases": sum(case.get("backend_stop_confirmed") is not True for case in raw_cases),
             "unexpected_native_error_cases": sum(
                 bool(case["native_error"]) and not case.get("expected_host_terminal_stop", False)
-                and not case.get("expected_backend_terminal_stop", False) for case in cases
+                and not case.get("expected_backend_terminal_stop", False)
+                and not case.get("observed_budget_failure", False) for case in cases
             ),
             "complete": complete,
             "reasons": reasons,

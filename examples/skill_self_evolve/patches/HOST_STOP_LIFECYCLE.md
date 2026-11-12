@@ -38,6 +38,12 @@ zeros, change the 900-second budget, fabricate environment `done`, alter data,
 or rehabilitate previously quarantined leases. Server-side action deadlines
 and a shared budget-outcome verifier are a separate module.
 
+The subsequent [budget protocol](../../../docs/skill_self_evolve/native_budget_protocol.md)
+implements that separate verifier. Only its independently proven deadline
+failure can set `budget_reward_eligible=true`; the raw Native completion and
+error fields remain unchanged. The [real backend cancellation test](../../../docs/skill_self_evolve/native_backend_cancel_contract.md)
+records transport acceptance independently of any ALFWorld reward claim.
+
 CPU checks cover the existing MDP races, host-only UUID cancellation, abort ACK
 without drain, frontend cancellation, durable actual first-input evidence,
 backend errors/unknown stops, immutable stop kinds, and fence-before-CLI-signal

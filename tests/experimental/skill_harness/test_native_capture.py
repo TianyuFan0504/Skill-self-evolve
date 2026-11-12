@@ -88,6 +88,21 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
         self.sandbox.host_stop_evidence = []
         self.requested_host_stops = []
         self.sandbox._request_backend_stop = self.requested_host_stops.append
+
+        async def register_budget(timeout):
+            started_ns = time.monotonic_ns()
+            return {
+                "started_ns": started_ns,
+                "deadline_ns": started_ns + int(timeout * 1_000_000_000),
+                "budget_seconds": timeout,
+                "registration_sha256": "c" * 64,
+            }
+
+        async def budget_deadline_stop():
+            self.requested_host_stops.append("budget_timeout")
+
+        self.sandbox.register_native_budget = register_budget
+        self.sandbox._budget_deadline_stop = budget_deadline_stop
         self.sandbox.private_tmp_identity = None
         self.sandbox.CAPTURE_DRAIN_TIMEOUT_SECONDS = 0.08
         self.sandbox.TERMINATION_TIMEOUT_SECONDS = 0.08

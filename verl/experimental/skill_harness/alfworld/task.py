@@ -41,6 +41,40 @@ from .protocol import (
 from .terminal_guard import _validated_state, monitor_terminal_process
 
 
+async def _register_native_budget(
+    client, *, base, session_id, headers, binding, account, run_root, output, timeout, budget_seconds
+):
+    """Host-only authenticated registration immediately before native Popen."""
+    from .budget import BINDING_KEYS, validate_budget_registration
+
+    if type(budget_seconds) is not int or budget_seconds <= 0 or isinstance(timeout, bool) or timeout != budget_seconds:
+        raise AccountIsolationError("The native timeout and declared server budget must agree")
+    payload = {
+        "schema_version": 1,
+        "budget_seconds": budget_seconds,
+        "binding": {key: getattr(binding, key) for key in BINDING_KEYS},
+        "account": account,
+    }
+    async with client.post(base + "/admin/budget/" + session_id + "/start", headers=headers, json=payload) as response:
+        response.raise_for_status()
+        registration = await response.json()
+    return validate_budget_registration(
+        registration,
+        payload=payload,
+        session_id=session_id,
+        run_root=run_root,
+        output=output,
+        budget_seconds=budget_seconds,
+    )
+
+
+async def _observe_native_budget(client, *, base, session_id, headers):
+    """Read the private server-ordered world/deadline view, never a model message."""
+    async with client.get(base + "/admin/budget/" + session_id, headers=headers) as response:
+        response.raise_for_status()
+        return await response.json()
+
+
 class PairedWorkspace:
     """Serialize one host-authorized pair and archive/reset its identical cwd.
 
@@ -290,15 +324,13 @@ class AlfworldUserSandbox(LocalSandbox):
         self.terminal_stop_evidence = []
         self.host_stop_evidence = []
         self.backend_binding = None
+        self.budget_registration = None
+        self.register_native_budget = None
+        self.observe_native_budget = None
 
-    def _request_backend_stop(self, stop_kind):
-        from .backend_terminal import fence_host_stop
-
-        if self.backend_binding is None:
-            raise AccountIsolationError("Native stop has no trusted backend attempt binding")
-        proof = fence_host_stop(self.backend_binding, stop_kind, reason="native_cli_" + stop_kind)
+    def _persist_backend_stop(self, requested_stop_kind, proof):
         evidence = {
-            "requested_stop_kind": stop_kind,
+            "requested_stop_kind": requested_stop_kind,
             "effective_stop_kind": proof["stop_kind"],
             "binding_id": self.backend_binding.binding_id,
             "binding_sha256": self.backend_binding.binding_sha256,
@@ -313,6 +345,40 @@ class AlfworldUserSandbox(LocalSandbox):
             stream.flush()
             os.fsync(stream.fileno())
         return evidence
+
+    def _request_backend_stop(self, stop_kind, *, reason=None):
+        from .backend_terminal import fence_host_stop
+
+        if self.backend_binding is None:
+            raise AccountIsolationError("Native stop has no trusted backend attempt binding")
+        proof = fence_host_stop(self.backend_binding, stop_kind, reason=reason or "native_cli_" + stop_kind)
+        return self._persist_backend_stop(stop_kind, proof)
+
+    async def _budget_deadline_stop(self):
+        from .backend_terminal import fence_episode
+        from .budget import digest, make_budget_stop_reason
+
+        registration = self.budget_registration
+        if not registration or not callable(self.observe_native_budget):
+            raise AccountIsolationError("A budget stop has no trusted registered server deadline")
+        ordered = await self.observe_native_budget()
+        state = _validated_state(ordered.get("world_state"))
+        if (
+            not all(ordered.get(key) == value for key, value in registration.items())
+            or ordered.get("server_closed") is not False
+            or ordered.get("deadline_reached") is not True
+            or type(ordered.get("now_ns")) is not int
+            or ordered["now_ns"] < registration["deadline_ns"]
+            or state is None
+            or ordered.get("world_state_sha256") != digest(ordered["world_state"])
+        ):
+            raise AccountIsolationError("The private ordered budget snapshot is unconfirmed")
+        if state[0]["won"] or state[0]["done"]:
+            # The session lock ordered this completed pre-deadline action before
+            # the deadline view. Preserve a real win/MDP terminal before stopping.
+            proof = fence_episode(self.backend_binding, ordered["world_state"])
+            return self._persist_backend_stop("budget_timeout", proof)
+        return self._request_backend_stop("budget_timeout", reason=make_budget_stop_reason(ordered))
 
     async def _observe_terminal_state(self):
         async with aiohttp.ClientSession(
@@ -411,6 +477,16 @@ class AlfworldUserSandbox(LocalSandbox):
                 expected_tmp=self.private_tmp_identity,
             )
             process_env.update(controlled_env)
+            if not callable(self.register_native_budget):
+                raise AccountIsolationError("The native launcher requires a host budget registration callback")
+            self.budget_registration = await self.register_native_budget(timeout)
+            if (
+                not isinstance(self.budget_registration, dict)
+                or type(self.budget_registration.get("deadline_ns")) is not int
+                or time.monotonic_ns() >= self.budget_registration["deadline_ns"]
+            ):
+                raise AccountIsolationError("The registered budget expired or is invalid before native launch")
+            native_started_ns = time.monotonic_ns()
             proc = await asyncio.create_subprocess_exec(
                 *child,
                 stdin=asyncio.subprocess.DEVNULL,
@@ -490,9 +566,16 @@ class AlfworldUserSandbox(LocalSandbox):
         async def stop_owned(stop_kind):
             nonlocal isolation_error
             try:
-                self._request_backend_stop(stop_kind)  # Durable admission fence BEFORE the first CLI signal.
+                if stop_kind == "budget_timeout":
+                    await self._budget_deadline_stop()
+                else:
+                    self._request_backend_stop(stop_kind)  # Durable fence BEFORE the first CLI signal.
             except Exception as error:
                 isolation_error = error
+                try:
+                    self._request_backend_stop("host_error", reason="budget_or_stop_proof_unconfirmed")
+                except Exception as fence_error:
+                    error.add_note("Host-error fallback fence failed: " + str(fence_error))
                 record_isolation_incident(
                     self.account_lease["owner"]["run_root"],
                     error,
@@ -549,7 +632,8 @@ class AlfworldUserSandbox(LocalSandbox):
         finally:
             os.close(ready_read)
         try:
-            await asyncio.wait_for(wait_for_parent_exit(), timeout=timeout)
+            remaining = max(0.0, (self.budget_registration["deadline_ns"] - time.monotonic_ns()) / 1_000_000_000)
+            await asyncio.wait_for(wait_for_parent_exit(), timeout=remaining)
         except asyncio.TimeoutError:
             timed_out = True
             await stop_owned("budget_timeout")
@@ -596,6 +680,11 @@ class AlfworldUserSandbox(LocalSandbox):
             "terminal_monitor_error": terminal_monitor_error,
             "backend_stop_confirmed": None,
             "host_stop_evidence": list(getattr(self, "host_stop_evidence", [])),
+            "declared_budget_seconds": self.budget_registration.get("budget_seconds"),
+            "budget_registration_sha256": self.budget_registration.get("registration_sha256"),
+            "budget_started_ns": self.budget_registration.get("started_ns"),
+            "budget_deadline_ns": self.budget_registration["deadline_ns"],
+            "native_started_ns": native_started_ns,
         }
         # Capture failures are host diagnostics, never invented native stderr.
         with (self.output / "native-capture-diagnostics.jsonl").open("a", encoding="utf-8") as stream:
@@ -634,13 +723,25 @@ class AlfworldSkillTrainingTask(Task):
         return root.resolve(strict=True)
 
     async def run(self):
+        from .budget import BudgetOutcomeUnknown
+
         trusted_root = self._trusted_run_root()
         try:
             if Path(self.config.metadata["run_dir"]).resolve() != trusted_root:
                 raise AccountIsolationError("Task metadata run_dir differs from the trusted host run root")
             return await self._run_episode()
         except asyncio.CancelledError:
-            raise  # Cancellation retains the existing owned-resource finally path.
+            raise
+        except BudgetOutcomeUnknown as budget_error:
+            if (
+                self.config.metadata.get("role") == "counterfactual_probe"
+                and getattr(budget_error, "safely_closed_budget_censor", False) is True
+            ):
+                raise  # Only a host-attested, safely closed CF unknown may be censored per case.
+            record_isolation_incident(trusted_root, "Unobserved solver budget outcome: " + str(budget_error))
+            raise AccountIsolationError(
+                "An unobserved budget outcome forbids partial GRPO-group training"
+            ) from budget_error
         except Exception as error:
             # The official adapter may filter a failed Task. A durable host
             # barrier must survive that filtering and forbid learner updates.
@@ -707,6 +808,7 @@ class AlfworldSkillTrainingTask(Task):
             session_id = created["session_id"]
             workdir = None
             agent_info = {}
+            native_finished = None
             error = None
             skill_context = None
             paired_workspace = None
@@ -837,9 +939,30 @@ class AlfworldSkillTrainingTask(Task):
                     attempt_id=attempt_id,
                 )
                 sandbox.backend_binding = backend_binding
+
+                async def register_native_budget(timeout):
+                    return await _register_native_budget(
+                        client,
+                        base=base,
+                        session_id=session_id,
+                        headers=headers,
+                        binding=backend_binding,
+                        account=account_pool.public(account_lease),
+                        run_root=Path(metadata["run_dir"]),
+                        output=output,
+                        timeout=timeout,
+                        budget_seconds=settings.get("budget_seconds", 900),
+                    )
+
+                async def observe_native_budget():
+                    return await _observe_native_budget(client, base=base, session_id=session_id, headers=headers)
+
+                sandbox.register_native_budget = register_native_budget
+                sandbox.observe_native_budget = observe_native_budget
                 agent_started = True
                 agent_result = await agent.run(sandbox=sandbox, messages=messages, workdir=str(workdir))
                 agent_info = agent_result.info or {}
+                native_finished = getattr(agent_result, "finished", None)
             except asyncio.CancelledError as cancelled_error:
                 try:
                     request_host_stop("task_cancel", "task_cancelled")
@@ -1077,6 +1200,7 @@ class AlfworldSkillTrainingTask(Task):
                 "agent_error": error or agent_info.get("error"),
                 "agent_exit_code": agent_info.get("exit_code"),
                 "agent_exit_status": agent_info.get("exit_status"),
+                "native_finished": native_finished,
                 "wall_seconds_total": time.time() - started,
                 "workdir": str(workdir) if workdir is not None else None,
                 "terminal_stop": terminal_stop,
@@ -1109,13 +1233,43 @@ class AlfworldSkillTrainingTask(Task):
                 **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                 **({"native_files": native_files} if native_files is not None else {}),
             }
+            budget_proof = None
+            budget_unknown = None
+            if result["budget_exhausted"] and isolation_error is None:
+                from .budget import BudgetOutcomeUnknown, verify_budget_failure
+
+                try:
+                    budget_proof = verify_budget_failure(task=result, engine=engine, output_dir=output)
+                    result.update(budget_reward_eligible=True, budget_failure_proof=budget_proof)
+                except BudgetOutcomeUnknown as budget_error:
+                    budget_unknown = budget_error
+                    result["budget_outcome_unknown"] = str(budget_error)
             (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print("ALFWORLD_EPISODE_RESULT " + json.dumps(result), flush=True)
             if isolation_error is not None:
                 raise isolation_error
+            if budget_unknown is not None:
+                safely_closed_cf = bool(
+                    metadata.get("role") == "counterfactual_probe"
+                    and account_summary
+                    and account_summary.get("status") == "attempt_closed"
+                    and account_summary.get("backend_drained") is True
+                    and account_summary.get("uid_drained") is True
+                    and backend_confirmed is True
+                    and not backend_error
+                    and native_files
+                    and native_files.get("status") == "archived_and_removed"
+                )
+                if safely_closed_cf:
+                    budget_unknown.safely_closed_budget_censor = True
+                raise budget_unknown  # No TaskResult/zero is emitted; public run enforces caller-specific censor/fatal.
             return TaskResult(
                 reward=reward,
                 accuracy=reward,
+                # This is the scored Task lifecycle, not the raw Native CLI
+                # finish signal. A proven environment terminal or validated
+                # wall-budget failure closes the Task even when the host stopped
+                # Native. Unknown budgets raised above and never reach this path.
                 finished=True,
                 extra_info={
                     **identity,
@@ -1126,6 +1280,7 @@ class AlfworldSkillTrainingTask(Task):
                     "invalid_actions": engine["invalid_actions"],
                     "agent_ok": result["agent_ok"],
                     "agent_exit_code": result["agent_exit_code"],
+                    "native_finished": native_finished,
                     "error": result["agent_error"] or backend_error,
                     "eval_completed": error is None,
                     "eval_execution_time": result["wall_seconds_total"],
@@ -1142,7 +1297,13 @@ class AlfworldSkillTrainingTask(Task):
                     "host_stop_requested": (backend_receipt or {}).get("host_stop_requested", False),
                     "budget_exhausted": host_stop_kind == "budget_timeout",
                     "task_cancelled": host_stop_kind == "task_cancel",
-                    "budget_reward_eligible": False,
+                    "budget_reward_eligible": result["budget_reward_eligible"],
+                    **({"budget_failure_proof": budget_proof} if budget_proof is not None else {}),
+                    **(
+                        {"budget_outcome_unknown": result["budget_outcome_unknown"]}
+                        if "budget_outcome_unknown" in result
+                        else {}
+                    ),
                     **({"skill_context": skill_context} if skill_context is not None else {}),
                     **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                     **({"native_files": native_files} if native_files is not None else {}),

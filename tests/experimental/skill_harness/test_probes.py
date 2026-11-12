@@ -12,6 +12,7 @@ import types
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness"
 PACKAGE = "_native_credit_probe_tests"
@@ -636,6 +637,67 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(probes.ProbeNotObserved, "backend drain"):
             await self.collect(run_branch=pending)
+
+    async def test_declared_budget_consumer_requires_matching_independent_private_proof(self):
+        proof = {"status": "observed_budget_failure", "score": 0.0, "fixture": "consumer-dispatch-only"}
+
+        async def stopped(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture.update(reward=0.0, accuracy=0.0)
+            info = capture["extra_info"]
+            info.update(
+                error="agent process timed out", native_finished=False, agent_ok=False,
+                budget_exhausted=True, budget_reward_eligible=True, budget_failure_proof=proof,
+            )
+            info["backend_terminal"].update(status="host_stopped", stop_kind="budget_timeout")
+            output = Path(info["episode_output_dir"])
+            engine = json.loads((output / "engine-result.json").read_text())
+            engine.update(won=False, reward=0.0)
+            (output / "engine-result.json").write_text(json.dumps(engine))
+            (output / "result.json").write_text(json.dumps({
+                "backend_binding": info["backend_binding"], "budget_failure_proof": proof,
+            }))
+            return capture
+
+        with patch.object(probes, "verify_budget_failure", return_value=proof) as verify:
+            event = await self.collect(run_branch=stopped)
+        self.assertEqual(verify.call_count, 2)
+        self.assertEqual(event.with_skill.score, 0.0)
+        self.assertEqual(event.without_skill.score, 0.0)
+        raw = probes._read_payload(self.probe_root() / "with_skill/native-capture.json")
+        self.assertFalse(raw["extra_info"]["native_finished"])
+        self.assertEqual(raw["extra_info"]["error"], "agent process timed out")
+
+    async def test_boolean_budget_admission_cannot_bypass_private_verifier(self):
+        async def claimed(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture["extra_info"].update(
+                error="agent process timed out", native_finished=False,
+                budget_exhausted=True, budget_reward_eligible=True,
+            )
+            output = Path(capture["extra_info"]["episode_output_dir"])
+            (output / "result.json").write_text("{}")
+            return capture
+
+        with patch.object(probes, "verify_budget_failure", side_effect=probes.BudgetOutcomeUnknown("missing clock")):
+            with self.assertRaisesRegex(probes.ProbeNotObserved, "declared budget outcome"):
+                await self.collect(run_branch=claimed)
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+
+    async def test_only_safely_closed_unknown_budget_is_censored(self):
+        for safe in (False, True):
+            self.request = replace(self.request, probe_id="unknown_budget_" + str(safe))
+
+            async def unknown(safe=safe, **kwargs):
+                error = probes.BudgetOutcomeUnknown("No ordered state was observed")
+                if safe:
+                    error.safely_closed_budget_censor = True
+                raise error
+
+            expected = probes.ProbeNotObserved if safe else probes.BudgetOutcomeUnknown
+            with self.subTest(safely_closed=safe), self.assertRaises(expected):
+                await self.collect(run_branch=unknown)
+            self.assertFalse((self.probe_root() / "paired-event.json").exists())
 
 
 if __name__ == "__main__":

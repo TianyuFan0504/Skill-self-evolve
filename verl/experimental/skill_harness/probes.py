@@ -28,6 +28,7 @@ from typing import Any
 
 from .alfworld.accounts import POLICY_VERSION as ACCOUNT_POLICY_VERSION
 from .alfworld.accounts import AccountIsolationError, AccountPool
+from .alfworld.budget import BudgetOutcomeUnknown, budget_failure_claimed, verify_budget_failure
 from .alfworld.terminal_guard import _validated_state
 from .context import CONTEXT_BUILDER_VERSION, _local_tokenizer, _skill_block, _user_index, pin_prompt_group
 from .credit import CreditProtocol, EvaluationOutcome, UsageEvent
@@ -213,7 +214,14 @@ def _backend_drained(capture):
                 and info.get("expected_backend_terminal_stop") is not True
             )
         )
-        and proof.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+        and (
+            proof.get("status") in ("drained", "terminal_refused", "terminal_aborted")
+            or (
+                proof.get("status") == "host_stopped"
+                and proof.get("stop_kind") == "budget_timeout"
+                and info.get("budget_exhausted") is True
+            )
+        )
         and proof.get("attempt_id") == info.get("attempt_id")
         and proof.get("gateway_session_id") == capture.get("session_id")
         and proof.get("environment_session_id") == info.get("environment_session_id")
@@ -701,9 +709,14 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     if capture.get("finished") is not True or capture.get("reward") not in (0.0, 1.0):
         raise ProbeNotObserved("Probe did not finish with an authoritative binary environment result")
     info = capture.get("extra_info", {})
+    budget_claimed = budget_failure_claimed(info)
     if (
         info.get("error")
-        and not (info.get("expected_host_terminal_stop") is True or info.get("expected_backend_terminal_stop") is True)
+        and not (
+            info.get("expected_host_terminal_stop") is True
+            or info.get("expected_backend_terminal_stop") is True
+            or budget_claimed
+        )
     ) or info.get("eval_completed") is not True:
         raise ProbeNotObserved("A failed native agent branch cannot become a counterfactual label")
     if capture.get("accuracy") != capture["reward"]:
@@ -748,7 +761,21 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
         or bool(engine["won"]) != bool(capture["reward"])
     ):
         raise ValueError("Probe outcome differs from the private environment result")
-    if info.get("expected_backend_terminal_stop") is True:
+    if budget_claimed:
+        try:
+            task = json.loads((output / "result.json").read_text())
+            proof = verify_budget_failure(task=task, engine=engine, output_dir=output)
+            if (
+                info.get("budget_reward_eligible") is not True
+                or info.get("budget_failure_proof") != proof
+                or task.get("budget_failure_proof") != proof
+                or info.get("native_finished") is not False
+                or task.get("backend_binding") != info.get("backend_binding")
+            ):
+                raise BudgetOutcomeUnknown("Captured budget proof differs from the private Task result")
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            raise ProbeNotObserved("The declared budget outcome is unobserved: " + str(error)) from error
+    elif info.get("expected_backend_terminal_stop") is True:
         if not _proven_terminal_stop(info, engine, output, rows, backend=True):
             raise ProbeNotObserved("Backend terminal stop lacks matching private environment proof or numeric TITO")
     elif info.get("expected_host_terminal_stop") is True:
@@ -756,6 +783,8 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
             raise ProbeNotObserved("Host terminal stop lacks matching private environment proof or numeric TITO")
     elif info.get("error"):
         raise ProbeNotObserved("A native bookkeeping error without proven terminal stop cannot become a credit label")
+    elif info.get("native_finished") is False:
+        raise ProbeNotObserved("An unfinished Native execution lacks a proven episode outcome")
     initial = json.loads((output / "initial-state.json").read_text())
     state_hash = hashlib.sha256(
         json.dumps(initial, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
@@ -945,14 +974,19 @@ async def collect_counterfactual_probe(
                         pin_directory=Path(artifact_root) / "context_groups",
                     )
                     _publish_immutable(started, {"started_at": time.time(), "session_id": fields["uid"]})
-                    capture = await run_branch(
-                        gateway_manager=gateway_manager,
-                        session_id=fields["uid"],
-                        sample_fields=fields,
-                        artifact_dir=branch_root,
-                        task_config_path=task_config_path,
-                        frozen_attestation=frozen_attestation,
-                    )
+                    try:
+                        capture = await run_branch(
+                            gateway_manager=gateway_manager,
+                            session_id=fields["uid"],
+                            sample_fields=fields,
+                            artifact_dir=branch_root,
+                            task_config_path=task_config_path,
+                            frozen_attestation=frozen_attestation,
+                        )
+                    except BudgetOutcomeUnknown as error:
+                        if getattr(error, "safely_closed_budget_censor", False) is not True:
+                            raise
+                        raise ProbeNotObserved("The safely closed budget attempt has no observed reward") from error
                     _publish_immutable(captured, capture)
                 outcomes[name] = _verify_branch(
                     capture,

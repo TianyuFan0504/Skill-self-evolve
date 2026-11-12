@@ -497,7 +497,8 @@ def execute(run, *, timeout_seconds=1800):
         input_assets = [
             source / "verl/experimental/skill_harness" / name
             for name in (
-                "probes.py", "context.py", "alfworld/accounts.py", "alfworld/task.py", "alfworld/native_files.py"
+                "probes.py", "context.py", "alfworld/accounts.py", "alfworld/task.py", "alfworld/native_files.py",
+                "alfworld/backend_terminal.py", "alfworld/budget.py", "alfworld/server.py",
             )
         ]
         input_assets.extend(

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import types
 import unittest
 import uuid
@@ -278,6 +279,16 @@ class NativeHomeTrackingTest(unittest.IsolatedAsyncioTestCase):
                 sandbox.private_tmp_identity = None
                 sandbox.launcher_proofs = []
                 sandbox.terminal_stop_evidence = []
+
+                async def register_budget(timeout):
+                    started_ns = time.monotonic_ns()
+                    return {
+                        "started_ns": started_ns,
+                        "deadline_ns": started_ns + int(timeout * 1_000_000_000),
+                        "budget_seconds": timeout,
+                    }
+
+                sandbox.register_native_budget = register_budget
                 sandbox.session_url = "http://127.0.0.1/unused"
 
                 async def nonterminal():
