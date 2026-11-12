@@ -3,13 +3,14 @@
 The fresh run `alfworld_joint_full64_v5_20261112` uses Uni-Agent, native Codex
 0.167.0 and local Qwen3.5-4B under executable source
 `d8b3de2dc4a60171d1bbb0ea35d26884b1c54131`. The initial seen partition has
-completed and passed independent review. The unseen partition is still
-running; a complete pooled initial baseline is not yet claimed.
+completed and passed independent review. The unseen partition was interrupted
+by a nonterminal vLLM engine failure. No complete pooled initial baseline or
+training update is claimed for this run.
 
 | Initial partition | Games | Wins | Mean reward | Accuracy |
 | --- | ---: | ---: | ---: | ---: |
 | Seen, complete | 140 | 59 | 0.4214285714 | 42.14285714% |
-| Unseen, pending | 134 expected | pending | pending | pending |
+| Unseen, interrupted | 134 expected | unobserved complete result | unavailable | unavailable |
 
 Reward is binary environment success, so its mean equals accuracy. No
 previous run's baseline, model, optimizer, EMA, skills, replay or ledger is
@@ -69,5 +70,28 @@ first optimizer update. All 399 development games and a checkpoint are
 scheduled every eight updates; final official evaluation uses the predeclared
 last update without test-based checkpoint selection.
 
-A completed initial stage and subsequent final-stage comparison are still
-required before claiming reward or accuracy improvement.
+## Nonterminal engine failure during unseen evaluation
+
+At 13:07:15 on 2026-11-12, one local vLLM worker stopped returning its
+`execute_model` response and reached the installed 300-second RPC watchdog.
+Downstream requests on that server failed with `EngineDeadError`. Native
+high-demand messages came from this local failure; they do not establish an
+external service outage. The affected worlds were nonterminal, with no budget
+stop or authoritative score-zero admission.
+
+The driver was controlled-stopped with the verified optimizer counter still
+zero. Its raw status remains `failed`, exit code `-6`; invalid unseen outcomes
+and quarantined leases are retained. The completed seen partition remains
+historical evidence under this configuration. It will not substitute for a
+fresh full baseline under a changed inference backend.
+
+Original worker logs, the watchdog exception, scheduler geometry and request
+correlation are retained at
+`diagnostics/independent_backend_failure_1794460183576949836/summary.json`,
+SHA256 `2dda11351fa58b4c73be749bd9d45c23cdb8922d4ae80dcf7668fecf95f1a2a3`.
+The [GDN prefill isolation candidate](../../examples/skill_self_evolve/patches/VLLM_GDN_TRITON.md)
+documents the installed FlashInfer path and supported Triton override without
+claiming the kernel root cause has been proven.
+
+A new complete initial stage, actual training and subsequent final-stage
+comparison remain required before claiming reward or accuracy improvement.
