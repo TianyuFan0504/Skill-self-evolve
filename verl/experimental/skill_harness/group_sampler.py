@@ -12,9 +12,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from verl.experimental.skill_harness.alfworld.accounts import local_archive_failed_groups
 from verl.trainer.ppo.v1.replay_buffer import ReplayBuffer
-
-from .alfworld.accounts import local_archive_failed_groups
 
 
 class ArchiveAwareReplayBuffer(ReplayBuffer):

@@ -76,7 +76,7 @@ trainer:
       # Refill complete failed groups, including those with valid sibling rows.
       sync_refill_failed_groups: true
       custom_sampler:
-        path: verl.experimental.skill_harness.group_sampler
+        path: ${oc.env:VERL_SOURCE_ROOT,/workspace/verl-0.9.1}/verl/experimental/skill_harness/group_sampler.py
         name: ArchiveAwareReplayBuffer
   n_gpus_per_node: ${oc.decode:${oc.env:TRAINING_GPUS,4}}
   checkpoint_callback_class: verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback

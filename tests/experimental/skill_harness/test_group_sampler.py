@@ -14,6 +14,7 @@ import sys
 import tempfile
 import types
 import unittest
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,10 +75,17 @@ skip.SkipManager = types.SimpleNamespace(annotate_tq=lambda **_kwargs: lambda me
 package = types.ModuleType("_archive_sampler_contract")
 package.__path__ = [str(ROOT / "verl/experimental/skill_harness")]
 sys.modules[package.__name__] = package
+accounts = load_module(
+    "_actual_archive_sampler_accounts", ROOT / "verl/experimental/skill_harness/alfworld/accounts.py"
+)
+import_utils = load_module("_actual_verl_archive_import_utils", ROOT / "verl/utils/import_utils.py")
 with patch.dict(sys.modules, {"numpy": optional_numpy, "omegaconf": optional_omega,
                               "transfer_queue": QUEUE, "verl.utils.skip": skip}):
     core = load_module("_actual_core_archive_replay_buffer", ROOT / "verl/trainer/ppo/v1/replay_buffer.py")
-    with patch.dict(sys.modules, {"verl.trainer.ppo.v1.replay_buffer": core}):
+    with patch.dict(sys.modules, {
+        "verl.trainer.ppo.v1.replay_buffer": core,
+        "verl.experimental.skill_harness.alfworld.accounts": accounts,
+    }):
         sampler = load_module(package.__name__ + ".group_sampler",
                               ROOT / "verl/experimental/skill_harness/group_sampler.py")
 
@@ -172,6 +180,38 @@ class GroupSamplerTest(unittest.TestCase):
             self.buffer(trainer_mode="separate_async")
         with self.assertRaisesRegex(ValueError, "gen_batch_size"):
             self.buffer(gen_batch_size=2)
+
+    def test_real_official_file_loader_loads_sampler_and_constructs_it(self):
+        # Run the actual production loader, including its anonymous file-module
+        # namespace. Only TQ transport/dependency boundaries remain replaced.
+        with patch.dict(sys.modules, {
+            "verl.trainer.ppo.v1.replay_buffer": core,
+            "verl.experimental.skill_harness.alfworld.accounts": accounts,
+        }):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                loaded = import_utils.load_extern_type(
+                    str(ROOT / "verl/experimental/skill_harness/group_sampler.py"), "ArchiveAwareReplayBuffer"
+                )
+            self.assertTrue(loaded.__module__.startswith("custom_module_"))
+            instance = loaded(
+                trainer_mode="sync", trainer_config={"train_batch_size": 2},
+                max_off_policy_threshold=None, max_off_policy_strategy="drop",
+                sampler_kwargs={}, refill_fn=self.refill,
+            )
+        self.assertIsInstance(instance, core.ReplayBuffer)
+        self.assertEqual(instance.train_batch_size, 2)
+        self.assertEqual(instance.gen_batch_size, 1)
+        self.assertTrue(instance.sync_refill_failed_groups)
+        self.assertEqual(instance.archive_run_root, self.run_root)
+
+    def test_real_official_loader_rejects_a_bare_dotted_path(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            with self.assertRaisesRegex(FileNotFoundError, "Custom module file not found"):
+                import_utils.load_extern_type(
+                    "verl.experimental.skill_harness.group_sampler", "ArchiveAwareReplayBuffer"
+                )
 
 
 if __name__ == "__main__":
