@@ -229,6 +229,49 @@ need to execute a restore entry. Direct entry/provider identity is reported
 separately under `direct_checkpoint_restore_evidence`; this exception permits
 the verified operational composition only, not arbitrary profile migrations.
 
+## AllNative learner transport
+
+The `parallel-direct-all-native-spawn-v1` mode has its own actual
+`*.all_native_spawn.json` and `*.all_native_spawn.initialized.json` records.
+The lifecycle's exact initialized reference selects this chain. The comparer
+verifies the new entry, direct/parallel/spawn component sources, new transport
+Python and curator C source against published Git objects. The separate
+curator helper must match the reviewed build digest
+`18f8ebbba0202bba7d9f871d53fa1517e4f6f70cb061ffe316c45b24b80f520e`
+and its recorded loaded digest. The solver component retains the reviewed
+four-descriptor helper digest
+`7905a68b89453e586a777c77cc5e3b0f45e44696f18378ee2ea8cc8d61c35088`.
+Current checkpoint/trainer core bytes must also match the published unchanged
+source cut. No shared library is executed by comparison.
+
+The initialized record must name the actual `AllNativeSelectorLoop` and
+`AllNativePolicy`. Prelaunch has no registered curator profile; initialized
+state has exactly the actual registered account profile. Its user agrees with
+the retained preflight runtime, its non-root UID and numeric GID are structurally
+checked, its work root agrees with configuration under the explicit temporary
+root, and its package agrees with the launch environment. The original solver
+helper, its loaded identity and primary `SpawnSafeRunner` remain a separate
+verified component. This is source and recorded-profile evidence, not a new
+independent curator kernel-UID attestation.
+
+The frozen final-fit receipt continues to identify its old spawn component.
+All three lifecycle records must additionally link the new AllNative extension
+and actual initialized receipt. The old learner-loop initializer is neither
+invoked nor fabricated. Only the common primary-worker/solver/client/service
+signature is normalized for comparison; the new actual loop, helper and profile
+are retained under `all_native_spawn_evidence`. The untouched zero-epoch base
+performs no curator generation and need not load the unused curator helper.
+
+A resumed AllNative run retains the Direct sourceN, one-full-validation,
+zero-EMA-copy and observed-save10 checks above. A fresh AllNative run instead
+uses an explicit source0/no-restore branch: original and initialized resume
+modes agree as `auto` or `disable`, both have no source path, and restored
+checkpoint, restore policy, restore reference and core binding are all null.
+The original immutable HF source must reproduce the base fingerprint. The
+effective configuration retains the original store/replay/ledger roots, and
+the final COMPLETE64 and lifecycle seal bind that original store. Contradictory
+restore fields or unverified initial model sources remain unsupported.
+
 ## Backend evidence tiers
 
 A genuine owned vLLM Worker kernel-selection line is direct log evidence. When
@@ -276,4 +319,10 @@ engineering evidence, not actual ALFWorld results:
 python examples/skill_self_evolve/tests/test_compare_official_runs.py -q
 python examples/skill_self_evolve/tests/test_compare_parallel_profile.py -q
 python examples/skill_self_evolve/tests/test_compare_direct_checkpoint.py -q
+python examples/skill_self_evolve/tests/test_compare_all_native_spawn.py -q
 ```
+
+The AllNative fixture additionally substitutes inert bytes at both pinned
+helper-binary boundaries. Its actual file/loaded-digest checks use those
+explicit fixture digests; source publication, lifecycle/configuration links,
+source10 and fresh0 branches, checkpoint integrity and all274 joins remain real.

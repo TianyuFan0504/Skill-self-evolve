@@ -65,6 +65,32 @@ DIRECT_FILES = {
     "checkpoint_core": "verl/experimental/skill_harness/joint_checkpoint.py",
     "trainer_core": "verl/experimental/skill_harness/joint_trainer.py",
 }
+ALL_NATIVE_POLICY = "parallel-direct-all-native-spawn-v1"
+ALL_NATIVE_TRANSPORT = "solver-and-registered-curator-posix-spawn-v1"
+ALL_NATIVE_MODULE = "skill_harness_examples.all_native_spawn"
+ALL_NATIVE_HELPER_SHA256 = "18f8ebbba0202bba7d9f871d53fa1517e4f6f70cb061ffe316c45b24b80f520e"
+ALL_NATIVE_SOLVER_HELPER_SHA256 = "7905a68b89453e586a777c77cc5e3b0f45e44696f18378ee2ea8cc8d61c35088"
+ALL_NATIVE_IDENTITY_FIELDS = (
+    "policy",
+    "actual_entry",
+    "driver_source_commit",
+    "files",
+    "all_role_native_spawn",
+    "solver_spawn_component_identity",
+    "core_fingerprint_scope",
+)
+ALL_NATIVE_FILES = {
+    "entry": "examples/skill_self_evolve/scripts/train_all_native_spawn.py",
+    "direct_component": DIRECT_FILES["entry"],
+    "restore_provider": DIRECT_FILES["restore_provider"],
+    "parallel_component": PARALLEL_DRIVER,
+    "spawn_component": SPAWN_DRIVER,
+}
+ALL_NATIVE_TRANSPORT_FILES = {
+    "python": "examples/skill_self_evolve/scripts/all_native_spawn.py",
+    "c": "examples/skill_self_evolve/scripts/curator_posix_spawn.c",
+    "helper": "examples/skill_self_evolve/scripts/curator_posix_spawn_helper.so",
+}
 TASK_PROFILE_FIELD = (
     "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path"
 )
@@ -442,6 +468,8 @@ class Stage:
         self.parquets, self.cases, self.allowed_differences = {}, {}, []
         self.parallel_extension, self.parallel_evidence = None, None
         self.direct_observations, self.direct_evidence = [], None
+        self.all_native_observations, self.all_native_evidence = [], None
+        self.all_native_fresh = False
         self.parallel_test_services, self.parallel_test_evidence = {}, {}
         self.setup_extension = None
         self.initialized_evidence = None
@@ -679,6 +707,225 @@ class Stage:
         need(runtime_blobs(source, commit) == self.source_blobs, "Direct checkpoint entry changed runtime sources")
         return identity
 
+    def verify_all_native_identity(self, value, *, initialized):
+        identity = {key: value[key] for key in ALL_NATIVE_IDENTITY_FIELDS}
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        commit = identity["driver_source_commit"]
+        need(
+            not self.base
+            and identity["policy"] == ALL_NATIVE_POLICY
+            and isinstance(commit, str)
+            and re.fullmatch(r"[0-9a-f]{40,64}", commit)
+            and identity["actual_entry"] == str(source / ALL_NATIVE_FILES["entry"])
+            and identity["core_fingerprint_scope"]
+            == "Unchanged core; actual all-role spawn and direct-read providers recorded separately",
+            "Unsupported AllNative entry/source scope",
+        )
+        exact_keys(identity["files"], ALL_NATIVE_FILES, "AllNative entry component sources")
+        for name, relative in ALL_NATIVE_FILES.items():
+            ref = identity["files"][name]
+            exact_keys(ref, ("path", "sha256"), "AllNative " + name + " source")
+            self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+        for name in ("checkpoint_core", "trainer_core"):
+            relative = DIRECT_FILES[name]
+            path = source / relative
+            self.verify_published_source(relative, commit, str(path), self.reader.hash_file(path))
+        component = self.verify_setup_identity(identity["solver_spawn_component_identity"], require_loaded=True)
+        need(component["driver_source_commit"] == commit, "AllNative solver component source commit differs")
+        native = identity["all_role_native_spawn"]
+        exact_keys(
+            native,
+            (
+                "policy",
+                "files",
+                "loaded_curator_helper_sha256",
+                "solver_component",
+                "loop_class",
+                "parent_fd_fork_guard",
+                "curator_profiles",
+            ),
+            "AllNative transport identity",
+        )
+        need(
+            native["policy"] == ALL_NATIVE_TRANSPORT
+            and native["loop_class"] == ALL_NATIVE_MODULE + ".AllNativeSelectorLoop"
+            and native["parent_fd_fork_guard"]
+            == "Python os.register_at_fork exclusion; parent stdio writers close before await"
+            and native["solver_component"] == component["composed_extensions"]["native_spawn"],
+            "AllNative loop/fork guard or unchanged solver helper identity differs",
+        )
+        solver_helper = native["solver_component"]["helper"]
+        need(
+            solver_helper["sha256"] == solver_helper["loaded_sha256"] == ALL_NATIVE_SOLVER_HELPER_SHA256,
+            "AllNative primary solver helper differs from the unchanged reviewed four-descriptor helper",
+        )
+        exact_keys(native["files"], ALL_NATIVE_TRANSPORT_FILES, "AllNative transport sources")
+        for name, relative in ALL_NATIVE_TRANSPORT_FILES.items():
+            ref = native["files"][name]
+            exact_keys(ref, ("path", "sha256"), "AllNative transport " + name)
+            if name != "helper":
+                self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+            else:
+                need(
+                    ref["path"] == str(source / relative)
+                    and ref["sha256"] == native["loaded_curator_helper_sha256"] == ALL_NATIVE_HELPER_SHA256
+                    and self.reader.hash_file(ref["path"]) == ref["sha256"],
+                    "AllNative curator helper bytes or loaded identity differ from the reviewed build",
+                )
+        profiles = native["curator_profiles"]
+        need(
+            isinstance(profiles, list) and len(profiles) == int(initialized),
+            "AllNative registered curator profile count differs",
+        )
+        if initialized:
+            profile = profiles[0]
+            exact_keys(profile, ("user", "uid", "gid", "work_root", "package_root"), "Registered curator profile")
+            work = Path(profile["work_root"])
+            package = Path(profile["package_root"])
+            need(
+                profile["user"] == self.preflight["curator_runtime"]["unix_user"]
+                and profile["user"] not in ("root", "alfworld_eval")
+                and type(profile["uid"]) is int
+                and profile["uid"] > 0
+                and type(profile["gid"]) is int
+                and profile["gid"] >= 0
+                and work.is_absolute()
+                and work == work.resolve()
+                and work
+                == Path(
+                    optional_field(self.config, "skill_harness.joint.curator_work_root", "/tmp/alfworld-curator")
+                ).resolve()
+                and work != Path("/tmp").resolve()
+                and work.is_relative_to(Path("/tmp").resolve())
+                and package.is_absolute()
+                and package == package.resolve()
+                and package.is_dir()
+                and package == Path(self.env["ALFWORLD_CODEX_PACKAGE_ROOT"]).resolve(),
+                "Registered curator account/work-root/package profile differs from the retained runtime",
+            )
+        need(
+            runtime_blobs(source, commit) == self.source_blobs, "AllNative entry changed core runtime source inventory"
+        )
+        return identity
+
+    def all_native_initialized(self, extension, ref, seal):
+        exact_keys(extension, ALL_NATIVE_IDENTITY_FIELDS, "AllNative lifecycle extension")
+        identity = self.verify_all_native_identity(extension, initialized=True)
+        exact_keys(ref, ("path", "sha256"), "AllNative initialized receipt reference")
+        path = Path(ref["path"])
+        need(
+            path == path.resolve()
+            and path.parent == self.root / "driver_runs"
+            and re.fullmatch(r"[0-9]+\.all_native_spawn\.initialized\.json", path.name)
+            and self.reader.hash_file(path) == ref["sha256"],
+            "AllNative initialized receipt path/hash differs",
+        )
+        value = self.reader.json(path)
+        exact_keys(
+            value,
+            (
+                "schema_version",
+                "kind",
+                *ALL_NATIVE_IDENTITY_FIELDS,
+                "imports",
+                "effective_config_after_trainer_init",
+                "original_training_manifest_sha256",
+                "counterfactual_loop_class",
+                "event_loop_policy_class",
+                "registered_curator_scope",
+                "primary_worker_scope",
+                "restore_receipt_ref",
+                "restored_checkpoint",
+                "restore_policy",
+                "core_version_binding",
+                "component_receipt_scope",
+            ),
+            "Actual AllNative initialized receipt",
+        )
+        need(
+            value["schema_version"] == 1
+            and value["kind"] == "initialized_all_native_spawn_entry"
+            and all(value[key] == extension[key] for key in ALL_NATIVE_IDENTITY_FIELDS)
+            and value["counterfactual_loop_class"] == ALL_NATIVE_MODULE + ".AllNativeSelectorLoop"
+            and value["event_loop_policy_class"] == ALL_NATIVE_MODULE + ".AllNativePolicy"
+            and value["registered_curator_scope"]
+            == "Actual NativeCuratorRuntime account, work root, package and clean environment"
+            and value["primary_worker_scope"]
+            == "Unchanged SpawnSafeRunner installs the solver-only component in episode workers"
+            and value["component_receipt_scope"]
+            == "Frozen final-fit body identity is a component; lifecycle extension uses this receipt"
+            and (
+                value["restore_policy"] == DIRECT_RESTORE_POLICY
+                if value["restored_checkpoint"] is not None
+                else value["restore_policy"] is None
+                and value["restore_receipt_ref"] is None
+                and value["core_version_binding"] is None
+            )
+            and value["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"]
+            and all(seal[key] == item for key, item in identity["solver_spawn_component_identity"].items()),
+            "Actual AllNative learner loop/profile or frozen final-fit component binding differs",
+        )
+        return path, value, identity
+
+    def verify_all_native_observation(self, value, path):
+        exact_keys(
+            value,
+            (
+                "schema_version",
+                "kind",
+                *ALL_NATIVE_IDENTITY_FIELDS,
+                "observed_at_ns",
+                "imports",
+                "parallel_component_ref",
+                "client_adapter",
+                "environment_health",
+                "environment_config_ref",
+                "config",
+                "original_training_manifest_preserved",
+                "not_a_post_init_or_served_model_receipt",
+            ),
+            "AllNative prelaunch component observation",
+        )
+        identity = self.verify_all_native_identity(value, initialized=False)
+        need(
+            path == path.resolve()
+            and path.parent == self.root / "driver_runs"
+            and re.fullmatch(r"[0-9]+\.all_native_spawn\.json", path.name)
+            and value["kind"] == "prelaunch_all_native_spawn_parallel_components"
+            and value["original_training_manifest_preserved"] is True
+            and value["parallel_component_ref"] == identity["files"]["parallel_component"],
+            "AllNative prelaunch entry/component binding differs",
+        )
+        for key in ("verl_source", "verl_version", "uni_agent_source", "uni_agent_adapter_sha256"):
+            need(
+                value["imports"].get(key) == self.manifest["import_provenance"].get(key),
+                "AllNative prelaunch imports differ",
+            )
+        common = {
+            key: value[key]
+            for key in (
+                "schema_version",
+                "observed_at_ns",
+                "client_adapter",
+                "environment_health",
+                "environment_config_ref",
+                "not_a_post_init_or_served_model_receipt",
+            )
+        }
+        component = {
+            **common,
+            "kind": "prelaunch_parallel_environment_client_observation",
+            "spawn_extension": identity["solver_spawn_component_identity"],
+            "driver_path": value["parallel_component_ref"]["path"],
+            "driver_sha256": value["parallel_component_ref"]["sha256"],
+            "effective_config_before_spawn_entry": value["config"],
+            "core_fingerprint_scope": value["core_fingerprint_scope"],
+            "hash_link_scope": "Explicit AllNative parallel inference component reference",
+        }
+        checked = self.verify_parallel_observation(component, path)
+        checked.update(observation=value, all_native_entry=identity)
+        return checked
+
     def verify_direct_observation(self, value, path):
         need(
             path == path.resolve()
@@ -746,6 +993,8 @@ class Stage:
         return checked
 
     def verify_parallel_observation(self, value, path):
+        if value.get("kind") == "prelaunch_all_native_spawn_parallel_components":
+            return self.verify_all_native_observation(value, path)
         if value.get("kind") == "prelaunch_direct_checkpoint_parallel_components":
             return self.verify_direct_observation(value, path)
         prospective = value.get("kind") == "prospective_parallel_environment_runtime_identity"
@@ -937,6 +1186,7 @@ class Stage:
                 [
                     *(self.root / "driver_runs").glob("*.parallel_client.json"),
                     *(self.root / "driver_runs").glob("*.direct_checkpoint.json"),
+                    *(self.root / "driver_runs").glob("*.all_native_spawn.json"),
                 ]
             )
         )
@@ -947,11 +1197,15 @@ class Stage:
                 if value.get("client_adapter", {}).get("task_profile", {}).get("sha256") == expected_hash:
                     observed.append((path, value))
         direct = [(path, value) for path, value in observed if path.name.endswith(".direct_checkpoint.json")]
+        all_native = [(path, value) for path, value in observed if path.name.endswith(".all_native_spawn.json")]
         # A direct continuation establishes its own outer-entry/service chain.
         # Historical parallel observers are not substitutes or dependencies.
-        if direct:
+        if direct or all_native:
             need(
-                all(value.get("kind") == "prelaunch_direct_checkpoint_parallel_components" for _, value in direct),
+                all(value.get("kind") == "prelaunch_direct_checkpoint_parallel_components" for _, value in direct)
+                and all(
+                    value.get("kind") == "prelaunch_all_native_spawn_parallel_components" for _, value in all_native
+                ),
                 "Unknown direct checkpoint observation kind",
             )
             lifecycle = self.reader.json(self.path / "lifecycle.json")
@@ -965,17 +1219,28 @@ class Stage:
                 and self.reader.hash_file(seal_path) == seal_ref["sha256"],
                 "Direct lifecycle selection lacks its explicit seal binding",
             )
-            component_ref = self.reader.json(seal_path)["initialized_receipt_ref"]
-            active = self.direct_initialized_for(component_ref, require_observation=False)
-            need(active is not None, "Direct observation lacks the lifecycle-linked initialized entry")
-            active_identity = active[2]
+            seal_record = self.reader.json(seal_path)
+            component_ref = seal_record["initialized_receipt_ref"]
             current_config_hash = self.reader.hash_file(self.root / "runtime/environment.json")
-            observed = [
-                (path, value)
-                for path, value in direct
-                if {key: value.get(key) for key in DIRECT_IDENTITY_FIELDS} == active_identity
-                and value.get("environment_config_ref", {}).get("sha256") == current_config_hash
-            ]
+            if all_native:
+                active = self.all_native_initialized(seal_record["lifecycle_extension"], component_ref, lifecycle)
+                self.all_native_fresh = active[1]["restored_checkpoint"] is None
+                observed = [
+                    (path, value)
+                    for path, value in all_native
+                    if all_native_source_signature(value) == all_native_source_signature(active[2])
+                    and value.get("environment_config_ref", {}).get("sha256") == current_config_hash
+                ]
+            else:
+                active = self.direct_initialized_for(component_ref, require_observation=False)
+                need(active is not None, "Direct observation lacks the lifecycle-linked initialized entry")
+                active_identity = active[2]
+                observed = [
+                    (path, value)
+                    for path, value in direct
+                    if {key: value.get(key) for key in DIRECT_IDENTITY_FIELDS} == active_identity
+                    and value.get("environment_config_ref", {}).get("sha256") == current_config_hash
+                ]
             need(observed, "Direct startup lacks matching active source/service observations")
         matches = [(path, self.verify_parallel_observation(value, path)) for path, value in observed]
         if not matches:
@@ -987,6 +1252,7 @@ class Stage:
         need(all(value == signatures[0] for value in signatures), "Conflicting matching parallel observations")
         self.parallel_extension = matches[0][1]
         self.direct_observations = [(path, value) for path, value in matches if "direct_entry" in value]
+        self.all_native_observations = [(path, value) for path, value in matches if "all_native_entry" in value]
         self.parallel_evidence = [
             {
                 "path": str(path),
@@ -1123,7 +1389,7 @@ class Stage:
         )
         return path, value, identity
 
-    def check_direct_restore(self, direct, initialized, seal, source_payload, expected_prelaunch):
+    def check_direct_restore(self, direct, initialized, seal, source_payload, expected_prelaunch, *, all_native=False):
         path, value, identity = direct
         need(
             value["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"]
@@ -1132,10 +1398,17 @@ class Stage:
             and value["core_version_binding"] == source_payload["spec"]["versions"],
             "Direct and spawn initialized checkpoint/configuration proofs disagree",
         )
+        observations = self.all_native_observations if all_native else self.direct_observations
         need(
             any(
-                observation["direct_entry"] == identity and observation["observation"]["config"] == expected_prelaunch
-                for _, observation in self.direct_observations
+                (
+                    all_native_source_signature(observation["all_native_entry"])
+                    == all_native_source_signature(identity)
+                    if all_native
+                    else observation["direct_entry"] == identity
+                )
+                and observation["observation"]["config"] == expected_prelaunch
+                for _, observation in observations
             ),
             "Direct initialized profile does not follow its recorded prelaunch configuration",
         )
@@ -1216,7 +1489,6 @@ class Stage:
                     need(not target.is_symlink() and not source.samefile(target), "Mutable state aliases checkpoint")
         self.direct_evidence = {
             "initialized_receipt": {"path": str(path), "sha256": self.reader.hash_file(path)},
-            "spawn_component_initialized_ref": value["spawn_component_initialized_ref"],
             "restore_receipt_ref": ref,
             "source_checkpoint": restored,
             "entry_identity": identity,
@@ -1225,97 +1497,133 @@ class Stage:
             "ema_files_copied": 0,
             "scope": "Published operational entry and linked restore records; unchanged inference component signature",
         }
+        if not all_native:
+            self.direct_evidence["spawn_component_initialized_ref"] = value["spawn_component_initialized_ref"]
 
     def check_initialized_setup(self, extension, ref, seal, final_spec):
-        spawn = extension.get("policy") == SPAWN_POLICY
-        extension = self.verify_setup_identity(extension, require_loaded=spawn)
-        exact_keys(ref, ("path", "sha256"), "Initialized setup receipt reference")
-        path = Path(ref["path"])
-        need(
-            path.is_absolute()
-            and path == path.resolve()
-            and path.parent == self.root / "driver_runs"
-            and re.fullmatch(
-                r"[0-9]+\." + ("spawn_safe" if spawn else "resilient") + r"\.initialized\.json", path.name
-            ),
-            "Initialized setup receipt escaped its explicit run directory",
-        )
-        need(self.reader.hash_file(path) == ref["sha256"], "Initialized setup receipt hash differs")
-        initialized = self.reader.json(path)
-        direct = self.direct_initialized_for(ref)
-        spawn_fields = (
-            ("counterfactual_loop_class", "event_loop_policy_class", "primary_runner_policy_install") if spawn else ()
-        )
-        exact_keys(
-            initialized,
-            (
-                *extension,
-                "imports",
-                "effective_config_after_trainer_init",
-                "original_training_manifest_sha256",
-                "restored_checkpoint",
-                *spawn_fields,
-            ),
-            "Initialized setup receipt",
-        )
-        need(
-            all(initialized[key] == value for key, value in extension.items())
-            and initialized["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"],
-            "Initialized setup source/original-manifest identity differs",
-        )
-        if spawn:
+        all_native = extension.get("policy") == ALL_NATIVE_POLICY
+        if all_native:
+            direct = self.all_native_initialized(extension, ref, seal)
+            path, initialized, identity = direct
+            extension = identity["solver_spawn_component_identity"]
+            spawn = True  # Common primary-worker component, not the learner loop.
+        else:
+            spawn = extension.get("policy") == SPAWN_POLICY
+            extension = self.verify_setup_identity(extension, require_loaded=spawn)
+            exact_keys(ref, ("path", "sha256"), "Initialized setup receipt reference")
+            path = Path(ref["path"])
             need(
-                initialized["counterfactual_loop_class"] == SPAWN_MODULE + ".NativeSpawnSelectorLoop"
-                and initialized["event_loop_policy_class"] == SPAWN_MODULE + ".NativeSpawnPolicy"
-                and initialized["primary_runner_policy_install"]
-                == "synchronous runner constructor before SDK asyncio.run",
-                "Initialized native spawn policy/loop/primary-runner installation differs",
+                path.is_absolute()
+                and path == path.resolve()
+                and path.parent == self.root / "driver_runs"
+                and re.fullmatch(
+                    r"[0-9]+\." + ("spawn_safe" if spawn else "resilient") + r"\.initialized\.json", path.name
+                ),
+                "Initialized setup receipt escaped its explicit run directory",
+            )
+            need(self.reader.hash_file(path) == ref["sha256"], "Initialized setup receipt hash differs")
+            initialized = self.reader.json(path)
+            direct = self.direct_initialized_for(ref)
+            spawn_fields = (
+                ("counterfactual_loop_class", "event_loop_policy_class", "primary_runner_policy_install")
+                if spawn
+                else ()
+            )
+            exact_keys(
+                initialized,
+                (
+                    *extension,
+                    "imports",
+                    "effective_config_after_trainer_init",
+                    "original_training_manifest_sha256",
+                    "restored_checkpoint",
+                    *spawn_fields,
+                ),
+                "Initialized setup receipt",
             )
             need(
-                all(seal[key] == value for key, value in extension.items()),
-                "Spawn lifecycle and initialized composite identities differ",
+                all(initialized[key] == value for key, value in extension.items())
+                and initialized["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"],
+                "Initialized setup source/original-manifest identity differs",
             )
+            if spawn:
+                need(
+                    initialized["counterfactual_loop_class"] == SPAWN_MODULE + ".NativeSpawnSelectorLoop"
+                    and initialized["event_loop_policy_class"] == SPAWN_MODULE + ".NativeSpawnPolicy"
+                    and initialized["primary_runner_policy_install"]
+                    == "synchronous runner constructor before SDK asyncio.run",
+                    "Initialized native spawn policy/loop/primary-runner installation differs",
+                )
+                need(
+                    all(seal[key] == value for key, value in extension.items()),
+                    "Spawn lifecycle and initialized composite identities differ",
+                )
         for key in ("verl_source", "verl_version", "uni_agent_source", "uni_agent_adapter_sha256"):
             need(
                 initialized["imports"].get(key) == self.manifest["import_provenance"].get(key),
                 "Initialized setup runtime/adapter import identity differs",
             )
         restored = initialized["restored_checkpoint"]
-        exact_keys(restored, ("checkpoint_dir", "manifest_id", "spec"), "Explicit source checkpoint")
-        checkpoint = Path(restored["checkpoint_dir"])
-        source_step = restored["spec"]["optimizer_step"] if direct else 4
-        need(
-            type(source_step) is int
-            and 1 <= source_step <= 64
-            and (not direct or restored["spec"]["global_step"] == source_step),
-            "Unsupported direct source checkpoint clock/cursor",
-        )
-        need(
-            checkpoint == Path(self.config["trainer"]["default_local_dir"]) / f"global_step_{source_step}"
-            and checkpoint == checkpoint.resolve(),
-            "Continuation did not bind its explicit retained source checkpoint",
-        )
-        source_payload, source_spec = self.verified_checkpoint(
-            checkpoint, manifest_id=restored["manifest_id"], clock=source_step, cursor=source_step
-        )
-        need(
-            source_spec.to_dict() == restored["spec"]
-            and dict(source_spec.versions) == dict(final_spec.versions)
-            and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
-            "Source checkpoint does not preserve final core/protocol compatibility",
-        )
-        if direct:
+        fresh_all_native = all_native and restored is None
+        if fresh_all_native:
+            source_step, source_payload, checkpoint = 0, None, None
+            effective = initialized["effective_config_after_trainer_init"]
             need(
-                source_spec.compatibility() == final_spec.compatibility()
-                and (
-                    source_step < 64
-                    and seal["seal_origin"] == "final_checkpoint_saved_after_quiescence"
-                    or source_step == 64
-                    and seal["seal_origin"] == "restored_complete_final_checkpoint"
-                    and restored["manifest_id"] == seal["manifest_id"]
-                ),
-                "Direct continuation source/final seal compatibility differs",
+                initialized["restore_receipt_ref"] is None
+                and initialized["restore_policy"] is None
+                and initialized["core_version_binding"] is None
+                and optional_field(self.config, "trainer.resume_mode") in ("disable", "auto")
+                and optional_field(effective, "trainer.resume_mode") == field(self.config, "trainer.resume_mode")
+                and optional_field(self.config, "trainer.resume_from_path") is None
+                and optional_field(effective, "trainer.resume_from_path") is None
+                and seal["seal_origin"] == "final_checkpoint_saved_after_quiescence",
+                "Fresh AllNative source0 contradicts its original configuration or restore fields",
             )
+            fingerprint = _model_fingerprint(self.model_path)
+            need(
+                fingerprint["fingerprint"] == self.expected_fingerprint,
+                "Fresh AllNative initial HF source differs from the unchanged base model",
+            )
+            for item in fingerprint["files"]:
+                model_file = self.model_path / item["path"]
+                info = model_file.stat()
+                self.reader.observed[str(model_file)] = (info.st_size, info.st_mtime_ns)
+        else:
+            exact_keys(restored, ("checkpoint_dir", "manifest_id", "spec"), "Explicit source checkpoint")
+            checkpoint = Path(restored["checkpoint_dir"])
+            source_step = restored["spec"]["optimizer_step"] if direct else 4
+            need(
+                type(source_step) is int
+                and 1 <= source_step <= 64
+                and (not direct or restored["spec"]["global_step"] == source_step),
+                "Unsupported direct source checkpoint clock/cursor",
+            )
+            need(
+                checkpoint == Path(self.config["trainer"]["default_local_dir"]) / f"global_step_{source_step}"
+                and checkpoint == checkpoint.resolve(),
+                "Continuation did not bind its explicit retained source checkpoint",
+            )
+            source_payload, source_spec = self.verified_checkpoint(
+                checkpoint, manifest_id=restored["manifest_id"], clock=source_step, cursor=source_step
+            )
+            need(
+                source_spec.to_dict() == restored["spec"]
+                and dict(source_spec.versions) == dict(final_spec.versions)
+                and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
+                "Source checkpoint does not preserve final core/protocol compatibility",
+            )
+            if direct:
+                need(
+                    source_spec.compatibility() == final_spec.compatibility()
+                    and (
+                        source_step < 64
+                        and seal["seal_origin"] == "final_checkpoint_saved_after_quiescence"
+                        or source_step == 64
+                        and seal["seal_origin"] == "restored_complete_final_checkpoint"
+                        and restored["manifest_id"] == seal["manifest_id"]
+                    ),
+                    "Direct continuation source/final seal compatibility differs",
+                )
         effective = initialized["effective_config_after_trainer_init"]
         expected = copy.deepcopy(self.config)
         if self.parallel_extension is not None:
@@ -1344,21 +1652,34 @@ class Stage:
         runner.update(runner_fqn=SPAWN_RUNNER if spawn else SETUP_RUNNER, max_concurrent_sessions=32)
         sampler.update(path=str(source / SETUP_DRIVER), name="ResilientReplayBuffer")
         store = Path(seal["store_root"])
+        if fresh_all_native:
+            need(
+                store == self.root / "skill_store" == Path(self.config["skill_harness"]["store_root"]),
+                "Fresh AllNative final seal does not bind the original prepared store",
+            )
+        else:
+            need(
+                re.fullmatch(rf"step_{source_step}_[0-9a-f]{{32}}", store.parent.name),
+                "Restored store is not bound to its explicit source checkpoint",
+            )
+            for key, value in (
+                ("store_root", store),
+                ("replay_root", store.parent / "replay"),
+                ("ledger_root", store.parent / "ledger"),
+            ):
+                set_existing_field(expected, "skill_harness." + key, str(value))
+                self.restore_bindings["skill_harness." + key] = str(value)
         need(
-            re.fullmatch(rf"step_{source_step}_[0-9a-f]{{32}}", store.parent.name),
-            "Restored store is not bound to its explicit source checkpoint",
+            field(effective, "trainer.resume_mode")
+            in (("auto", "disable") if fresh_all_native else ("auto", "resume_path")),
+            "Unknown initialized resume mode",
         )
-        for key, value in (
-            ("store_root", store),
-            ("replay_root", store.parent / "replay"),
-            ("ledger_root", store.parent / "ledger"),
-        ):
-            set_existing_field(expected, "skill_harness." + key, str(value))
-            self.restore_bindings["skill_harness." + key] = str(value)
-        need(field(effective, "trainer.resume_mode") in ("auto", "resume_path"), "Unknown initialized resume mode")
         set_existing_field(expected, "trainer.resume_mode", field(effective, "trainer.resume_mode"))
         resume_from = optional_field(effective, "trainer.resume_from_path")
-        need(resume_from is None or resume_from == str(checkpoint), "Initialized resume path differs from source")
+        need(
+            resume_from is None or not fresh_all_native and resume_from == str(checkpoint),
+            "Initialized resume path differs from source",
+        )
         if "resume_from_path" in expected["trainer"]:
             set_existing_field(expected, "trainer.resume_from_path", resume_from)
         if direct:
@@ -1416,13 +1737,45 @@ class Stage:
             "effective_config_sha256": INDEX.digest(effective),
         }
         if direct:
-            self.check_direct_restore(direct, initialized, seal, source_payload, expected_prelaunch)
-            self.direct_evidence["checkpoint_save_frequency"] = {
+            if fresh_all_native:
+                need(
+                    any(
+                        all_native_source_signature(observation["all_native_entry"])
+                        == all_native_source_signature(identity)
+                        and observation["observation"]["config"] == expected_prelaunch
+                        for _, observation in self.all_native_observations
+                    ),
+                    "Fresh AllNative initialized config differs from its actual prelaunch observation",
+                )
+            else:
+                self.check_direct_restore(
+                    direct, initialized, seal, source_payload, expected_prelaunch, all_native=all_native
+                )
+            cadence = {
                 "original": optional_field(self.config, "trainer.save_freq"),
                 "initialized": optional_field(effective, "trainer.save_freq"),
                 "prelaunch": optional_field(expected_prelaunch, "trainer.save_freq"),
                 "scope": "Verified operational cadence; excluded from the common inference signature",
             }
+            if self.direct_evidence is not None:
+                self.direct_evidence["checkpoint_save_frequency"] = cadence
+            if all_native:
+                self.initialized_evidence.update(
+                    operational_policy=ALL_NATIVE_POLICY,
+                    actual_learner_loop=initialized["counterfactual_loop_class"],
+                )
+                self.all_native_evidence = {
+                    "initialized_receipt_ref": ref,
+                    "entry_identity": identity,
+                    "actual_learner_loop": initialized["counterfactual_loop_class"],
+                    "actual_event_loop_policy": initialized["event_loop_policy_class"],
+                    "initial_source_step": source_step,
+                    "initial_hf_fingerprint": fingerprint["fingerprint"] if fresh_all_native else None,
+                    "restore_receipt_ref": initialized["restore_receipt_ref"],
+                    "checkpoint_save_frequency": cadence,
+                    "final_fit_component": extension,
+                    "scope": "Actual learner transport; unchanged primary-worker inference component signature",
+                }
 
     def check_lifecycle_binding(self):
         """Bind a resumed final stage to its explicit, successful sealed-store receipt."""
@@ -1526,14 +1879,20 @@ class Stage:
             "Final evaluation lifecycle lacks its quiescent/config-copy/completion evidence",
         )
         store = Path(receipt["store_root"])
-        need(
-            store.is_absolute()
-            and store == store.resolve()
-            and store.name == "skill_store"
-            and store.parent.parent == self.root / "restored_state"
-            and re.fullmatch(r"step_[0-9]+_[0-9a-f]{32}", store.parent.name),
-            "Sealed restored skill store is outside its explicit run restore binding",
-        )
+        if self.all_native_fresh:
+            need(
+                store == self.root / "skill_store" == Path(self.config["skill_harness"]["store_root"]),
+                "Fresh AllNative sealed store escaped its original run binding",
+            )
+        else:
+            need(
+                store.is_absolute()
+                and store == store.resolve()
+                and store.name == "skill_store"
+                and store.parent.parent == self.root / "restored_state"
+                and re.fullmatch(r"step_[0-9]+_[0-9a-f]{32}", store.parent.name),
+                "Sealed restored skill store is outside its explicit run restore binding",
+            )
         checkpoint = Path(receipt["checkpoint_dir"])
         need(
             checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_64"
@@ -2239,6 +2598,14 @@ def extension_signature(identity):
     return result
 
 
+def all_native_source_signature(value):
+    identity = {key: copy.deepcopy(value.get(key)) for key in ALL_NATIVE_IDENTITY_FIELDS}
+    native = identity["all_role_native_spawn"]
+    if isinstance(native, dict):
+        native.pop("curator_profiles", None)  # Prelaunch precedes actual learner profile registration.
+    return identity
+
+
 def parallel_signature(value):
     adapter = value["client_adapter"]
     route = adapter["environment_python_route"]
@@ -2384,7 +2751,7 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             "Source commits may differ only if their complete enumerated runtime Git blob maps and dirty hashes match",
             "Applied model version0 versus64; empty genesis versus integrity-checked learned skill snapshots",
         ]
-        if trained.initialized_evidence:
+        if trained.initialized_evidence and not trained.all_native_fresh:
             report["explicit_allowed_differences"].append(
                 "Resumed original manifest is preserved; inference uses only its verified initialized32/safe-runner "
                 "profile and explicit source-checkpoint/store bindings, matched to the base's original actual profile."
@@ -2394,6 +2761,12 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
                 "The trained direct-checkpoint entry changes only verified restore operations; its published "
                 "outer/provider sources and source checkpoint are retained separately from the common "
                 "parallel/spawn inference signature. The zero-epoch base does not execute restore operations."
+            )
+        if trained.all_native_evidence:
+            report["explicit_allowed_differences"].append(
+                "The actual AllNative learner loop and reviewed curator helper/profile are verified as operational "
+                "evidence. The untouched zero-epoch base retains the identical primary SpawnSafeRunner/solver/client "
+                "inference profile and does not need to load or execute the unused curator helper."
             )
         if base.prospective_runtime_evidence:
             report["explicit_allowed_differences"].append(
@@ -2440,6 +2813,7 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             },
         }
         report["direct_checkpoint_restore_evidence"] = trained.direct_evidence
+        report["all_native_spawn_evidence"] = trained.all_native_evidence
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:
         report["reasons"].append(f"{type(error).__name__}: {error}")
     changed = reader.changed()
