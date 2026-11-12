@@ -1257,6 +1257,240 @@ class ResumedStoreReceiptTests(unittest.TestCase):
         self.assert_incomplete(self.compare_pair())
 
 
+class SafeSetupEffectiveProfileTests(unittest.TestCase):
+    compare_pair = CompareOfficialRunsTests.compare_pair
+    change = CompareOfficialRunsTests.change
+    assert_incomplete = CompareOfficialRunsTests.assert_incomplete
+
+    @classmethod
+    def setUpClass(cls):
+        ResumedStoreReceiptTests.setUpClass.__func__(cls)
+        run = cls.pair.root / "trained"
+        receipt = read(cls.receipt_path)
+        source = Path(receipt["driver_path"]).parents[3]
+        for relative in (cls.compare.SETUP_DRIVER, cls.compare.SETUP_NAMESPACE):
+            path = source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((ROOT / relative).read_bytes())
+            subprocess.check_call(["git", "-C", str(source), "add", relative])
+        if subprocess.run(["git", "-C", str(source), "diff", "--cached", "--quiet"]).returncode:
+            subprocess.check_call([
+                "git", "-C", str(source), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Setup fixture",
+            ])
+        commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        cls.extension = {
+            "policy": cls.compare.SETUP_POLICY, "driver_path": str(source / cls.compare.SETUP_DRIVER),
+            "driver_sha256": file_sha(source / cls.compare.SETUP_DRIVER),
+            "namespace_path": str(source / cls.compare.SETUP_NAMESPACE),
+            "namespace_sha256": file_sha(source / cls.compare.SETUP_NAMESPACE), "driver_source_commit": commit,
+        }
+        new_parent = cls.restored.parent.with_name("step_4_" + "a" * 32)
+        cls.restored.parent.rename(new_parent)
+        cls.restored = new_parent / "skill_store"
+        for role in ("base", "trained"):
+            root = cls.pair.root / role
+            path = root / "training-manifest.json"
+            manifest = read(path)
+            config = manifest["config"]
+            config["actor_rollout_ref"]["actor"] = {"optim": {"total_training_steps": -1}}
+            config["critic"] = {"optim": {"total_training_steps": -1}}
+            config["algorithm"] = {"adv_estimator": "grpo", "gamma": 1.0}
+            config["reward"] = {"reward_model": {
+                "enable": False, "enable_resource_pool": False, "n_gpus_per_node": 8, "nnodes": 0,
+            }}
+            config["data"]["gen_batch_size"] = None
+            config["trainer"]["resume_from_path"] = None
+            config["trainer"]["v1"] = {"trainer_mode": "sync", "sync": {"parameter_sync_step": 1}, "sampler": {
+                "sync_refill_failed_groups": True, "custom_sampler": {
+                    "path": str(source / "verl/experimental/skill_harness/group_sampler.py"),
+                    "name": "ArchiveAwareReplayBuffer",
+                },
+            }}
+            config["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]["agent_runners"] = {"task": {
+                "runner_fqn": "verl.experimental.skill_harness.alfworld.runner.run_task",
+                "max_concurrent_sessions": 64, "runner_kwargs": {"task_config_path": str(root / "task_config.yaml")},
+            }}
+            if role == "base":
+                manifest["source_commit"] = commit
+                runner = config["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]["agent_runners"]["task"]
+                runner.update(runner_fqn=cls.compare.SETUP_RUNNER, max_concurrent_sessions=32)
+                config["trainer"]["v1"]["sampler"]["custom_sampler"].update(
+                    path=cls.extension["driver_path"], name="ResilientReplayBuffer"
+                )
+            write(path, manifest)
+        module = cls.compare.pure_module("joint_checkpoint")
+        cls.source_checkpoint_path = run / "checkpoints/global_step_4"
+        versions = cls.checkpoint.payload["spec"]["versions"]
+        state = read(run / "controller/state.json")
+        state.update(
+            optimizer_step=4, applied_update_ids={f"update_{i}": f"optimizer:{i}:update_{i}" for i in range(1, 5)}
+        )
+        spec = module.JointCheckpointSpec(4, 4, 4, "fixture-layout", versions,
+                                          cls.pair.fingerprint, "fixture-protocol")
+
+        def online(actor):
+            actor.mkdir()
+            for rank in range(4):
+                for kind in ("model", "optim", "extra_state"):
+                    (actor / f"{kind}_world_size_4_rank_{rank}.pt").write_bytes(b"Source4 CPU fixture; never loaded")
+            (actor.parent / "data.pt").write_bytes(b"Source4 iterator fixture; never loaded")
+            return module.CompletedOnlineCheckpoint(4, 4, 4, "fixture-layout", "fixture:source4")
+
+        def ema(directory):
+            result = []
+            for rank in range(4):
+                file = directory / f"ema_rank_{rank:05d}.pt"
+                file.write_bytes(b"Source4 EMA fixture; never loaded")
+                result.append({"path": str(file), "last_optimizer_step": 4})
+            return result
+
+        replay = cls.compare.pure_module("replay").CurateReplay(new_parent / "replay")
+        ledger = cls.compare.pure_module("credit").CreditLedger(new_parent / "ledger", replay)
+        checkpoint = module.JointCheckpointCoordinator().save(
+            cls.source_checkpoint_path, spec=spec, save_online=online, save_ema=ema,
+            skill_store=store_module.SkillStore(cls.restored), replay=replay, ledger=ledger, controller_state=state,
+            evaluation_state={
+                "evaluator_fingerprint": cls.pair.fingerprint, "protocol_fingerprint": "fixture-protocol"
+            },
+            fence=nullcontext,
+        )
+        original = read(run / "training-manifest.json")
+        effective = json.loads(json.dumps(original["config"]))
+        runner = effective["actor_rollout_ref"]["rollout"]["custom"]["agent_framework"]["agent_runners"]["task"]
+        runner.update(runner_fqn=cls.compare.SETUP_RUNNER, max_concurrent_sessions=32)
+        effective["trainer"]["v1"]["sampler"]["custom_sampler"].update(
+            path=cls.extension["driver_path"], name="ResilientReplayBuffer"
+        )
+        effective["trainer"].update(resume_mode="resume_path", resume_from_path=str(cls.source_checkpoint_path))
+        effective["data"]["gen_batch_size"] = 1
+        for name in ("store_root", "replay_root", "ledger_root"):
+            effective["skill_harness"][name] = str(new_parent / {"store_root": "skill_store", "replay_root": "replay",
+                                                                "ledger_root": "ledger"}[name])
+        effective["actor_rollout_ref"]["actor"]["optim"]["total_training_steps"] = 64
+        effective["critic"]["optim"]["total_training_steps"] = 64
+        effective["reward"]["reward_model"].update(n_gpus_per_node=4, nnodes=1)
+        cls.initialized_path = run / "driver_runs/100.resilient.initialized.json"
+        write(cls.initialized_path, {
+            **cls.extension, "imports": original["import_provenance"], "effective_config_after_trainer_init": effective,
+            "original_training_manifest_sha256": file_sha(run / "training-manifest.json"),
+            "restored_checkpoint": {"checkpoint_dir": checkpoint.checkpoint_dir, "manifest_id": checkpoint.manifest_id,
+                                    "spec": checkpoint.payload["spec"]},
+        })
+        for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+            path = Path(receipt[key]["path"])
+            row = read(path)
+            row.update(store_root=str(cls.restored),
+                       original_training_manifest_sha256=file_sha(run / "training-manifest.json"),
+                       lifecycle_extension=cls.extension,
+                       initialized_receipt_ref={"path": str(cls.initialized_path),
+                                                "sha256": file_sha(cls.initialized_path)})
+            write(path, row)
+            receipt[key]["sha256"] = file_sha(path)
+        receipt.update(store_root=str(cls.restored),
+                       original_training_manifest_sha256=file_sha(run / "training-manifest.json"))
+        write(cls.receipt_path, receipt)
+
+    @contextmanager
+    def mutated_initialized(self, callback):
+        receipt = read(self.receipt_path)
+        files = [self.receipt_path, self.initialized_path, *[Path(receipt[k]["path"]) for k in
+                 ("checkpoint_seal", "evaluation_entry", "evaluation_complete")]]
+        originals = {path: path.read_bytes() for path in files}
+        try:
+            value = read(self.initialized_path)
+            callback(value)
+            write(self.initialized_path, value)
+            for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+                path = Path(receipt[key]["path"])
+                row = read(path)
+                row["initialized_receipt_ref"]["sha256"] = file_sha(self.initialized_path)
+                write(path, row)
+                receipt[key]["sha256"] = file_sha(path)
+            write(self.receipt_path, receipt)
+            yield
+        finally:
+            for path, content in originals.items():
+                path.write_bytes(content)
+
+    @contextmanager
+    def mutated_lifecycle_records(self, callback):
+        receipt = read(self.receipt_path)
+        files = [self.receipt_path, *[Path(receipt[k]["path"]) for k in
+                 ("checkpoint_seal", "evaluation_entry", "evaluation_complete")]]
+        originals = {path: path.read_bytes() for path in files}
+        try:
+            for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+                path = Path(receipt[key]["path"])
+                value = read(path)
+                callback(value)
+                write(path, value)
+                receipt[key]["sha256"] = file_sha(path)
+            write(self.receipt_path, receipt)
+            yield
+        finally:
+            for path, content in originals.items():
+                path.write_bytes(content)
+
+    def test_actual32_safe_base_matches_validated_initialized_final_not_stale_original64(self):
+        original = file_sha(self.pair.root / "trained/training-manifest.json")
+        report = self.compare_pair()
+        self.assertTrue(report["comparison_supported"], report["reasons"])
+        evidence = report["execution_extension_evidence"]
+        self.assertEqual(evidence["base"]["driver_sha256"], self.extension["driver_sha256"])
+        self.assertEqual(evidence["inference_configuration_sources"]["trained"], "validated_initialized_receipt")
+        self.assertEqual(original, file_sha(self.pair.root / "trained/training-manifest.json"))
+
+    def test_baseline64_is_not_silently_treated_as_matching_actual32(self):
+        self.change(self.pair.root / "base/training-manifest.json", lambda v: v["config"]["actor_rollout_ref"]
+                    ["rollout"]["custom"]["agent_framework"]["agent_runners"]["task"].update(max_concurrent_sessions=64))
+        self.assert_incomplete(self.compare_pair())
+
+    def test_forward_budget_algorithm_and_CF_changes_in_effective_receipt_are_rejected(self):
+        changes = (
+            lambda c: c["actor_rollout_ref"]["rollout"].update(max_model_len=36863),
+            lambda c: c["algorithm"].update(adv_estimator="gae"),
+            lambda c: c["skill_harness"]["joint"].update(probes_per_step=1),
+        )
+        for change in changes:
+            with self.subTest(change=change), self.mutated_initialized(
+                lambda row, modify=change: modify(row["effective_config_after_trainer_init"])
+            ):
+                self.assert_incomplete(self.compare_pair())
+
+    def test_mismatched_extension_source_or_initialized_identity_is_rejected(self):
+        with self.mutated_initialized(lambda v: v.update(namespace_sha256="f" * 64)):
+            self.assert_incomplete(self.compare_pair())
+
+    def test_explicit_source_checkpoint4_must_remain_intact(self):
+        path = self.source_checkpoint_path / "actor/model_world_size_4_rank_0.pt"
+        original = path.read_bytes()
+        self.addCleanup(path.write_bytes, original)
+        path.write_bytes(b"changed source checkpoint4")
+        self.assert_incomplete(self.compare_pair())
+
+    def test_declared_source_clock_cannot_replace_actual_retained_checkpoint4(self):
+        with self.mutated_initialized(lambda v: v["restored_checkpoint"]["spec"].update(optimizer_step=3)):
+            self.assert_incomplete(self.compare_pair())
+
+    def test_missing_extension_records_cannot_fall_back_to_stale_original_profile(self):
+        def remove(value):
+            value.pop("lifecycle_extension")
+            value.pop("initialized_receipt_ref")
+
+        with self.mutated_lifecycle_records(remove):
+            self.assert_incomplete(self.compare_pair())
+
+    def test_initialized_link_hash_and_published_namespace_identity_are_checked(self):
+        changes = (
+            lambda row: row["initialized_receipt_ref"].update(sha256="f" * 64),
+            lambda row: row["lifecycle_extension"].update(namespace_sha256="f" * 64),
+        )
+        for change in changes:
+            with self.subTest(change=change), self.mutated_lifecycle_records(change):
+                self.assert_incomplete(self.compare_pair())
+
+
 class BackendEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

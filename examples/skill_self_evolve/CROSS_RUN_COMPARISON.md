@@ -100,6 +100,38 @@ clocks, driver identities or receipt hashes remain unsupported. No `latest`
 pointer, directory-name heuristic or arbitrary run-path replacement selects
 the store. Original training configuration and raw artifacts remain unchanged.
 
+## Safe setup continuation and the actual inference profile
+
+The safe-setup examples driver records `lifecycle_extension` and the same
+file-hashed `initialized_receipt_ref` in all three lifecycle records. The
+comparer validates the published driver and dedicated namespace Git blobs,
+their current file hashes, the exact `exact-pre-create-no-native-v1` policy,
+matching runtime/adapter imports, and the preserved original manifest hash.
+Its explicitly referenced source COMPLETE checkpoint4 must still be intact and
+compatible with the final checkpoint; no `latest` pointer selects that source.
+
+The final inference signature uses the validated
+`effective_config_after_trainer_init`, rather than pretending the immutable
+original manifest's 64-session profile was the actual 32-session execution.
+Only the known safe runner FQN, `ResilientReplayBuffer` source binding, 32-session
+limit, explicit checkpoint4 resume/store/replay/ledger paths, and verified core
+constructor normalizations are permitted. The latter comprise single-prompt
+refill, computed optimizer schedule horizons, and unused disabled reward-model
+placement. All other resolved fields, including model/tokenizer/forward budgets,
+algorithm and counterfactual budgets, must equal the original recorded values.
+The 900-second and 36,864-token limits are not relaxed.
+
+The untouched base uses the original entrypoint with zero optimizer iterations
+and explicit 32-session/safe-runner/sampler overrides, so its original fresh
+manifest already records its actual inference profile. It does not need a
+fabricated initialized receipt or an additional initial-stage pointer. Its
+driver/namespace bytes and inference settings must match the final extension.
+A legacy 64-session base is unsupported against the actual safe 32-session
+final; unknown or missing extension receipts never fall back to stale settings.
+Original quiescent and fresh legacy comparisons remain supported when both
+sides use that same original profile. This code launches neither reference nor
+final evaluation.
+
 ## Backend evidence tiers
 
 A genuine owned vLLM Worker kernel-selection line is direct log evidence. When

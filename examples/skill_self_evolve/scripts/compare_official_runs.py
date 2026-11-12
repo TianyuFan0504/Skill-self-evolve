@@ -32,6 +32,10 @@ COUNTS = {"test_seen": 140, "test_unseen": 134}
 SPLITS = {"test_seen": "valid_seen", "test_unseen": "valid_unseen"}
 GREEDY = {"n": 1, "do_sample": False, "temperature": 0.0, "top_p": 1.0, "top_k": -1}
 LIFECYCLE_DRIVER = "examples/skill_self_evolve/scripts/train_quiescent_eval.py"
+SETUP_DRIVER = "examples/skill_self_evolve/scripts/train_resilient_setup.py"
+SETUP_NAMESPACE = "skill_harness_examples/__init__.py"
+SETUP_POLICY = "exact-pre-create-no-native-v1"
+SETUP_RUNNER = "skill_harness_examples.train_resilient_setup.safe_run_task"
 LIFECYCLE_IDENTITY = (
     "driver_path", "driver_sha256", "driver_source_commit", "original_training_manifest_sha256",
 )
@@ -160,6 +164,20 @@ def field(value, path):
     for key in path.split("."):
         value = value[key]
     return value
+
+
+def optional_field(value, path, default=None):
+    try:
+        return field(value, path)
+    except (KeyError, TypeError):
+        return default
+
+
+def set_existing_field(value, path, replacement):
+    keys = path.split(".")
+    parent = field(value, ".".join(keys[:-1]))
+    need(keys[-1] in parent, "Missing original configuration field: " + path)
+    parent[keys[-1]] = replacement
 
 
 def exact_keys(value, keys, label):
@@ -383,8 +401,187 @@ class Stage:
         self.parquets, self.cases, self.allowed_differences = {}, {}, []
         self.check_protocol()
         self.check_identity()
-        self.signature = self.config_signature(self.config)
+        self.inference_config = self.config
+        self.setup_extension = None
+        self.initialized_evidence = None
+        self.restore_bindings = {}
         self.check_lifecycle_binding()
+        if self.setup_extension is None and optional_field(
+            self.config, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn"
+        ) == SETUP_RUNNER:
+            need(self.base, "A trained safe-setup profile requires its initialized lifecycle receipt")
+            source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+            identity = {
+                "policy": SETUP_POLICY, "driver_path": str(source / SETUP_DRIVER),
+                "driver_sha256": self.reader.hash_file(source / SETUP_DRIVER),
+                "namespace_path": str(source / SETUP_NAMESPACE),
+                "namespace_sha256": self.reader.hash_file(source / SETUP_NAMESPACE),
+                "driver_source_commit": self.manifest["source_commit"],
+            }
+            self.setup_extension = self.verify_setup_identity(identity)
+            self.check_safe_setup_profile(self.config)
+        self.signature = self.config_signature(self.inference_config)
+
+    def verified_checkpoint(self, checkpoint, *, manifest_id, clock, cursor):
+        """Read COMPLETE publication/files only; no tensor loading or store constructors."""
+        envelope = json.loads(self.reader.bytes(checkpoint / "joint_manifest.json"))
+        exact_keys(envelope, ("manifest_id", "payload"), "Joint checkpoint envelope")
+        payload = envelope["payload"]
+        need(
+            envelope["manifest_id"] == manifest_id == "sha256:" + INDEX.digest(payload)
+            and payload.get("schema_version") == 1 and payload.get("state") == "complete",
+            "Checkpoint is not the intact sealed COMPLETE publication",
+        )
+        spec = pure_module("joint_checkpoint").JointCheckpointSpec(**payload["spec"])
+        need(spec.optimizer_step == clock and spec.global_step == cursor and spec.world_size == 4,
+             "COMPLETE checkpoint clock/cursor/world differs")
+        need(payload["training_state_paths"] == ["data.pt"], "Unsupported synchronous checkpoint data inventory")
+        actual = set()
+        for component in ("actor", "joint_state", "data.pt"):
+            location = checkpoint / component
+            for file in location.rglob("*") if location.is_dir() else (location,):
+                relative = file.relative_to(checkpoint)
+                need(not file.is_symlink(), "Checkpoint file inventory contains a symlink")
+                if "locks" not in relative.parts and file.name != ".writer.lock" and file.is_file():
+                    actual.add(relative.as_posix())
+        need(actual == set(payload["files"]), "COMPLETE checkpoint file inventory differs")
+        for relative, identity in payload["files"].items():
+            safe = PurePosixPath(relative)
+            need(not safe.is_absolute() and ".." not in safe.parts and str(safe) == relative, "Unsafe checkpoint file")
+            file = checkpoint / relative
+            need(identity == {"sha256": self.reader.hash_file(file), "size": file.stat().st_size},
+                 "COMPLETE checkpoint file digest differs: " + relative)
+        need(
+            all(f"actor/{kind}_world_size_4_rank_{rank}.pt" in actual
+                for rank in range(4) for kind in ("model", "optim", "extra_state")),
+            "Online model/optimizer/RNG rank inventory is incomplete",
+        )
+        ema = payload["ema_metadata"]
+        need(
+            len(ema) == 4 and {row["file"] for row in ema} == {f"ema_rank_{rank:05d}.pt" for rank in range(4)}
+            and all(row["last_optimizer_step"] == clock and "joint_state/ema/" + row["file"] in actual for row in ema),
+            "COMPLETE checkpoint lacks all four matching EMA acknowledgements",
+        )
+        saved = self.reader.json(checkpoint / "joint_state/controller.json")
+        need(saved["optimizer_step"] == clock and saved["prepared_update"] is None
+             and saved["protocol_fingerprint"] == spec.protocol_fingerprint,
+             "Saved controller does not match its sealed applied policy")
+        return payload, spec
+
+    def verify_setup_identity(self, identity):
+        keys = ("policy", "driver_path", "driver_sha256", "namespace_path", "namespace_sha256", "driver_source_commit")
+        exact_keys(identity, keys, "Safe-setup extension identity")
+        need(identity["policy"] == SETUP_POLICY, "Unknown safe-setup admission policy")
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        commit = identity["driver_source_commit"]
+        need(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40,64}", commit), "Missing setup source commit")
+        for kind, relative in (("driver", SETUP_DRIVER), ("namespace", SETUP_NAMESPACE)):
+            path = source / relative
+            need(identity[kind + "_path"] == str(path), "Unexpected setup " + kind + " source binding")
+            try:
+                blob = subprocess.check_output(
+                    ["git", "-C", str(source), "show", commit + ":" + relative],
+                    stderr=subprocess.PIPE, timeout=15,
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                raise Error("Published setup extension/namespace source is unavailable") from error
+            need(hashlib.sha256(blob).hexdigest() == identity[kind + "_sha256"] == self.reader.hash_file(path),
+                 "Setup extension/namespace bytes differ from published source")
+        need(runtime_blobs(source, commit) == self.source_blobs, "Setup extension changed runtime source inventory")
+        return dict(identity)
+
+    def check_safe_setup_profile(self, config):
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        runner = field(config, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task")
+        sampler = field(config, "trainer.v1.sampler.custom_sampler")
+        need(runner["runner_fqn"] == SETUP_RUNNER and type(runner["max_concurrent_sessions"]) is int
+             and runner["max_concurrent_sessions"] == 32
+             and sampler == {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
+             "Actual safe-setup runner/concurrency/sampler profile differs")
+
+    def check_initialized_setup(self, extension, ref, seal, final_spec):
+        extension = self.verify_setup_identity(extension)
+        exact_keys(ref, ("path", "sha256"), "Initialized setup receipt reference")
+        path = Path(ref["path"])
+        need(path.is_absolute() and path == path.resolve() and path.parent == self.root / "driver_runs"
+             and re.fullmatch(r"[0-9]+\.resilient\.initialized\.json", path.name),
+             "Initialized setup receipt escaped its explicit run directory")
+        need(self.reader.hash_file(path) == ref["sha256"], "Initialized setup receipt hash differs")
+        initialized = self.reader.json(path)
+        exact_keys(initialized, (*extension, "imports", "effective_config_after_trainer_init",
+                                "original_training_manifest_sha256", "restored_checkpoint"),
+                   "Initialized setup receipt")
+        need(all(initialized[key] == value for key, value in extension.items())
+             and initialized["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"],
+             "Initialized setup source/original-manifest identity differs")
+        for key in ("verl_source", "verl_version", "uni_agent_source", "uni_agent_adapter_sha256"):
+            need(initialized["imports"].get(key) == self.manifest["import_provenance"].get(key),
+                 "Initialized setup runtime/adapter import identity differs")
+        restored = initialized["restored_checkpoint"]
+        exact_keys(restored, ("checkpoint_dir", "manifest_id", "spec"), "Explicit source checkpoint")
+        checkpoint = Path(restored["checkpoint_dir"])
+        need(checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_4"
+             and checkpoint == checkpoint.resolve(), "Safe-setup continuation did not bind retained source checkpoint4")
+        _, source_spec = self.verified_checkpoint(checkpoint, manifest_id=restored["manifest_id"], clock=4, cursor=4)
+        need(source_spec.to_dict() == restored["spec"] and dict(source_spec.versions) == dict(final_spec.versions)
+             and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
+             "Source checkpoint4 does not preserve final core/protocol compatibility")
+        effective = initialized["effective_config_after_trainer_init"]
+        expected = copy.deepcopy(self.config)
+        runner = field(expected, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task")
+        sampler = field(expected, "trainer.v1.sampler.custom_sampler")
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        need(runner["runner_fqn"] in ("verl.experimental.skill_harness.alfworld.runner.run_task", SETUP_RUNNER)
+             and runner["max_concurrent_sessions"] in (32, 64)
+             and sampler in (
+                 {"path": str(source / "verl/experimental/skill_harness/group_sampler.py"),
+                  "name": "ArchiveAwareReplayBuffer"},
+                 {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
+             ), "Unknown original profile cannot be silently replaced by setup extension")
+        runner.update(runner_fqn=SETUP_RUNNER, max_concurrent_sessions=32)
+        sampler.update(path=str(source / SETUP_DRIVER), name="ResilientReplayBuffer")
+        store = Path(seal["store_root"])
+        need(re.fullmatch(r"step_4_[0-9a-f]{32}", store.parent.name),
+             "Restored store is not bound to source checkpoint4")
+        for key, value in (("store_root", store), ("replay_root", store.parent / "replay"),
+                           ("ledger_root", store.parent / "ledger")):
+            set_existing_field(expected, "skill_harness." + key, str(value))
+            self.restore_bindings["skill_harness." + key] = str(value)
+        need(field(effective, "trainer.resume_mode") in ("auto", "resume_path"), "Unknown initialized resume mode")
+        set_existing_field(expected, "trainer.resume_mode", field(effective, "trainer.resume_mode"))
+        resume_from = optional_field(effective, "trainer.resume_from_path")
+        need(resume_from is None or resume_from == str(checkpoint), "Initialized resume path does not bind checkpoint4")
+        if "resume_from_path" in expected["trainer"]:
+            set_existing_field(expected, "trainer.resume_from_path", resume_from)
+        if optional_field(expected, "data.gen_batch_size") in (None, 1):
+            need(optional_field(effective, "data.gen_batch_size") == 1
+                 and optional_field(expected, "trainer.v1.sampler.sync_refill_failed_groups") is True,
+                 "Unknown exact-refill dataloader normalization")
+            set_existing_field(expected, "data.gen_batch_size", 1)
+        horizon = expected["trainer"]["total_training_steps"] * optional_field(
+            expected, "trainer.v1.sync.parameter_sync_step", 1
+        )
+        for prefix in ("actor_rollout_ref.actor.optim", "critic.optim"):
+            key = prefix + ".total_training_steps"
+            old = optional_field(expected, key)
+            if old is not None:
+                need(old in (-1, horizon), "Unknown optimizer schedule initialization")
+                set_existing_field(expected, key, horizon)
+        if optional_field(expected, "reward.reward_model.enable") is False:
+            need(optional_field(expected, "reward.reward_model.enable_resource_pool") is False,
+                 "Separate reward-model topology cannot be normalized")
+            for name, value in (("n_gpus_per_node", expected["trainer"]["n_gpus_per_node"]),
+                                ("nnodes", expected["trainer"]["nnodes"])):
+                set_existing_field(expected, "reward.reward_model." + name, value)
+        need(effective == expected,
+             "Unknown initialized configuration change outside explicit setup/restore/constructor bindings")
+        self.check_safe_setup_profile(effective)
+        self.setup_extension = extension
+        self.inference_config = effective
+        self.initialized_evidence = {
+            "path": str(path), "sha256": ref["sha256"], "restored_checkpoint": restored,
+            "effective_config_sha256": INDEX.digest(effective),
+        }
 
     def check_lifecycle_binding(self):
         """Bind a resumed final stage to its explicit, successful sealed-store receipt."""
@@ -489,16 +686,9 @@ class Stage:
             and checkpoint == checkpoint.resolve(),
             "Final COMPLETE checkpoint path differs from the original configured run",
         )
-        manifest_path = checkpoint / "joint_manifest.json"
-        envelope = json.loads(self.reader.bytes(manifest_path))
-        exact_keys(envelope, ("manifest_id", "payload"), "Joint checkpoint envelope")
-        payload = envelope["payload"]
-        need(
-            envelope["manifest_id"] == receipt["manifest_id"] == "sha256:" + INDEX.digest(payload)
-            and payload.get("schema_version") == 1 and payload.get("state") == "complete",
-            "Final checkpoint is not the intact sealed COMPLETE publication",
+        payload, spec = self.verified_checkpoint(
+            checkpoint, manifest_id=receipt["manifest_id"], clock=self.version, cursor=receipt["checkpoint_cursor"]
         )
-        spec = pure_module("joint_checkpoint").JointCheckpointSpec(**payload["spec"])
         need(
             spec.optimizer_step == self.version and spec.global_step == receipt["checkpoint_cursor"]
             and spec.world_size == 4 and dict(spec.versions) == receipt["checkpoint_core_versions"]
@@ -506,45 +696,6 @@ class Stage:
             and spec.versions["tokenizer"] == self.tokenizer
             and spec.protocol_fingerprint == self.controller["protocol_fingerprint"],
             "Final checkpoint sealed policy/core/protocol identity differs",
-        )
-        need(payload["training_state_paths"] == ["data.pt"], "Unsupported synchronous checkpoint data-state inventory")
-        actual = set()
-        for component in ("actor", "joint_state", "data.pt"):
-            location = checkpoint / component
-            for file in location.rglob("*") if location.is_dir() else (location,):
-                relative = file.relative_to(checkpoint)
-                need(not file.is_symlink(), "Checkpoint file inventory contains a symlink")
-                if "locks" not in relative.parts and file.name != ".writer.lock" and file.is_file():
-                    actual.add(relative.as_posix())
-        need(actual == set(payload["files"]), "Final COMPLETE checkpoint file inventory differs")
-        for relative, identity in payload["files"].items():
-            safe = PurePosixPath(relative)
-            need(not safe.is_absolute() and ".." not in safe.parts and str(safe) == relative, "Unsafe checkpoint file")
-            file = checkpoint / relative
-            need(
-                identity == {"sha256": self.reader.hash_file(file), "size": file.stat().st_size},
-                "Final COMPLETE checkpoint file digest differs: " + relative,
-            )
-        for rank in range(4):
-            need(
-                all(
-                    f"actor/{kind}_world_size_4_rank_{rank}.pt" in actual for kind in ("model", "optim", "extra_state")
-                ),
-                "Final online model/optimizer/RNG rank inventory is incomplete",
-            )
-        ema = payload["ema_metadata"]
-        need(
-            len(ema) == 4 and {row["file"] for row in ema} == {f"ema_rank_{rank:05d}.pt" for rank in range(4)}
-            and all(
-                row["last_optimizer_step"] == self.version and "joint_state/ema/" + row["file"] in actual for row in ema
-            ),
-            "Final COMPLETE checkpoint lacks all four EMA64 acknowledgements",
-        )
-        saved_controller = self.reader.json(checkpoint / "joint_state/controller.json")
-        need(
-            saved_controller["optimizer_step"] == self.version and saved_controller["prepared_update"] is None
-            and saved_controller["protocol_fingerprint"] == spec.protocol_fingerprint,
-            "Final saved controller does not match the sealed applied policy",
         )
         head = self.reader.json(store / "refs/main.json")
         snapshot_id = receipt["snapshot_id"]
@@ -557,6 +708,18 @@ class Stage:
             "Final restored store/head differs from its COMPLETE checkpoint seal",
         )
         self.evaluation_store_root, self.sealed_snapshot_id = store, snapshot_id
+        extensions = [record.get("lifecycle_extension") for record in records.values()]
+        initialized_refs = [record.get("initialized_receipt_ref") for record in records.values()]
+        if any(value is not None for value in (*extensions, *initialized_refs)):
+            need(all(value == extensions[0] for value in extensions) and extensions[0] is not None
+                 and all(value == initialized_refs[0] for value in initialized_refs)
+                 and initialized_refs[0] is not None,
+                 "Lifecycle setup extension/initialized receipt copies disagree")
+            self.check_initialized_setup(extensions[0], initialized_refs[0], receipt, spec)
+        else:
+            need(not (self.root / "setup_adapter").exists()
+                 and not any((self.root / "driver_runs").glob("*.resilient.initialized.json")),
+                 "Safe-setup run lacks its lifecycle extension/initialized receipt")
         self.lifecycle = {"receipt_path": str(path), "receipt_sha256": self.reader.hash_file(path), **receipt}
 
     def check_protocol(self):
@@ -875,8 +1038,15 @@ class Stage:
         if path in TRAINING_ONLY_SECTIONS or path in TRAINING_ONLY_FIELDS:
             return "<unused-training-configuration>"
         if path in RUN_PATHS:
-            need(value == str(self.root / RUN_PATHS[path]), "Unknown host path change: " + path)
+            expected = self.restore_bindings.get(path, str(self.root / RUN_PATHS[path]))
+            need(value == expected, "Unknown host path change: " + path)
             return "<run>/" + RUN_PATHS[path]
+        if path in ("reward.reward_model.n_gpus_per_node", "reward.reward_model.nnodes") and optional_field(
+            self.inference_config, "reward.reward_model.enable"
+        ) is False:
+            need(optional_field(self.inference_config, "reward.reward_model.enable_resource_pool") is False
+                 and type(value) is int and value >= 0, "Unknown disabled reward-model placement")
+            return "<unused-disabled-reward-model-placement>"
         if path in ("trainer.experiment_name", "actor_rollout_ref.rollout.trace.experiment_name"):
             need(value == self.root.name, "Unknown run-name binding")
             return "<run-name>"
@@ -897,6 +1067,9 @@ class Stage:
             need(value in ("DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL"), "Unknown logging level metadata")
             return "<logging-only-metadata>"
         if path == "trainer.v1.sampler.custom_sampler.path":
+            if self.setup_extension is not None:
+                need(value == str(Path(source) / SETUP_DRIVER), "Unsupported safe-setup sampler source binding")
+                return "<validated-source>/" + SETUP_DRIVER
             need(
                 value == str(Path(source) / "verl/experimental/skill_harness/group_sampler.py"),
                 "Unsupported sampler source binding",
@@ -928,8 +1101,14 @@ class Stage:
             need(value is None or Path(value).resolve() == self.model_path.resolve(), "Unknown model metadata path")
             return "<intended-model-metadata-source>"
         if path == "trainer.resume_mode":
-            need(value == "disable" if self.base else value in ("auto", "disable"), "Unsupported resume mode")
+            need(value == "disable" if self.base else value in ("auto", "disable")
+                 or value == "resume_path" and self.initialized_evidence is not None, "Unsupported resume mode")
             return "<explicit-zero-base-or-trained-run>"
+        if path == "trainer.resume_from_path":
+            need(value is None or self.initialized_evidence is not None
+                 and value == self.initialized_evidence["restored_checkpoint"]["checkpoint_dir"],
+                 "Unknown resume checkpoint binding")
+            return "<explicit-zero-base-or-retained-source-checkpoint>"
         if path in ("skill_harness.evaluation.initial", "skill_harness.evaluation.final"):
             need(
                 value is (self.base if path.endswith("initial") else not self.base), "Stage evaluation switches differ"
@@ -1188,6 +1367,12 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             base.signature == trained.signature,
             "Unknown resolved configuration difference beyond explicit host paths/execution modes",
         )
+        need((base.setup_extension is None) == (trained.setup_extension is None),
+             "Base and final safe-setup execution policies differ")
+        if base.setup_extension is not None:
+            need(all(base.setup_extension[key] == trained.setup_extension[key]
+                     for key in ("policy", "driver_sha256", "namespace_sha256")),
+                 "Base and final safe-setup driver/namespace identities differ")
         need(
             base.source_blobs == trained.source_blobs
             and base.manifest["dirty_diff_sha256"] == trained.manifest["dirty_diff_sha256"]
@@ -1261,6 +1446,11 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             "Source commits may differ only if their complete enumerated runtime Git blob maps and dirty hashes match",
             "Applied model version0 versus64; empty genesis versus integrity-checked learned skill snapshots",
         ]
+        if trained.initialized_evidence:
+            report["explicit_allowed_differences"].append(
+                "Resumed original manifest is preserved; inference uses only its verified initialized32/safe-runner "
+                "profile and explicit checkpoint4/store bindings, matched to the base's original actual profile."
+            )
         report["identity_scope"] = {
             "untouched_base_hf_fingerprint": base.model_fingerprint,
             "trained_parameter_fingerprint_compared_to_base": False,
@@ -1276,6 +1466,14 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
         }
         report["backend_evidence"] = {"base": base.backend_evidence, "trained": trained.backend_evidence}
         report["lifecycle_evidence"] = {"base": base.lifecycle, "trained": trained.lifecycle}
+        report["execution_extension_evidence"] = {
+            "base": base.setup_extension, "trained": trained.setup_extension,
+            "trained_initialized_receipt": trained.initialized_evidence,
+            "inference_configuration_sources": {
+                "base": "original_manifest_actual_profile",
+                "trained": "validated_initialized_receipt" if trained.initialized_evidence else "original_manifest",
+            },
+        }
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:
         report["reasons"].append(f"{type(error).__name__}: {error}")
     changed = reader.changed()
