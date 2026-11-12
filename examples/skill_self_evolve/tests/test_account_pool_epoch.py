@@ -28,6 +28,10 @@ def load(name, path):
 epoch = load("_account_pool_epoch_cpu", HERE / "scripts/account_pool_epoch.py")
 accounts = load("_epoch_frozen_accounts_cpu", ROOT / "verl/experimental/skill_harness/alfworld/accounts.py")
 native = load("_epoch_native_spawn_cpu", HERE / "scripts/native_posix_spawn.py")
+history_package = types.ModuleType("_epoch_probe_history_cpu")
+history_package.__path__ = [str(ROOT / "verl/experimental/skill_harness")]
+sys.modules[history_package.__name__] = history_package
+history_probes = importlib.import_module(history_package.__name__ + ".probes")
 
 
 def file_hashes(root):
@@ -152,6 +156,112 @@ class EpochTests(unittest.TestCase):
         self.assertEqual(json.loads(Path(ref["path"]).read_text())["native_spawn_account_pool"], epoch.identity())
         self.assertEqual(file_hashes(self.old), old)
 
+    def cached_pair(self, *, fresh=False, name="history", complete=True):
+        request = types.SimpleNamespace(window_id="window-one", probe_id="probe-one")
+        group = history_probes.probe_group_id(request, self.run)
+        public = {"lease_id": "b" * 32, "uid": 30001 if fresh else 20001,
+                  "gid": 30001 if fresh else 20001, "name": "alfworld_ep3_001" if fresh else "alfworld_ep2_001",
+                  "owner": {"run_root": str(self.run), "scope_id": group, "kind": "pair"}}
+        value = {**public, "status": "released", "abandoned": False, "active_attempt": None,
+                 "token": "private-fixture-token-never-logged", "attempts": {
+                     "a": {"variant": "with_skill", "status": "closed"},
+                     "b": {"variant": "without_skill", "status": "closed"}}}
+        lease = (self.new if fresh else self.old) / "leases" / (public["lease_id"] + ".json")
+        lease.parent.mkdir(mode=0o700, exist_ok=True)
+        lease.write_text(json.dumps(value))
+        lease.chmod(0o600)
+        root = self.run / name
+        for branch in (("with_skill", "without_skill") if complete else ("with_skill",)):
+            path = root / branch / "native-capture.json"
+            path.parent.mkdir(parents=True)
+            history_probes._publish_immutable(path, {"extra_info": {"account_isolation": public}})
+        return root, request, group, public, value, lease
+
+    def test_cached_released_old_pair_uses_frozen_reader_without_any_registry_or_capture_writes(self):
+        root, request, _, public, _, _ = self.cached_pair()
+        # A subsequent lease's quarantine of this UID cannot erase an earlier
+        # released pair. The frozen historical proof is bound to its lease ID.
+        (self.old / "quarantined-uids" / str(public["uid"])).mkdir(parents=True)
+        with patch.dict(sys.modules, self.modules):
+            epoch.install_process(role="ray_worker")
+            pool = epoch.probe_account_pool()
+        before = file_hashes(self.root)
+        with patch.object(history_probes, "AccountIsolationError", accounts.AccountIsolationError), \
+                patch.object(accounts.AccountPool, "acquire", side_effect=AssertionError("No acquisition")), \
+                patch.object(accounts.AccountPool, "finish", side_effect=AssertionError("No closure")), \
+                patch.object(accounts.AccountPool, "drain", side_effect=AssertionError("No drain")), \
+                patch.object(Path, "mkdir", side_effect=AssertionError("No source flags or directories")), \
+                patch("builtins.print") as printed:
+            with history_probes._pair_account_scope(root, request=request, run_root=self.run, pool=pool) as scope:
+                self.assertEqual(scope.public, public)
+                self.assertIsNone(scope.ref)
+                scope.complete()
+            printed.assert_not_called()
+        self.assertEqual(file_hashes(self.root), before)
+
+    def test_old_held_quarantined_abandoned_partial_and_mismatched_lease_proofs_remain_unobserved(self):
+        root, request, _, _, original, lease = self.cached_pair()
+        with patch.dict(sys.modules, self.modules):
+            epoch.install_process(role="ray_worker")
+            pool = epoch.probe_account_pool()
+        mutations = ({"status": "leased"}, {"status": "quarantined"}, {"abandoned": True},
+                     {"attempts": {"a": {"variant": "with_skill", "status": "closed"}}},
+                     {"gid": 20002}, {"name": "alfworld_ep2_002"},
+                     {"owner": {**original["owner"], "scope_id": "wrong-group"}})
+        for changes in mutations:
+            lease.write_text(json.dumps({**original, **changes}))
+            before = file_hashes(self.root)
+            with self.subTest(changes=changes), \
+                    patch.object(history_probes, "AccountIsolationError", accounts.AccountIsolationError), \
+                    patch.object(accounts.AccountPool, "acquire", side_effect=AssertionError("No acquisition")), \
+                    patch.object(accounts.AccountPool, "finish", side_effect=AssertionError("No closure")), \
+                    self.assertRaises(history_probes.ProbeNotObserved):
+                with history_probes._pair_account_scope(root, request=request, run_root=self.run, pool=pool):
+                    self.fail("Invalid historical proof cannot yield a probe scope")
+            self.assertEqual(file_hashes(self.root), before)
+
+    def test_partial_cached_old_capture_does_not_retry_or_modify_either_registry(self):
+        root, request, _, _, _, _ = self.cached_pair(complete=False)
+        with patch.dict(sys.modules, self.modules):
+            epoch.install_process(role="ray_worker")
+            pool = epoch.probe_account_pool()
+        before = file_hashes(self.root)
+        with patch.object(pool, "historical_pair", side_effect=AssertionError("No partial history")), \
+                patch.object(pool, "acquire", side_effect=AssertionError("No resample")), \
+                patch.object(pool, "finish", side_effect=AssertionError("No closure")), \
+                self.assertRaises(history_probes.ProbeNotObserved):
+            with history_probes._pair_account_scope(root, request=request, run_root=self.run, pool=pool):
+                self.fail("Partial captures cannot yield a probe scope")
+        self.assertEqual(file_hashes(self.root), before)
+
+    def test_fresh_pair_history_still_delegates_to_the_unchanged_fresh_pool(self):
+        _, _, group, public, value, _ = self.cached_pair(fresh=True)
+        with patch.dict(sys.modules, self.modules):
+            epoch.install_process(role="ray_worker")
+            pool = epoch.probe_account_pool()
+        before = file_hashes(self.root)
+        with patch.object(pool._fresh, "historical_pair", wraps=pool._fresh.historical_pair) as reader:
+            self.assertEqual(pool.historical_pair(public, run_root=self.run, group=group), value)
+            reader.assert_called_once_with(public, run_root=self.run, group=group)
+        self.assertEqual(file_hashes(self.root), before)
+
+    def test_retired_ref_cannot_enter_any_live_probe_pool_operation(self):
+        _, _, _, public, _, _ = self.cached_pair()
+        with patch.dict(sys.modules, self.modules):
+            epoch.install_process(role="ray_worker")
+            pool = epoch.probe_account_pool()
+        before = file_hashes(self.root)
+        with patch.object(pool._fresh, "finish", side_effect=AssertionError("No fresh-side quarantine")), \
+                patch.object(pool._fresh, "public", side_effect=AssertionError("No live old reference")):
+            for operation in (pool.finish, pool.public):
+                with self.assertRaises(accounts.AccountIsolationError):
+                    operation(public)
+        for name in ("drain", "initialize", "account", "quarantine", "begin_attempt", "close_attempt"):
+            self.assertFalse(hasattr(pool, name))
+        with self.assertRaisesRegex(ValueError, "exact fresh live pool"):
+            epoch.ProbeAccountPool(types.SimpleNamespace(root=self.old, roster=accounts.expected_roster()))
+        self.assertEqual(file_hashes(self.root), before)
+
     def test_conflicting_alias_rejects_before_any_alias_changes(self):
         previous = self.task.AccountPool
         self.probes.AccountPool = lambda: None
@@ -179,6 +289,7 @@ class EpochTests(unittest.TestCase):
         self.assertFalse(report["lease_acquired"])
         self.assertEqual(report["task_pool_root"], str(self.new))
         self.assertEqual(report["probe_pool_root"], str(self.new))
+        self.assertEqual(report["probe_pool_class"], epoch.ProbeAccountPool.__module__ + ".ProbeAccountPool")
         self.assertEqual((self.new / "state.json").read_bytes(), before)
 
     def test_learner_rejects_overwritten_hook_even_after_successful_worker_installation(self):

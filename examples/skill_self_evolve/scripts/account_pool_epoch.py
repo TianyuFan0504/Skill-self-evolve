@@ -19,6 +19,7 @@ import stat
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 POLICY = "operator-provisioned-account-pool-epoch-v1"
 WORKER_SETUP_HOOK = "skill_harness_examples.account_pool_epoch.setup_worker"
@@ -273,8 +274,60 @@ def task_account_pool():
     return _pool("task_account_pool")
 
 
+class ProbeAccountPool:
+    """Fresh live leases plus the frozen read-only retired-pair proof reader."""
+
+    def __init__(self, fresh):
+        if fresh.root != EPOCH_POOL_ROOT or fresh.roster != roster():
+            raise ValueError("The probe façade requires the exact fresh live pool")
+        self._fresh = fresh
+        self.root, self.roster = fresh.root, fresh.roster
+
+    @staticmethod
+    def _epoch(public):
+        accounts = _accounts()
+        if isinstance(public, dict) and type(public.get("uid")) is int and type(public.get("gid")) is int:
+            uid = public["uid"]
+            for base, prefix, label in ((30000, "alfworld_ep3_", "fresh"), (20000, "alfworld_ep2_", "retired")):
+                if (base <= uid < base + CAPACITY and public["gid"] == uid
+                        and public.get("name") == prefix + f"{uid - base:03d}"):
+                    return label
+        raise accounts.AccountIsolationError("Probe account identity is outside the exact epoch rosters")
+
+    def acquire(self, **kwargs):
+        return self._fresh.acquire(**kwargs)
+
+    def public(self, ref):
+        self._require_fresh(ref)
+        return self._fresh.public(ref)
+
+    def _require_fresh(self, ref):
+        if self._epoch(ref) != "fresh":
+            raise _accounts().AccountIsolationError("A retired account is available only for read-only pair history")
+
+    def finish(self, ref, *, abandoned=False):
+        self._require_fresh(ref)
+        return self._fresh.finish(ref, abandoned=abandoned)
+
+    def historical_pair(self, public, *, run_root, group):
+        if self._epoch(public) == "fresh":
+            return self._fresh.historical_pair(public, run_root=run_root, group=group)
+        accounts = _accounts()
+        if not re.fullmatch(r"[0-9a-f]{32}", str(public.get("lease_id", ""))):
+            raise accounts.AccountIsolationError("Invalid historical paired lease identity")
+        _private(OLD_POOL_ROOT, directory=True)
+        _private(OLD_POOL_ROOT / "leases", directory=True)
+        _private(OLD_POOL_ROOT / "leases" / (public["lease_id"] + ".json"))
+        # The frozen reader dereferences only root/leases and verifies this
+        # exact released, complete, nonabandoned pair. No old live pool object
+        # or old mutation API is exposed, and private lease tokens are not logged.
+        return accounts.AccountPool.historical_pair(
+            SimpleNamespace(root=OLD_POOL_ROOT), public, run_root=run_root, group=group,
+        )
+
+
 def probe_account_pool():
-    return _pool("probe_account_pool")
+    return ProbeAccountPool(_pool("probe_account_pool"))
 
 
 def preflight_account_pool():
@@ -401,6 +454,8 @@ def inspect_worker_bindings():
         raise ValueError("Ray primary and paired probe account pools differ")
     return {"account_pool_epoch_extension": selected, "owner": process_identity(),
             "task_pool_root": str(primary.root), "probe_pool_root": str(paired.root),
+            "task_pool_class": type(primary).__module__ + "." + type(primary).__qualname__,
+            "probe_pool_class": type(paired).__module__ + "." + type(paired).__qualname__,
             "roster_digest": digest(primary.roster), "lease_acquired": False,
             "activation_refs": activation_refs()}
 

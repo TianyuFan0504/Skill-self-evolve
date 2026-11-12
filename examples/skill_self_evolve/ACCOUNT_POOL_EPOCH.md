@@ -13,7 +13,8 @@ The retired registry `/var/lib/alfworld-skill-harness/account_pool_v2`, all
 UID/GID20000–20127, all old leases/quarantines and protected UID20071 remain
 fenced. This provider never resets, releases, drains, remaps or initializes
 that registry. It reads historical settled local-archive dispositions so failed
-training groups remain excluded. The new independent registry is
+training groups remain excluded, and complete released paired-lease proofs so
+cached delayed credit remains verifiable. The new independent registry is
 `/var/lib/alfworld-skill-harness/account_pool_epoch3`, containing128 accounts
 `alfworld_ep3_000`…`alfworld_ep3_127`, UID=GID30000…30127. It uses the unchanged
 core account isolation policy `alfworld-uid-landlock-v1`.
@@ -104,7 +105,8 @@ the private provisioned manifest and host registry. It binds only these three
 import aliases in that owned process:
 
 - `alfworld.task.AccountPool` → frozen `AccountPool(new_root, roster=new_roster)`;
-- `probes.AccountPool` → the same constructor/root/roster;
+- `probes.AccountPool` → `account_pool_epoch.ProbeAccountPool`, with the same
+  fresh constructor/root/roster for every live operation;
 - `group_sampler.local_archive_failed_groups` → the unchanged reader applied to
   both retired and new roots.
 
@@ -113,6 +115,25 @@ Paired probes retain one lease across both branches; the Task validates that
 lease against the same fresh registry. Unknown-artifact filtering rules are
 unchanged. The actual learner additionally rejects a lost runtime hook or
 missing matching Ray activation before trainer construction.
+
+When both native captures already exist, the probe façade routes
+`historical_pair` by the exact public UID/GID/name roster. Fresh identities use
+the unchanged fresh pool reader. Retired epoch2 identities use the exact frozen
+`AccountPool.historical_pair` method on a root-only read-only view; no retired
+live pool instance or mutation API is exposed. Private nonsymlink lease paths
+are checked before reading. The frozen reader requires the exact owner/group,
+released status, both variants and no abandonment. Held, quarantined or partial
+leases and mismatched identities remain unobserved. A later unrelated lease's
+quarantine of the same UID does not invalidate an earlier complete released
+pair; this preserves the frozen reader's historical semantics without reusing
+that UID. Partial captures still cannot be retried or resampled.
+
+`acquire`, `public` and `finish` operate on fresh leases only. Old references are
+rejected before entering a live operation, so they cannot cause a fresh-side
+failure/quarantine write. Historical lookup writes neither registry, capture,
+closure nor source flag and logs no private lease token. The model-free worker
+acceptance report records the actual primary and probe pool classes, including
+the façade, separately from the unchanged live root/roster identity.
 
 The examples Native transport had a separate old UID-range guard. Its new
 explicit `register_account_pool_epoch` API registers only the verified manifest
@@ -172,7 +193,10 @@ temporary registries, with system-account/process lookups replaced by fixtures.
 It covers inert import, read-only behavior, hash/privacy/roster rejection,
 no-reset initialization, account conflicts, quarantine/live/lease capacity,
 paired Task/probe registry agreement, Native roster/FD guards and historical plus
-new archive dispositions. Entry fixtures cover hook ordering and original
+new archive dispositions. Real frozen probe-scope fixtures also verify cached
+retired released pairs, unobserved held/quarantined/incomplete cases and fresh
+history, with registry and capture bytes unchanged and mutation calls disabled.
+Entry fixtures cover hook ordering and original
 baseline behavior. The comparer fixtures exercise a complete synthetic274-case
 comparison and reject mismatched or merely claimed pool/worker evidence. No
 fixture provisions host identities or starts a model/environment.
