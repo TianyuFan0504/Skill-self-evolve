@@ -69,3 +69,30 @@ Its plan SHA256 is
 startup checks SHA256 is
 `8d3d86b2e94c122bfc1867c707861052e59e13ea9288b2494bceaa2e2a21d63f`.
 Launching v5 does not establish completed training or reward/accuracy gains.
+
+## First actual v5 cases after the repairs
+
+A subsequent independent review passed 34 checks against one real unsuccessful
+and one real successful initial-evaluation episode under source `d8b3de2d`.
+The unsuccessful UID 20010 case used 10 world actions and received reward 0;
+the successful UID 20012 case used 18 actions and received reward 1. Their
+response lengths were 1,522 and 3,367 tokens, with 390 and 694 authored tokens.
+Both retained aligned finite float32 likelihoods, with nonpositive values on
+authored tokens. Both leases released, backend requests closed and all three
+owned temporary roots were removed. All 194 archive members were independently
+read back with matching content hashes.
+
+The successful case preserves a Native reconnect error after the world had
+already reported `won=true` and `done=true` (events 42 then 43). It is a
+documented postterminal retry, not a silently removed error. The review found
+no nonterminal error in those cases and no run identity/media incident at its
+observation cut. Real backend weight clocks and the controller optimizer were
+zero. Source/interpreter evidence identifies the pidfd compatibility path;
+an individual syscall trace was not saved or claimed.
+
+The artifact under the v5 run is
+`diagnostics/independent_v5_first_zero_win_1794458942266595927.json`, SHA256
+`73086d64d7a19f6691aff875f78e344b6faa91a92f0cebb2db567e3ae73386e7`.
+These observations establish actual Native trajectory and lifecycle behavior
+after the repairs. They do not establish a complete 274-game baseline, a
+parameter update or improvement.
