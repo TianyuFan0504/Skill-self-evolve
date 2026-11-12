@@ -297,6 +297,9 @@ def controller_class():
 
 
 class ResilientLifecycleMixin:
+    def _joint_controller_class(self):
+        return controller_class()
+
     def _lifecycle_record(self, name, payload):
         return super()._lifecycle_record(name, {
             **payload, "lifecycle_extension": self._resilient_extension_identity,
@@ -310,7 +313,7 @@ class ResilientLifecycleMixin:
             if self._joint_controller is not None:
                 raise RuntimeError("The joint controller cannot be initialized twice")
             identity = self._identity()
-            self._joint_controller = self._await(controller_class().create(
+            self._joint_controller = self._await(self._joint_controller_class().create(
                 self, native_runtime=identity.runtime, restored_state=self._joint_restored,
             ))
             if (self._joint_controller.protocol_fingerprint != identity.protocol_fingerprint
