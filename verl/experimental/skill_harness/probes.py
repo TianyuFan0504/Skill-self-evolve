@@ -10,14 +10,17 @@ All generated token trajectories and failed branches remain experiment artifacts
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import hashlib
 import inspect
 import json
+import math
 import os
 import re
 import time
+import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -488,6 +491,54 @@ def _trajectory_payload(trajectory):
     }
 
 
+def _probe_error_payload(error):
+    return {
+        "type": type(error).__name__,
+        "message": str(error),
+        "traceback": "".join(traceback.format_exception(type(error), error, error.__traceback__)),
+    }
+
+
+def _note_probe_secondary(primary, error, stage):
+    note = f"Native probe {stage} also failed: {type(error).__name__}: {error}"
+    if hasattr(primary, "add_note"):
+        primary.add_note(note)
+    else:  # Python 3.10 CPU fixtures; production runs on Python 3.11.
+        primary.__notes__ = [*getattr(primary, "__notes__", ()), note]
+
+
+def _probe_failure_artifact(path, payload, primary):
+    """Never replace the original Task error with a diagnostic write error."""
+    try:
+        _publish_immutable(path, payload)
+    except Exception as error:
+        _note_probe_secondary(primary, error, f"writing {path.name}")
+
+
+async def _bounded_probe_lifecycle(operation, *, timeout, name):
+    """Bound the caller's wait, including an unresponsive cancellation handler.
+
+    Cancelling this local await does not prove a Ray actor or backend stopped.
+    The caller records an unknown lifecycle result on timeout, then attempts
+    the separate public cleanup operation.
+    """
+    task = asyncio.ensure_future(operation)
+
+    def consume(future):
+        if not future.cancelled():
+            future.exception()
+
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+        if task in done:
+            return task.result()
+        raise TimeoutError(f"Native probe {name} did not return within {timeout:g} seconds; state is unknown")
+    finally:
+        if not task.done():
+            task.cancel()
+            task.add_done_callback(consume)
+
+
 async def native_probe_branch(
     *,
     gateway_manager,
@@ -497,8 +548,18 @@ async def native_probe_branch(
     task_config_path,
     frozen_attestation,
     model_name="Qwen3.5-4B-nothink",
+    capture_timeout_seconds=10.0,
+    cleanup_timeout_seconds=5.0,
 ):
-    """Run the unchanged official Task runner and persist exact Gateway tokens."""
+    """Persist exact Gateway tokens; archive failures without turning them into labels."""
+    for timeout in (capture_timeout_seconds, cleanup_timeout_seconds):
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int | float)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("Probe lifecycle timeouts must be finite positive seconds")
     frozen_attestation = _gateway_attestation(gateway_manager, frozen_attestation)
     from .alfworld.runner import run_task
 
@@ -517,6 +578,10 @@ async def native_probe_branch(
         sampling_params={"temperature": 0.0, "top_p": 1.0, "top_k": -1},
     )
     finalized = False
+    finalize_attempted = False
+    trajectories = None
+    stage = "task"
+    primary = None
     try:
         result = await run_task(
             session=session,
@@ -526,8 +591,13 @@ async def native_probe_branch(
             task_config_path=task_config_path,
             model_name=model_name,
         )
-        trajectories = await gateway_manager.finalize_session(session_id)
+        stage = "finalize"
+        finalize_attempted = True
+        trajectories = await _bounded_probe_lifecycle(
+            gateway_manager.finalize_session(session_id), timeout=capture_timeout_seconds, name="finalize"
+        )
         finalized = True
+        stage = "capture"
         _gateway_attestation(gateway_manager, frozen_attestation)
         capture = {
             "schema_version": 1,
@@ -541,9 +611,89 @@ async def native_probe_branch(
         }
         _publish_immutable(artifact_dir / "native-capture.json", capture)
         return capture
+    except BaseException as error:
+        primary = error
+        # This durable raw record precedes any operation that can clear the
+        # Gateway's committed chains. A claim is not observed input evidence.
+        failure = {
+            "schema_version": 1,
+            "kind": "native_probe_failure",
+            "session_id": session_id,
+            "stage": stage,
+            "error": _probe_error_payload(error),
+            "policy_attestation_claim": _plain(frozen_attestation),
+            "finished": False,
+            "reward": None,
+            "accuracy": None,
+            "archive_only": True,
+        }
+        _probe_failure_artifact(artifact_dir / "native-failure.json", failure, primary)
+        finalization = {"status": "returned" if finalized else "unknown", "timeout_seconds": capture_timeout_seconds}
+        if not finalize_attempted:
+            try:
+                trajectories = await _bounded_probe_lifecycle(
+                    gateway_manager.finalize_session(session_id),
+                    timeout=capture_timeout_seconds,
+                    name="failure finalize",
+                )
+                finalized = True
+                finalization["status"] = "returned"
+            except BaseException as secondary:
+                finalization["error"] = _probe_error_payload(secondary)
+                _note_probe_secondary(primary, secondary, "failure finalize")
+        elif not finalized:
+            finalization["error"] = _probe_error_payload(primary)
+        observed = []
+        try:
+            if trajectories is not None:
+                observed = [_trajectory_payload(row) for row in trajectories]
+        except Exception as secondary:
+            finalization["serialization_error"] = _probe_error_payload(secondary)
+            _note_probe_secondary(primary, secondary, "failure trajectory serialization")
+        _probe_failure_artifact(
+            artifact_dir / "native-failure-capture.json",
+            {
+                **failure,
+                "kind": "native_probe_failure_capture",
+                "capture_status": (
+                    "unknown"
+                    if "serialization_error" in finalization
+                    else "observed_committed_trajectories"
+                    if observed
+                    else "empty"
+                    if finalized
+                    else "unknown"
+                ),
+                "finalization": finalization,
+                "trajectories": observed,
+                "observed_scope": (
+                    "Only exact trajectories returned by public Gateway finalize; no pending request reconstruction."
+                ),
+            },
+            primary,
+        )
+        raise
     finally:
         if not finalized:
-            await gateway_manager.abort_session(session_id)
+            try:
+                await _bounded_probe_lifecycle(
+                    gateway_manager.abort_session(session_id), timeout=cleanup_timeout_seconds, name="abort"
+                )
+            except BaseException as error:
+                if primary is None:
+                    raise
+                _note_probe_secondary(primary, error, "abort")
+                _probe_failure_artifact(
+                    artifact_dir / "native-cleanup-failure.json",
+                    {
+                        "schema_version": 1,
+                        "kind": "native_probe_cleanup_failure",
+                        "session_id": session_id,
+                        "backend_stop_confirmed": None,
+                        "error": _probe_error_payload(error),
+                    },
+                    primary,
+                )
 
 
 def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, frozen_attestation, expected_account):
@@ -653,15 +803,37 @@ def _pair_account_scope(root, *, request, run_root, pool):
     else:
         ref = pool.acquire(run_root=run_root, scope_id=group, kind="pair")
         scope = _PairAccountScope(pool, ref, pool.public(ref))
+    primary = None
     try:
         yield scope
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         if not scope.closed:
             # This includes failure in the first variant: safely closed started
             # attempts can release without waiting for an unstarted second one.
             # Any missing drain/archive evidence quarantines and raises instead.
-            pool.finish(scope.ref, abandoned=True)
-            scope.closed = True
+            try:
+                pool.finish(scope.ref, abandoned=True)
+                scope.closed = True
+            except BaseException as error:
+                if primary is None:
+                    raise
+                _note_probe_secondary(primary, error, "pair account closure")
+                _probe_failure_artifact(
+                    root / "pair-cleanup-failure.json",
+                    {
+                        "schema_version": 1,
+                        "kind": "native_probe_pair_cleanup_failure",
+                        "credit_probe_group": group,
+                        "primary": _probe_error_payload(primary),
+                        "cleanup": _probe_error_payload(error),
+                        "account_identity": _plain(scope.public),
+                        "closed": False,
+                    },
+                    primary,
+                )
 
 
 async def collect_counterfactual_probe(
