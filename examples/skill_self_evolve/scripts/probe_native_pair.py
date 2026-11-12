@@ -482,6 +482,11 @@ def execute(run, *, timeout_seconds=1800):
         task_config, _ = launcher.install_codex_runtime(run, benchmark, capacity)
         os.environ["ALFWORLD_TASK_CONFIG"] = str(task_config)
         with open_dict(config):
+            current_rollout = OmegaConf.load(RECIPE / "config/alfworld_common.yaml").actor_rollout_ref.rollout
+            config.actor_rollout_ref.rollout.mode = current_rollout.mode
+            config.actor_rollout_ref.rollout.engine_kwargs = OmegaConf.merge(
+                config.actor_rollout_ref.rollout.get("engine_kwargs", {}), current_rollout.engine_kwargs
+            )
             config.skill_harness.artifact_root = str(run)
             config.skill_harness.store_root = str(run / "skill_store")
             config.skill_harness.split_manifest = str(run / "data/split_manifest.json")
@@ -489,14 +494,21 @@ def execute(run, *, timeout_seconds=1800):
             config.actor_rollout_ref.rollout.custom.agent_framework.gateway_count = 1
         (run / "diagnostic-config.yaml").write_text(OmegaConf.to_yaml(config, resolve=True))
         launcher.start_environment(run, benchmark, source)
-        input_assets = [source / "verl/experimental/skill_harness" / name for name in ("probes.py", "context.py")]
+        input_assets = [
+            source / "verl/experimental/skill_harness" / name
+            for name in (
+                "probes.py", "context.py", "alfworld/accounts.py", "alfworld/task.py", "alfworld/native_files.py"
+            )
+        ]
         input_assets.extend(
             RECIPE / name
             for name in (
                 "scripts/codex_entrypoint.sh",
+                "scripts/launch.py",
                 "prompts/solver_system.md",
                 "prompts/solver_task.txt",
                 "scripts/probe_native_pair.py",
+                "config/alfworld_common.yaml",
             )
         )
         write_new(

@@ -20,7 +20,7 @@ starts no service, Ray cluster or GPU process:
 
 ```bash
 /opt/conda/bin/python examples/skill_self_evolve/scripts/probe_native_pair.py \
-  --run-dir /root/nas_chaohuang/skill_training/runs/alfworld_native_pair_input_v5_20261112
+  --run-dir /root/nas_chaohuang/skill_training/runs/alfworld_native_pair_input_v6_20261112
 ```
 
 Review `probe-input.json`, then use `--execute` to run the prepared pair. Select
@@ -30,7 +30,7 @@ command only prepares and validates input files.
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
 /opt/conda/bin/python examples/skill_self_evolve/scripts/probe_native_pair.py \
-  --run-dir /root/nas_chaohuang/skill_training/runs/alfworld_native_pair_input_v5_20261112 \
+  --run-dir /root/nas_chaohuang/skill_training/runs/alfworld_native_pair_input_v6_20261112 \
   --execute
 ```
 
@@ -42,6 +42,19 @@ It creates no solver, learner, optimizer, EMA, replay writer or credit ledger.
 Both branches use the original frozen checkpoint, greedy sampling and seed 42,
 the full existing horizon, one common empty work directory and separate native
 homes. The native CodexAgent, Gateway encoding and sampled token IDs are kept.
+
+The private account roster must be initialized and its production preflight
+verified first. The outer collector retains one leased identity across both
+variants, including source archival and backend/process drain. See
+[account isolation](ACCOUNT_ISOLATION.md).
+
+The copied archived configuration preserves the model and rollout geometry.
+Before allocating a model, the driver applies the current common recipe's
+rollout API mode and backend engine options. In this pinned cut that retains
+the asynchronous API with vLLM `async_scheduling=false`. Actual resolved values
+are saved in `diagnostic-config.yaml`. Runtime provenance also hashes the
+account, Task, archive, launcher and common recipe sources alongside the
+existing context, prompt and collector assets.
 
 `result.json` reports `input_control_passed` only when the collector's immutable
 `paired-input-audit.json` reports `observed` and proves the actual initial model
