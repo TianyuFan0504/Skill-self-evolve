@@ -328,7 +328,9 @@ class JointTrainerTests(unittest.TestCase):
         self.trainer.global_steps = 1
         fake_tq = SimpleNamespace(kv_clear=Mock(), kv_batch_get=Mock(
             side_effect=lambda **kwargs: self.source.select(*kwargs["select_fields"]).clone()
-        ))
+        ), kv_describe=Mock(side_effect=lambda **kwargs: {
+            key: {"fields": list(self.source.keys()), "unfinalized": [], "links": {}} for key in kwargs["keys"]
+        }))
 
         def gather(output, value, *_args, **_kwargs):
             output[0] = value

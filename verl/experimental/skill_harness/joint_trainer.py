@@ -38,6 +38,12 @@ from verl.utils.metric import Metric
 from verl.utils.transferqueue_utils import tq
 
 from .controller import SkillJointController, preflight_controller_identity
+from .framework import (
+    TEXT_ONLY_MEDIA_FIELDS,
+    assert_no_nontext_incidents,
+    guard_text_only_tq_batch,
+    require_text_only_media,
+)
 from .joint_checkpoint import (
     CompletedOnlineCheckpoint,
     JointCheckpointCoordinator,
@@ -273,6 +279,7 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             super().on_train_begin()
 
     def _materialize_solver(self, batch):
+        guard_text_only_tq_batch(tq, batch, artifact_root=self.config.skill_harness.artifact_root)
         fields = list(required_solver_fields()) + ["raw_prompt"]
         actor = self.config.actor_rollout_ref.actor
         if actor.use_kl_loss or self.config.algorithm.get("use_kl_in_reward", False):
@@ -284,7 +291,16 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             fields.append("rollout_log_probs")
         source = tq.kv_batch_get(keys=batch.keys, partition_id=batch.partition_id,
                                 select_fields=list(dict.fromkeys(fields)))
-        for key, value in batch.extra_info.items():
+        # Inspect before omitting only proved text-only optional carriers. A nonempty
+        # payload raises; image-conditioned likelihood must never lose pixels.
+        for key in TEXT_ONLY_MEDIA_FIELDS:
+            if key in source:
+                require_text_only_media({key: source[key]}, source="materialized solver media field",
+                                        artifact_root=self.config.skill_harness.artifact_root)
+                source.pop(key)
+        for key, value in (batch.extra_info or {}).items():
+            if key in TEXT_ONLY_MEDIA_FIELDS:
+                continue  # Already proved empty by the authoritative media guard.
             if key not in source:
                 tu.assign_non_tensor_data(source, key, value)
         tu.assign_non_tensor(source, calculate_entropy=actor.calculate_entropy or actor.entropy_coeff != 0,
@@ -295,10 +311,12 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
 
     def _update_actor(self, batch, metrics):
         with self._joint_lock:
+            assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             if self._joint_controller is None:
                 raise RuntimeError("Joint controller must be initialized before any optimizer update")
             source = self._materialize_solver(batch)
             prepared = self._await(self._joint_controller.prepare_update(source, self.global_steps))
+            assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             output = self._await(self.actor_rollout_wg.update_actor(prepared.data))
             actual = self._ema_clock()
             if actual != prepared.expected_optimizer_step:
