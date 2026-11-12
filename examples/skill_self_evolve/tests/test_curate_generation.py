@@ -37,6 +37,9 @@ class FrozenBoundary:
     async def _run_background_source(self, key, entry):
         self.events.append(("delegate", copy.deepcopy(entry)))
 
+    async def _run_background_probe(self, job):
+        return await self.probe_body(job)
+
 
 Controller = type("GenerationController", (generation.GenerationControllerMixin, FrozenBoundary),
                   {"__module__": generation.__name__})
@@ -50,9 +53,17 @@ class GenerationTests(unittest.TestCase):
         self.owner = patch.object(generation, "process_identity", return_value=OWNER)
         self.owner.start()
         self.addCleanup(self.owner.stop)
+        runtime = types.ModuleType("skill_harness_examples.learner_runtime")
+        runtime.PROBE_CONCURRENCY, runtime.CONFIGURED_PROBE_CONCURRENCY, runtime.START_METHOD = 2, 8, "spawn"
+        runtime.multiprocessing = types.SimpleNamespace(get_start_method=lambda: "spawn")
+        examples = types.ModuleType("skill_harness_examples")
+        examples.__path__ = []
+        examples.learner_runtime = runtime
         self.modules = patch.dict(sys.modules, {
             "verl.experimental.skill_harness.curate": protocol.curate,
             "verl.experimental.skill_harness.source_queue": queue_fixture.queue,
+            "skill_harness_examples": examples,
+            "skill_harness_examples.learner_runtime": runtime,
         })
         self.modules.start()
         self.addCleanup(self.modules.stop)
@@ -66,6 +77,7 @@ class GenerationTests(unittest.TestCase):
         return types.SimpleNamespace(
             config=types.SimpleNamespace(skill_harness=types.SimpleNamespace(artifact_root=str(root))),
             _joint_restored=types.SimpleNamespace(checkpoint=checkpoint),
+            _learner_runtime_ref={"path": "runtime-reference", "sha256": "a" * 64},
         )
 
     def controller(self, trainer=None):
@@ -81,7 +93,7 @@ class GenerationTests(unittest.TestCase):
         controller.routes = {"curator": types.SimpleNamespace(optimizer_step=10)}
         controller.loading = {"tokenizer_version": "tokenizer:one"}
         controller.runtime = types.SimpleNamespace(template_version="template:one")
-        controller.settings = types.SimpleNamespace(candidates_per_source=1)
+        controller.settings = types.SimpleNamespace(candidates_per_source=1, credit_concurrency=8)
         controller.store = types.SimpleNamespace(head=lambda: "a" * 64)
         controller._initialize_background()
         controller.source_queue = queue_fixture.queue.SourceQueue(
@@ -235,7 +247,7 @@ class GenerationTests(unittest.TestCase):
         entry["curator_jobs"] = [{"created_at": 12, "candidate_group_id": "original", "mu": [-.3]}]
         jobs = copy.deepcopy(entry["curator_jobs"])
         controller.state = {"optimizer_step": 10, "source_queue": queue.state, "probe_jobs": {}}
-        controller.settings = types.SimpleNamespace(max_source_backlog=8192)
+        controller.settings = types.SimpleNamespace(max_source_backlog=8192, credit_concurrency=8)
         controller.save_state = lambda: events.append("persist")
         controller._pump_background = lambda: None
         controller._initialize_background()
@@ -243,6 +255,89 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(entry["details"]["reason"], "interrupted_background_generation")
         self.assertEqual(entry["curator_jobs"], jobs)
         self.assertLess(events.index("persist"), events.index("pump"))
+
+    def test_probe_gate_bounds_eight_logical_jobs_without_blocking_loop_or_waiter_leases(self):
+        async def scenario():
+            controller, _, _ = self.controller()
+            release = asyncio.Event()
+            active, peak, heartbeats, entered = 0, 0, 0, []
+
+            async def body(job):
+                nonlocal active, peak
+                entered.append(job["id"])
+                active += 1
+                peak = max(peak, active)
+                try:
+                    await release.wait()
+                finally:
+                    active -= 1
+
+            controller.probe_body = body
+            jobs = [{"id": index, "status": "running"} for index in range(8)]
+            tasks = [asyncio.create_task(controller._run_background_probe(job)) for job in jobs]
+            for _ in range(5):
+                await asyncio.sleep(.001)
+                heartbeats += 1
+            self.assertEqual(entered, [0, 1])
+            self.assertEqual(peak, 2)
+            self.assertEqual(heartbeats, 5)
+            tasks[-1].cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await tasks[-1]
+            self.assertEqual(jobs[-1], {"id": 7, "status": "running"})
+            release.set()
+            await asyncio.gather(*tasks[:-1])
+            self.assertEqual(len(entered), 7)
+            self.assertEqual(controller._physical_probe_gate._value, 2)
+            self.assertEqual(controller.settings.credit_concurrency, 8)
+
+        asyncio.run(scenario())
+
+    def test_frozen_probe_unknown_and_cancellation_do_not_create_zero_reward(self):
+        tree = ast.parse((ROOT / "verl/experimental/skill_harness/controller.py").read_text())
+        controller_node = next(node for node in tree.body if getattr(node, "name", None) == "SkillJointController")
+        probe = next(node for node in controller_node.body if getattr(node, "name", None) == "_run_background_probe")
+        namespace = {"asyncio": asyncio}
+        exec(compile(ast.Module(body=[probe], type_ignores=[]), "frozen_probe", "exec"), namespace)
+        base = type("FrozenProbe", (), {"_run_background_probe": namespace["_run_background_probe"]})
+        cls = type("ProbeController", (generation.GenerationControllerMixin, base), {})
+
+        async def scenario():
+            controller = cls()
+            controller._physical_probe_gate = asyncio.Semaphore(2)
+            controller._writes_allowed = asyncio.Event()
+            controller._writes_allowed.set()
+            controller.state = {"pending": {"w": {"observed": {}, "unobserved": {}}}}
+            controller.save_state = lambda: None
+            job = {"window_id": "w", "logical_id": "p", "assignment": {}, "source_step": 12,
+                   "status": "running"}
+
+            async def unknown(*args):
+                raise ValueError("unknown tail provenance")
+
+            controller._observe_one = unknown
+            await controller._run_background_probe(job)
+            self.assertEqual(job["status"], "failed")
+            self.assertEqual(controller.state["pending"]["w"]["observed"], {})
+            self.assertEqual(controller.state["pending"]["w"]["unobserved"], {"p": "ValueError"})
+            entered = asyncio.Event()
+
+            async def blocked(*args):
+                entered.set()
+                await asyncio.Event().wait()
+
+            controller._observe_one = blocked
+            job = {**job, "logical_id": "cancel", "status": "running"}
+            task = asyncio.create_task(controller._run_background_probe(job))
+            await entered.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertEqual(job["status"], "running")
+            self.assertNotIn("cancel", controller.state["pending"]["w"]["observed"])
+            self.assertEqual(controller._physical_probe_gate._value, 2)
+
+        asyncio.run(scenario())
 
     def test_new_branch_abstention_still_has_no_replay_or_credit_label(self):
         fixture = protocol.CurateTest()

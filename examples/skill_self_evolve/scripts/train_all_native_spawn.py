@@ -44,7 +44,7 @@ def extension_identity(policy):
 
 def initialized_receipt(trainer, config, imports, policy, *, identity=None,
                         suffix="all_native_spawn", kind="initialized_all_native_spawn_entry",
-                        curate_generation_ref=None):
+                        curate_generation_ref=None, learner_runtime_ref=None, learner_runtime_observation=None):
     from omegaconf import OmegaConf
 
     from skill_harness_examples import all_native_spawn, train_spawn_safe
@@ -92,6 +92,8 @@ def initialized_receipt(trainer, config, imports, policy, *, identity=None,
                 "Frozen final-fit body identity is a component; lifecycle extension uses this receipt"
             ),
             **({"curate_generation_ref": curate_generation_ref} if curate_generation_ref is not None else {}),
+            **({"learner_runtime_ref": learner_runtime_ref,
+                "learner_runtime_observation": learner_runtime_observation} if learner_runtime_ref is not None else {}),
         },
     )
 
@@ -129,8 +131,14 @@ def runner_class(extension_module=None):
             tq.init(config.transfer_queue)
             diagnostics = train_direct_checkpoint.passive_diagnostics(config.skill_harness.artifact_root)
             try:
+                learner_runtime_ref = None
+                if provider is not None and hasattr(provider, "prepare_learner"):
+                    diagnostics.stage("learner_start_method")
+                    learner_runtime_ref = provider.prepare_learner(config)
                 diagnostics.stage("trainer_construct")
                 trainer = (train_direct_checkpoint if provider is None else provider).trainer_class()(config)
+                if learner_runtime_ref is not None:
+                    trainer._learner_runtime_ref = learner_runtime_ref
                 diagnostics.attach(trainer)
                 diagnostics.stage("trainer_init")
                 trainer.init()

@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import test_curate_generation as contract
+import test_learner_runtime as runtime_contract
 import test_train_all_native_spawn as legacy
 
 HERE = Path(__file__).resolve().parents[1]
@@ -29,32 +30,55 @@ class EntryTests(unittest.TestCase):
         self.namespace = self.modules["skill_harness_examples"]
         self.namespace.train_all_native_spawn = legacy.entry
         self.namespace.curate_generation = contract.generation
+        self.namespace.learner_runtime = runtime_contract.runtime
         self.modules["skill_harness_examples.curate_generation"] = contract.generation
+        self.modules["skill_harness_examples.learner_runtime"] = runtime_contract.runtime
         self.namespace.train_resilient_setup = types.SimpleNamespace(
             __file__=str(HERE / "scripts/train_resilient_setup.py"))
         self.modules["skill_harness_examples.train_curate_generation"] = entry
+        self.fixture.config.data = types.SimpleNamespace(dataloader_num_workers=4)
+        self.fixture.config.skill_harness.joint = types.SimpleNamespace(credit_concurrency=8)
+        self.method = "fork"
+
+        def set_method(method, force):
+            self.method = method
+            self.fixture.events.append("spawn-default")
+
+        mp = patch.object(runtime_contract.runtime, "multiprocessing", types.SimpleNamespace(
+            set_start_method=set_method, get_start_method=lambda **kwargs: self.method))
+        mp.start()
+        self.addCleanup(mp.stop)
 
     def test_explicit_identity_names_new_entry_provider_and_composed_all_native_body(self):
         with patch.dict(sys.modules, self.modules):
             identity = entry.extension_identity(self.fixture.policy)
-        self.assertEqual(identity["policy"], "parallel-direct-all-native-spawn-curate-generation-v1")
+        self.assertEqual(identity["policy"], "parallel-direct-all-native-spawn-curate-generation-v2")
         self.assertEqual(identity["actual_entry"], str(HERE / "scripts/train_curate_generation.py"))
         self.assertEqual(identity["files"]["all_native_component"]["path"],
                          str(HERE / "scripts/train_all_native_spawn.py"))
         self.assertEqual(identity["curate_generation_extension"]["policy"], contract.generation.POLICY)
         self.assertEqual(identity["solver_spawn_component_identity"], {"component": "frozen-solver-spawn"})
+        self.assertEqual(identity["runtime_guards_extension"]["credit_probe_concurrency"], 2)
 
     def test_namespace_is_prepared_after_restore_before_initialized_receipt_and_fit(self):
         events = self.fixture.events
 
         class Trainer:
             def __init__(self, config):
+                events.append("trainer-construct")
                 self.config = config
                 self.logger = types.SimpleNamespace(finish=lambda **kwargs: None)
 
             def init(self):
                 events.append("restored")
                 self._joint_restored = None
+                self.train_dataloader_it = None
+                self.train_dataloader = types.SimpleNamespace(
+                    dataset=runtime_contract.Dataset(), sampler=object(), num_workers=4,
+                    multiprocessing_context=None, _iterator=None)
+                self.val_dataloader = types.SimpleNamespace(
+                    dataset=runtime_contract.Dataset(), sampler=object(), num_workers=4,
+                    multiprocessing_context=None, _iterator=None)
 
             def _identity(self):
                 return types.SimpleNamespace(runtime="actual-runtime")
@@ -90,6 +114,7 @@ class EntryTests(unittest.TestCase):
                     patch.object(contract.generation, "process_identity", return_value=contract.OWNER):
                 legacy.entry.runner_class("skill_harness_examples.train_curate_generation")().run(self.fixture.config)
         self.assertLess(events.index("restored"), events.index("prepare"))
+        self.assertLess(events.index("spawn-default"), events.index("trainer-construct"))
         self.assertLess(events.index("prepare"), events.index("new-initialized"))
         self.assertLess(events.index("new-initialized"), events.index("fit"))
 
@@ -105,6 +130,8 @@ class EntryTests(unittest.TestCase):
                 _joint_loop=loop, _joint_restored=None,
                 _joint_coordinator=types.SimpleNamespace(last_restore_receipt=None),
                 _curate_generation_ref={"path": "prepared-reference", "sha256": "a" * 64},
+                _learner_runtime_ref={"path": "runtime-reference", "sha256": "b" * 64},
+                _learner_runtime_observation={"fixture": "observed loader transport"},
             )
             captured = []
             self.fixture.spawn._base = lambda: types.SimpleNamespace(
@@ -117,6 +144,7 @@ class EntryTests(unittest.TestCase):
         self.assertTrue(path.name.endswith(".curate_generation.initialized.json"))
         self.assertEqual(value["kind"], "initialized_curate_generation_entry")
         self.assertEqual(value["curate_generation_ref"], trainer._curate_generation_ref)
+        self.assertEqual(value["learner_runtime_ref"], trainer._learner_runtime_ref)
         self.assertNotIn("actual_controller_class", value)
 
     def test_opt_in_entry_uses_provider_without_replacing_default_module_globals(self):

@@ -8,6 +8,7 @@ colliding with orphan journals produced after that checkpoint.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -125,18 +126,32 @@ def prepare_namespace(trainer):
 
 class GenerationControllerMixin:
     def _initialize_background(self):
+        from skill_harness_examples import learner_runtime
+
         ref = self.trainer._curate_generation_ref
         namespace = namespace_for(self.trainer)
         source = namespace["source_checkpoint"]
         expected_clock = 0 if source is None else source["optimizer_step"]
         if self.state["optimizer_step"] != expected_clock:
             raise ValueError("Curator generation namespace and restored controller clocks differ")
+        if (learner_runtime.multiprocessing.get_start_method() != learner_runtime.START_METHOD
+                or self.settings.credit_concurrency != learner_runtime.CONFIGURED_PROBE_CONCURRENCY):
+            raise ValueError("Actual learner start method or configured credit ceiling differs before activation")
         self._curate_generation_namespace = namespace["namespace"]
+        self._physical_probe_gate = asyncio.Semaphore(learner_runtime.PROBE_CONCURRENCY)
         activation = {
             "schema_version": 1, "kind": "activated_curate_generation_controller",
             "namespace": namespace["namespace"], "namespace_ref": ref,
             "controller_class": type(self).__module__ + "." + type(self).__qualname__,
             "optimizer_step": self.state["optimizer_step"],
+            "runtime_guards": {
+                "learner_runtime_ref": self.trainer._learner_runtime_ref,
+                "observed_default_start_method": learner_runtime.multiprocessing.get_start_method(),
+                "probe_semaphore_class": type(self._physical_probe_gate).__module__ + "."
+                + type(self._physical_probe_gate).__qualname__,
+                "probe_semaphore_initial_value": self._physical_probe_gate._value,
+                "configured_credit_concurrency": self.settings.credit_concurrency,
+            },
         }
         path = Path(ref["path"]).with_name(namespace["namespace"] + ".activated.json")
         self.state["curate_generation_activation_ref"] = publish(path, activation)
@@ -144,6 +159,13 @@ class GenerationControllerMixin:
         # The frozen initializer preserves running-action uncertainty and only
         # creates its background pump after this durable activation record.
         return super()._initialize_background()
+
+    async def _run_background_probe(self, job):
+        # The frozen pump can retain its configured ceiling of eight logical
+        # jobs. Only this many confirmed-lifecycle probe bodies enter the lease
+        # and RPC path together; waiting acquires neither and never blocks the loop.
+        async with self._physical_probe_gate:
+            return await super()._run_background_probe(job)
 
     async def _run_background_source(self, key, entry):
         from verl.experimental.skill_harness.curate import CuratorBehavior

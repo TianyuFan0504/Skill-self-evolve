@@ -4,7 +4,7 @@
 training process. It composes the AllNative transport, direct checkpoint reads,
 existing solver sampler and frozen training/final-evaluation body. The public
 launcher and ordinary AllNative entry retain their existing default behavior.
-This module has not been deployed into the running experiment.
+The actual deployed entry is identified by its runtime receipts.
 
 The opt-in entry requires remaining optimizer updates. Restoring a checkpoint
 whose optimizer clock has already reached the target is rejected before
@@ -29,20 +29,25 @@ changes their hashes, or calls a new action the original draw.
 
 ## Execution and persistence order
 
-1. The existing trainer initializes and restores the actual checkpoint.
-2. The provider creates and fsyncs a fresh namespace document under
+1. In the actual learner, the v2 provider sets and observes the multiprocessing
+   default as `spawn` before constructing the trainer. It records this
+   observation separately from prelaunch source/provider intent.
+2. The existing trainer initializes and restores the actual checkpoint. Before
+   either loader starts an iterator, the provider applies the transport repair
+   described below to the existing train/dev dataset instances.
+3. The provider creates and fsyncs a fresh namespace document under
    `controller/generation_epochs/`. It records the process generation, actual
    source checkpoint and provider hash. The initialized entry receipt calls
    this a **prepared** namespace; no controller activation or model generation
    is claimed at this stage.
-3. The actual `GenerationController` publishes a separate activation document
+4. The actual `GenerationController` publishes a separate activation document
    and persists its reference in controller state before the unchanged
    background initializer starts its pump.
-4. For a newly claimed source whose `curator_jobs` is empty, the adapter derives
+5. For a newly claimed source whose `curator_jobs` is empty, the adapter derives
    `candidate_group_id = "cohort_" + SHA256([original_update_id,
    episode_output_dir, namespace])`. It persists the full request, actual EMA
    behavior and namespace before delegating to the unchanged collector.
-5. The collector retains its exact full context, action tokens, processed
+6. The collector retains its exact full context, action tokens, processed
    behavior logprobs, EMA version, abstention and immutable commit checks. The
    controller's existing credit windows and replay acknowledgments still
    identify a single action in the active restored branch.
@@ -62,6 +67,51 @@ actions as failed without resampling them. Terminal dispositions, including
 the128 failed sources observed during the earlier checkpoint10 transition,
 remain immutable. Old artifacts remain available for audit, contribute no
 duplicate admission or loss, and are not negative/zero utility observations.
+
+## Operational safeguards in v2
+
+The original learner exit cause is unknown. Four forked DataLoader children
+were observed holding inherited Ray/GPU descriptors after that learner exited.
+Selecting spawn addresses descriptor inheritance; it does not establish why
+the learner exited or claim to repair that unproven cause.
+
+The learner changes its own default multiprocessing context before trainer
+construction. Configured train/dev worker counts remain4. Installed torchdata
+uses this default when its loader has no explicit context override; the
+initialized receipt records the default and actual loader attributes, rather
+than asserting that every worker has already spawned.
+
+The production default `RLHFDataset.__getstate__` omits its filtered dataframe,
+and the Qwen processor contains a dynamically bound method that cannot be
+unpickled by spawn. Therefore spawn alone is insufficient. After filtering and
+checkpoint state loading, but before any loader iterator exists, v2:
+
+- requires the exact default `RLHFDataset` and verifies plain text prompt
+  content with no media payloads;
+- sets the existing dataset-instance `serialize_dataset` transport flag so
+  spawn carries its original filtered Arrow dataframe;
+- removes only the dataset's unused processor reference. The trainer's
+  processor, tokenizer, sampler, filtered frame, data config and pending
+  DataLoader state remain unchanged.
+
+The provider rejects custom/multimodal datasets, explicit fork overrides and
+already-started iterators. It never migrates to workers0. These are transport
+operations outside the scientific config and checkpoint protocol fingerprint.
+Scheduled dev uses the repaired four-worker loader. The existing official
+evaluation loader uses workers0 and needs no multiprocessing serialization.
+
+An async semaphore admits at most2 background probe bodies to the existing
+lease/RPC path at a time. The frozen pump and `JointSettings.credit_concurrency`
+retain ceiling8, so other logical jobs await the semaphore without a lease,
+RPC or blocked event loop. No wait is added to the learner's update path.
+Cancellation releases a held permit; unknown observations retain their
+original unknown/interrupted disposition and create no zero reward or label.
+
+This limit bounds admitted probe bodies under their confirmed lifecycle. It
+does not release retained uncertain leases, prove a global count of orphan
+processes, or reset quarantined accounts. Their separate ownership/drain
+evidence remains required. Source8/physical2 is recorded explicitly in the
+operational evidence instead of silently rewriting protocol settings.
 
 ## Invocation and evidence
 
@@ -114,13 +164,16 @@ infer ownership of an existing process. Preserve the normal single-learner
 launch guards and supply the experiment's remaining resolved overrides.
 
 Receipts use policy
-`parallel-direct-all-native-spawn-curate-generation-v1`, distinct
+`parallel-direct-all-native-spawn-curate-generation-v2`, distinct
 `*.curate_generation.json` and `*.curate_generation.initialized.json` names,
 the actual new entry/provider/hook hashes, the composed AllNative source, and
-the unchanged solver transport component. The comparer understands this
-policy explicitly. It verifies the prepared namespace and later controller
-activation, including the activation captured in the final checkpoint; it
-does not relabel these records as the old AllNative implementation.
+the unchanged solver transport component. The comparer accepts historical v1
+evidence separately. For v2 it additionally checks the observed learner
+default before construction, post-init dataset transport observation, and
+actual semaphore activation with its configured ceiling. It verifies the
+prepared namespace and later controller activation, including the activation
+captured in the final checkpoint; it does not relabel these records as the old
+AllNative implementation.
 
 ## CPU validation and limits
 
@@ -138,6 +191,26 @@ action, preserves its actual fixture tokens/logprobs, and verifies neutral
 abstention. Entry tests distinguish prepared from activated evidence. Synthetic
 full274-case comparer fixtures check explicit new identities and legacy
 compatibility; they are not real benchmark or model results.
+
+`scripts/test_stateful_spawn_restore_linux.py` separately checks the installed
+torchdata implementation using four CPU workers and the real checkpoint's
+`data.pt`, original local dataset/tokenizer, sampler and collate function. It
+compares fork-to-spawn continuation and deliberately inheritable sentinel
+descriptors; no model or benchmark-environment request is involved. The test's
+own output records exact source versions, file hashes, expected serialization
+failures and successful continuation checks. Its worker observations are
+limited to that owned CPU proof, not attestation of future training workers.
+
+The checkpoint10 CPU proof on Torch2.11/torchdata0.11 retained four workers:
+fork and adapted default-spawn produced the same next32 original task IDs,
+raw-prompt hashes and entire loader/sampler state. A saved spawn state restored
+into fork matched the following32 tasks. All four fork workers inherited the
+test sentinel descriptor and all four spawn workers excluded it; all12 final
+proof workers joined with exit0. The checkpoint file hash remained unchanged
+and CUDA was never initialized. The dev399 dataset received the same guarded
+transport preparation, but its workers were not iterated by that proof. The
+proof redirected only its cache directory to an owned temporary location;
+original parquet/model-tokenizer inputs and production config were not edited.
 
 This fix does not recover completed orphan actions transactionally, retry an
 uncertain native launch, rewrite current failed sources, or establish reward

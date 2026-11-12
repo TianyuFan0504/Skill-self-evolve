@@ -340,5 +340,286 @@ class CurateGenerationComparisonTests(unittest.TestCase):
             path.write_bytes(original)
 
 
+class GuardedCurateGenerationComparisonTests(unittest.TestCase):
+    """v2 separates process-default, loader-transport and controller evidence."""
+
+    compare_pair = CurateGenerationComparisonTests.compare_pair
+    assert_incomplete = CurateGenerationComparisonTests.assert_incomplete
+    assert_rejected_for = CurateGenerationComparisonTests.assert_rejected_for
+    install_source = classmethod(CurateGenerationComparisonTests.install_source.__func__)
+    relink_activation = CurateGenerationComparisonTests.relink_activation
+
+    @classmethod
+    def setUpClass(cls):
+        CurateGenerationComparisonTests.setUpClass.__func__(cls)
+        compare = cls.compare
+        for relative in compare.CURATE_RUNTIME_GUARDS_FILES.values():
+            path = cls.source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((ROOT / relative).read_bytes())
+            subprocess.check_call(["git", "-C", str(cls.source), "add", relative])
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(cls.source),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "-q",
+                "-m",
+                "Guarded curate generation fixture",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        commit = subprocess.check_output(["git", "-C", str(cls.source), "rev-parse", "HEAD"], text=True).strip()
+        for component in (cls.spawn, cls.loaded_spawn):
+            component["driver_source_commit"] = commit
+            component["composed_extensions"]["resilient_setup"]["driver_source_commit"] = commit
+        cls.all_identity.update(
+            policy=compare.CURATE_GENERATION_V2_POLICY,
+            driver_source_commit=commit,
+            runtime_guards_extension={
+                "policy": compare.CURATE_RUNTIME_GUARDS_POLICY,
+                "files": {
+                    name: {"path": str(cls.source / relative), "sha256": sha(cls.source / relative)}
+                    for name, relative in compare.CURATE_RUNTIME_GUARDS_FILES.items()
+                },
+                "learner_start_method": "spawn",
+                "credit_probe_concurrency": 2,
+            },
+        )
+        for role in ("base", "trained"):
+            path = cls.pair.root / role / "training-manifest.json"
+            value = read(path)
+            value["config"]["data"]["dataloader_num_workers"] = 4
+            value["config"]["skill_harness"]["joint"]["credit_concurrency"] = 8
+            if role == "base":
+                value["source_commit"] = commit
+            write(path, value)
+        value = read(cls.observations["base"])
+        value.update(source_commit=commit, spawn_extension=cls.spawn)
+        value["effective_config_before_entry"]["data"]["dataloader_num_workers"] = 4
+        value["effective_config_before_entry"]["skill_harness"]["joint"]["credit_concurrency"] = 8
+        write(cls.observations["base"], value)
+        cls.learner_path = cls.pair.root / "trained/driver_runs/400.learner_runtime.json"
+        owner = read(cls.namespace_path)["owner"]
+        write(
+            cls.learner_path,
+            {
+                "schema_version": 1,
+                "kind": "observed_spawn_learner_default",
+                "policy": compare.CURATE_RUNTIME_GUARDS_POLICY,
+                "owner": owner,
+                "observed_before": "trainer_construct",
+                "previous_default_start_method": "fork",
+                "observed_default_start_method": "spawn",
+                "configured_dataloader_workers": 4,
+                "configured_credit_concurrency": 8,
+                "physical_credit_probe_concurrency": 2,
+                "provider_ref": cls.all_identity["runtime_guards_extension"]["files"]["learner"],
+                "scope": compare.CURATE_LEARNER_DEFAULT_SCOPE,
+            },
+        )
+        ref = {"path": str(cls.learner_path), "sha256": sha(cls.learner_path)}
+        value = read(cls.all_initialized)
+        value.update(cls.all_identity, learner_runtime_ref=ref)
+        value["effective_config_after_trainer_init"]["data"]["dataloader_num_workers"] = 4
+        value["effective_config_after_trainer_init"]["skill_harness"]["joint"]["credit_concurrency"] = 8
+        value["original_training_manifest_sha256"] = sha(cls.pair.root / "trained/training-manifest.json")
+        value["learner_runtime_observation"] = {
+            "default_start_method": "spawn",
+            "scope": compare.CURATE_LOADER_TRANSPORT_SCOPE,
+            **{
+                role: {
+                    "dataset_class": "verl.utils.dataset.rl_dataset.RLHFDataset",
+                    "num_workers": 4,
+                    "multiprocessing_context": None,
+                    "iterator_started": False,
+                    "serialize_dataset_before": False,
+                    "serialize_dataset_after": True,
+                    "dataframe_fingerprint": "synthetic_" + role,
+                    "dataset_length": length,
+                    "filtered_dataframe_unchanged": True,
+                    "processor_before_class": "transformers.models.qwen3_vl.processing_qwen3_vl.Qwen3VLProcessor",
+                    "processor_after_class": None,
+                    "trainer_processor_unchanged": True,
+                    "text_only_transport": True,
+                }
+                for role, length in (("train", 3), ("val", 2))
+            },
+        }
+        write(cls.all_initialized, value)
+        value = read(cls.all_prelaunch)
+        identity = copy.deepcopy(cls.all_identity)
+        identity["all_role_native_spawn"]["curator_profiles"] = []
+        value.update(identity)
+        value["config"]["data"]["dataloader_num_workers"] = 4
+        value["config"]["skill_harness"]["joint"]["credit_concurrency"] = 8
+        write(cls.all_prelaunch, value)
+        value = read(cls.activation_path)
+        value["runtime_guards"] = {
+            "learner_runtime_ref": ref,
+            "observed_default_start_method": "spawn",
+            "probe_semaphore_class": "asyncio.locks.Semaphore",
+            "probe_semaphore_initial_value": 2,
+            "configured_credit_concurrency": 8,
+        }
+        write(cls.activation_path, value)
+        for path in (cls.live_controller, cls.final_controller):
+            state = read(path)
+            state["curate_generation_activation_ref"] = {
+                "path": str(cls.activation_path),
+                "sha256": sha(cls.activation_path),
+            }
+            write(path, state, wrapped=True)
+        cls.relink()
+
+    @classmethod
+    def relink(cls):
+        CurateGenerationComparisonTests.relink.__func__(cls)
+        receipt = read(cls.receipt_path)
+        original = sha(cls.pair.root / "trained/training-manifest.json")
+        receipt["original_training_manifest_sha256"] = original
+        for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+            path = Path(receipt[key]["path"])
+            value = read(path)
+            value["original_training_manifest_sha256"] = original
+            write(path, value)
+            receipt[key]["sha256"] = sha(path)
+        write(cls.receipt_path, receipt)
+
+    @contextmanager
+    def mutated(self):
+        original = self.learner_path.read_bytes()
+        try:
+            with CurateGenerationComparisonTests.mutated(self):
+                yield
+        finally:
+            self.learner_path.write_bytes(original)
+
+    def relink_learner(self):
+        ref = {"path": str(self.learner_path), "sha256": sha(self.learner_path)}
+        value = read(self.all_initialized)
+        value["learner_runtime_ref"] = ref
+        write(self.all_initialized, value)
+        value = read(self.activation_path)
+        value["runtime_guards"]["learner_runtime_ref"] = ref
+        write(self.activation_path, value)
+        self.relink_activation()
+
+    def test_v2_source10_full274_matches_original_base_without_runtime_guard_execution(self):
+        report = self.compare_pair()
+        self.assertTrue(report["comparison_supported"], report["reasons"])
+        guards = report["all_native_spawn_evidence"]["curate_generation"]["runtime_guards"]
+        self.assertEqual(guards["observed_default_start_method"], "spawn")
+        self.assertEqual(guards["delegated_probe_limit"], 2)
+        self.assertIn("source-linked inference", guards["scope"])
+        self.assertEqual(report["pooled"]["games"], 274)
+        self.assertFalse((self.pair.root / "base/driver_runs/400.learner_runtime.json").exists())
+
+    def test_prelaunch_runtime_intent_cannot_replace_actual_constructor_observation(self):
+        with self.mutated():
+            self.learner_path.unlink()
+            self.assert_rejected_for("learner_runtime.json")
+
+    def update_identity_links(self):
+        initialized = read(self.all_initialized)
+        initialized.update(self.all_identity)
+        write(self.all_initialized, initialized)
+        before = read(self.all_prelaunch)
+        identity = copy.deepcopy(self.all_identity)
+        identity["all_role_native_spawn"]["curator_profiles"] = []
+        before.update(identity)
+        write(self.all_prelaunch, before)
+        self.relink()
+
+    def test_rehashed_runtime_intent_requires_spawn_and_two_delegated_probes(self):
+        for field, replacement in (("learner_start_method", "fork"), ("credit_probe_concurrency", 3)):
+            with self.subTest(field=field), self.mutated():
+                self.all_identity["runtime_guards_extension"][field] = replacement
+                self.update_identity_links()
+                self.assert_rejected_for("runtime guard intent differs")
+
+    def test_v1_policy_cannot_silently_carry_v2_observations(self):
+        with self.mutated():
+            self.all_identity["policy"] = self.compare.CURATE_GENERATION_POLICY
+            self.update_identity_links()
+            self.assert_rejected_for("AllNative lifecycle extension: unsupported or missing schema fields")
+
+    def test_rehashed_wrong_observed_default_owner_or_constructor_stage_rejects(self):
+        for updates in (
+            {"observed_default_start_method": "fork"},
+            {"observed_before": "trainer_init"},
+            {"owner": {"pid": 9999, "start_ticks": 5678}},
+            {"configured_dataloader_workers": 0},
+            {"configured_credit_concurrency": 2},
+        ):
+            with self.subTest(updates=updates), self.mutated():
+                value = read(self.learner_path)
+                value.update(updates)
+                write(self.learner_path, value)
+                self.relink_learner()
+                self.assert_rejected_for("Observed learner spawn default, owner, timing")
+
+    def test_rehashed_loader_data_change_or_started_iterator_rejects(self):
+        for role in ("train", "val"):
+            for updates in (
+                {"serialize_dataset_after": False},
+                {"iterator_started": True},
+                {"filtered_dataframe_unchanged": False},
+                {"num_workers": 0},
+                {"multiprocessing_context": "fork"},
+                {"dataframe_fingerprint": ""},
+                {"text_only_transport": False},
+                {"trainer_processor_unchanged": False},
+                {"processor_after_class": "fixture.Processor"},
+            ):
+                with self.subTest(role=role, updates=updates), self.mutated():
+                    value = read(self.all_initialized)
+                    value["learner_runtime_observation"][role].update(updates)
+                    write(self.all_initialized, value)
+                    self.relink()
+                    self.assert_rejected_for("loader transport changed data, workers or iteration boundary")
+
+    def test_rehashed_wrong_probe_semaphore_or_activation_default_rejects(self):
+        for updates in (
+            {"probe_semaphore_initial_value": 3},
+            {"probe_semaphore_class": "asyncio.Lock"},
+            {"observed_default_start_method": "fork"},
+            {"configured_credit_concurrency": 2},
+        ):
+            with self.subTest(updates=updates), self.mutated():
+                value = read(self.activation_path)
+                value["runtime_guards"].update(updates)
+                write(self.activation_path, value)
+                self.relink_activation()
+                self.assert_rejected_for("Activated controller spawn default or delegated probe semaphore differs")
+
+    def test_source_linked_inference_cannot_claim_per_worker_attestation(self):
+        with self.mutated():
+            value = read(self.all_initialized)
+            value["learner_runtime_observation"]["scope"] = "Every worker and every orphan was attested clean"
+            write(self.all_initialized, value)
+            self.relink()
+            self.assert_rejected_for("source-linked inference scope differs")
+
+    def test_changed_published_learner_provider_rejects(self):
+        path = self.source / self.compare.CURATE_RUNTIME_GUARDS_FILES["learner"]
+        original = path.read_bytes()
+        try:
+            path.write_bytes(original + b"\n# changed learner guard\n")
+            self.assert_rejected_for("Extension bytes differ from published source")
+        finally:
+            path.write_bytes(original)
+
+
 if __name__ == "__main__":
     unittest.main()
