@@ -165,6 +165,10 @@ count, concurrency or token limits must be recorded in a new run manifest.
 
 ## Saved evidence
 
+The [formal v3 initial baseline](../../docs/skill_self_evolve/native_formal_initial_v3.md)
+records all 274 official games, independent per-case reconciliation and the
+boundary between a complete baseline and demonstrated training improvement.
+
 Each NAS run directory contains:
 
 - `launch_manifest.json`, `preflight.json`, `resolved-config.preflight.yaml`,
