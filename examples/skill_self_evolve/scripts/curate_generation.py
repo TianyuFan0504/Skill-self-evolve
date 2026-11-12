@@ -125,6 +125,11 @@ def prepare_namespace(trainer):
 
 
 class GenerationControllerMixin:
+    def _credit_probe_concurrency(self):
+        from skill_harness_examples import learner_runtime
+
+        return learner_runtime.PROBE_CONCURRENCY
+
     def _initialize_background(self):
         from skill_harness_examples import learner_runtime
 
@@ -138,7 +143,7 @@ class GenerationControllerMixin:
                 or self.settings.credit_concurrency != learner_runtime.CONFIGURED_PROBE_CONCURRENCY):
             raise ValueError("Actual learner start method or configured credit ceiling differs before activation")
         self._curate_generation_namespace = namespace["namespace"]
-        self._physical_probe_gate = asyncio.Semaphore(learner_runtime.PROBE_CONCURRENCY)
+        self._physical_probe_gate = asyncio.Semaphore(self._credit_probe_concurrency())
         activation = {
             "schema_version": 1, "kind": "activated_curate_generation_controller",
             "namespace": namespace["namespace"], "namespace_ref": ref,

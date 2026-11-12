@@ -44,7 +44,8 @@ def extension_identity(policy):
 
 def initialized_receipt(trainer, config, imports, policy, *, identity=None,
                         suffix="all_native_spawn", kind="initialized_all_native_spawn_entry",
-                        curate_generation_ref=None, learner_runtime_ref=None, learner_runtime_observation=None):
+                        curate_generation_ref=None, learner_runtime_ref=None, learner_runtime_observation=None,
+                        account_pool_epoch_activation_refs=None, account_pool_epoch_activation_directory=None):
     from omegaconf import OmegaConf
 
     from skill_harness_examples import all_native_spawn, train_spawn_safe
@@ -79,7 +80,11 @@ def initialized_receipt(trainer, config, imports, policy, *, identity=None,
             + type(trainer._joint_loop).__qualname__,
             "event_loop_policy_class": type(policy).__module__ + "." + type(policy).__qualname__,
             "registered_curator_scope": "Actual NativeCuratorRuntime account, work root, package and clean environment",
-            "primary_worker_scope": "Unchanged SpawnSafeRunner installs the solver-only component in episode workers",
+            "primary_worker_scope": (
+                "Unchanged SpawnSafeRunner installs the solver-only component in episode workers"
+                if account_pool_epoch_activation_refs is None else
+                "Official Ray setup_worker selects the fresh pool in actual episode workers; unchanged SpawnSafeRunner"
+            ),
             "restore_receipt_ref": restore_ref,
             "restored_checkpoint": None if checkpoint is None else {
                 "checkpoint_dir": checkpoint.checkpoint_dir,
@@ -94,6 +99,9 @@ def initialized_receipt(trainer, config, imports, policy, *, identity=None,
             **({"curate_generation_ref": curate_generation_ref} if curate_generation_ref is not None else {}),
             **({"learner_runtime_ref": learner_runtime_ref,
                 "learner_runtime_observation": learner_runtime_observation} if learner_runtime_ref is not None else {}),
+            **({"account_pool_epoch_activation_refs": account_pool_epoch_activation_refs,
+                "account_pool_epoch_activation_directory": account_pool_epoch_activation_directory}
+               if account_pool_epoch_activation_refs is not None else {}),
         },
     )
 
@@ -195,6 +203,17 @@ def entry(config, *, extension_module=None):
     from skill_harness_examples import train_spawn_safe as spawn
     from verl.experimental.skill_harness.bootstrap import apply_runtime_environment, configure_runtime
 
+    provider = None
+    if extension_module is not None:
+        import importlib
+
+        provider = importlib.import_module(extension_module)
+    selected_epoch = any(name in os.environ for name in (
+        "ALFWORLD_ACCOUNT_POOL_MANIFEST", "ALFWORLD_ACCOUNT_POOL_MANIFEST_SHA256"))
+    if selected_epoch and (provider is None or not hasattr(provider, "prepare_driver")):
+        raise ValueError("A selected fresh account epoch requires the explicit train_curate_epoch entry")
+    if provider is not None and hasattr(provider, "prepare_driver"):
+        provider.prepare_driver(config)
     run = Path(config.skill_harness.artifact_root)
     settings_path = Path(os.environ["ALFWORLD_SERVER_CONFIG"])
     settings = json.loads(settings_path.read_bytes())
@@ -222,12 +241,9 @@ def entry(config, *, extension_module=None):
     auto_set_device(config)
     validate_config(config, use_reference_policy=need_reference_policy(config), use_critic=need_critic(config))
     apply_runtime_environment(config)
+    if provider is not None and hasattr(provider, "prepare_runtime_environment"):
+        provider.prepare_runtime_environment(config)
     policy = all_native_spawn.install_policy()
-    provider = None
-    if extension_module is not None:
-        import importlib
-
-        provider = importlib.import_module(extension_module)
     identity = extension_identity(policy) if provider is None else provider.extension_identity(policy)
     suffix = "all_native_spawn" if provider is None else provider.SUFFIX
     kind = "prelaunch_all_native_spawn_parallel_components" if provider is None else provider.PRELAUNCH_KIND

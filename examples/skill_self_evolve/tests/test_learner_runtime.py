@@ -95,6 +95,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(value["configured_credit_concurrency"], 8)
         self.assertEqual(value["physical_credit_probe_concurrency"], 2)
 
+    def test_explicit_new_provider_records_cap_eight_without_changing_historical_default(self):
+        ref = runtime.prepare_learner(self.config, physical_probe_concurrency=8)
+        self.assertEqual(contract.generation.read_ref(ref)["physical_credit_probe_concurrency"], 8)
+        self.assertEqual(runtime.PROBE_CONCURRENCY, 2)
+
+    def test_physical_limit_outside_configured_ceiling_rejects_before_process_change(self):
+        for value in (0, 9, True):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "physical probe"):
+                runtime.prepare_learner(self.config, physical_probe_concurrency=value)
+        self.assertEqual(self.calls, [])
+
     def test_transport_preserves_config_sampler_and_queued_checkpoint_state(self):
         trainer = self.trainer()
         config = copy.deepcopy(self.config)

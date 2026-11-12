@@ -102,7 +102,14 @@ def restricted_native_preflight(run, executable):
     )
     from verl.experimental.skill_harness.alfworld.native_files import archive_native_files
 
-    pool = AccountPool()
+    if "ALFWORLD_ACCOUNT_POOL_MANIFEST" in os.environ or "ALFWORLD_ACCOUNT_POOL_MANIFEST_SHA256" in os.environ:
+        from skill_harness_examples import account_pool_epoch
+
+        account_pool_epoch.readonly_preflight(minimum_available=64)
+        account_pool_epoch.install_process(role="driver")
+        pool = account_pool_epoch.preflight_account_pool()
+    else:
+        pool = AccountPool()
     available, abi = pool.available(), landlock_abi()
     check(available >= 64, "Fewer than 64 clean private attempt accounts are available")
     scope, attempt = uuid.uuid4().hex, uuid.uuid4().hex
@@ -218,6 +225,13 @@ def main() -> int:
     from verl.experimental.skill_harness.bootstrap import configure_runtime, runtime_env_config
 
     report["imports"] = configure_runtime(register_tasks=True)
+    account_epoch = None
+    if "ALFWORLD_ACCOUNT_POOL_MANIFEST" in os.environ or "ALFWORLD_ACCOUNT_POOL_MANIFEST_SHA256" in os.environ:
+        from skill_harness_examples import account_pool_epoch as account_epoch
+
+        report["account_pool_epoch_preflight"] = account_epoch.readonly_preflight(minimum_available=64)
+        account_epoch.install_process(role="driver")
+        report["account_pool_epoch_extension"] = account_epoch.identity()
     modules = (
         "uni_agent.framework.entry",
         "uni_agent.agents.codex.agent",
@@ -271,6 +285,8 @@ def main() -> int:
     with initialize_config_dir(config_dir=str(RECIPE / "config"), version_base=None):
         cfg = compose(config_name=args.config_name, overrides=overrides)
     OmegaConf.resolve(cfg)
+    if account_epoch is not None:
+        account_epoch.prepare_runtime_environment(cfg)
     from verl.checkpoint_engine import CheckpointEngineRegistry
 
     backend = cfg.actor_rollout_ref.rollout.checkpoint_engine.backend
@@ -327,7 +343,8 @@ def main() -> int:
             "credit": int(joint.credit_gpus),
         }
     (run / "resolved-config.preflight.yaml").write_text(OmegaConf.to_yaml(cfg, resolve=True))
-    report["ray_worker_setup_hook"] = runtime_env_config()["worker_process_setup_hook"]
+    report["ray_worker_setup_hook"] = (runtime_env_config()["worker_process_setup_hook"] if account_epoch is None
+                                       else account_epoch.WORKER_SETUP_HOOK)
     if args.require_service:
         settings = json.loads(Path(os.environ["ALFWORLD_SERVER_CONFIG"]).read_text())
         check(settings["catalog_digest"] == manifest["catalog_digest"], "Service/data catalog digests differ")

@@ -88,6 +88,7 @@ ALL_NATIVE_FILES = {
 }
 CURATE_GENERATION_POLICY = "parallel-direct-all-native-spawn-curate-generation-v1"
 CURATE_GENERATION_V2_POLICY = "parallel-direct-all-native-spawn-curate-generation-v2"
+CURATE_EPOCH_POLICY = "parallel-direct-all-native-spawn-curate-generation-account-epoch-v3"
 CURATE_GENERATION_NAMESPACE_POLICY = "queued-source-generation-namespace-v1"
 CURATE_GENERATION_MODULE = "skill_harness_examples.curate_generation"
 CURATE_GENERATION_CONTROLLER = CURATE_GENERATION_MODULE + ".GenerationController"
@@ -110,6 +111,25 @@ CURATE_RUNTIME_GUARDS_FILES = {
     "probe": CURATE_GENERATION_PROVIDER_FILES["provider"],
 }
 CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS = (*CURATE_GENERATION_IDENTITY_FIELDS, "runtime_guards_extension")
+ACCOUNT_EPOCH_POLICY = "operator-provisioned-account-pool-epoch-v1"
+ACCOUNT_EPOCH_PROVIDER = "examples/skill_self_evolve/scripts/account_pool_epoch.py"
+ACCOUNT_EPOCH_HOOK = "skill_harness_examples.account_pool_epoch.setup_worker"
+ACCOUNT_EPOCH_ROOT = "/var/lib/alfworld-skill-harness/account_pool_epoch3"
+ACCOUNT_EPOCH_EXPECTED_RECEIPT = "runtime/account_pool_epoch.expected.json"
+ACCOUNT_EPOCH_BASELINE_MODULE = "skill_harness_examples.train_account_pool_baseline"
+ACCOUNT_EPOCH_BASELINE_DRIVER = "examples/skill_self_evolve/scripts/train_account_pool_baseline.py"
+ACCOUNT_EPOCH_BASELINE_POLICY = "zero-epoch-original-trainer-account-pool-epoch-v1"
+ACCOUNT_EPOCH_BINDINGS = [
+    "verl.experimental.skill_harness.alfworld.task.AccountPool",
+    "verl.experimental.skill_harness.probes.AccountPool",
+    "verl.experimental.skill_harness.group_sampler.local_archive_failed_groups",
+]
+CURATE_EPOCH_FILES = {
+    **CURATE_GENERATION_FILES,
+    "entry": "examples/skill_self_evolve/scripts/train_curate_epoch.py",
+    "generation_component": CURATE_GENERATION_FILES["entry"],
+}
+CURATE_EPOCH_IDENTITY_FIELDS = (*CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS, "account_pool_epoch_extension")
 CURATE_LEARNER_DEFAULT_SCOPE = (
     "Actual learner default before trainer construction; no per-worker or root-cause attestation"
 )
@@ -120,30 +140,43 @@ CURATE_LOADER_TRANSPORT_SCOPE = (
 
 
 def all_native_shape(value):
-    guards = value.get("policy") == CURATE_GENERATION_V2_POLICY
-    generation = value.get("policy") in (CURATE_GENERATION_POLICY, CURATE_GENERATION_V2_POLICY)
+    epoch = value.get("policy") == CURATE_EPOCH_POLICY
+    guards = value.get("policy") in (CURATE_GENERATION_V2_POLICY, CURATE_EPOCH_POLICY)
+    generation = value.get("policy") in (CURATE_GENERATION_POLICY, CURATE_GENERATION_V2_POLICY, CURATE_EPOCH_POLICY)
     return {
+        "account_epoch": epoch,
+        "probe_limit": 8 if epoch else 2,
+        "controller": "skill_harness_examples.train_curate_epoch.EpochGenerationController"
+        if epoch else CURATE_GENERATION_CONTROLLER,
         "generation": generation,
         "runtime_guards": guards,
-        "policy": CURATE_GENERATION_V2_POLICY
+        "policy": CURATE_EPOCH_POLICY
+        if epoch
+        else CURATE_GENERATION_V2_POLICY
         if guards
         else CURATE_GENERATION_POLICY
         if generation
         else ALL_NATIVE_POLICY,
         "fields": (
-            CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS
+            CURATE_EPOCH_IDENTITY_FIELDS
+            if epoch
+            else CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS
             if guards
             else CURATE_GENERATION_IDENTITY_FIELDS
             if generation
             else ALL_NATIVE_IDENTITY_FIELDS
         ),
-        "files": CURATE_GENERATION_FILES if generation else ALL_NATIVE_FILES,
-        "stem": "curate_generation" if generation else "all_native_spawn",
-        "initialized_kind": "initialized_curate_generation_entry"
+        "files": CURATE_EPOCH_FILES if epoch else CURATE_GENERATION_FILES if generation else ALL_NATIVE_FILES,
+        "stem": "curate_epoch" if epoch else "curate_generation" if generation else "all_native_spawn",
+        "initialized_kind": "initialized_curate_epoch_entry"
+        if epoch
+        else "initialized_curate_generation_entry"
         if generation
         else "initialized_all_native_spawn_entry",
         "prelaunch_kind": (
-            "prelaunch_curate_generation_parallel_components"
+            "prelaunch_curate_epoch_parallel_components"
+            if epoch
+            else "prelaunch_curate_generation_parallel_components"
             if generation
             else "prelaunch_all_native_spawn_parallel_components"
         ),
@@ -538,6 +571,7 @@ class Stage:
         self.setup_extension = None
         self.initialized_evidence = None
         self.prospective_runtime_evidence = None
+        self.account_epoch_extension, self.account_epoch_evidence = None, None
         self.restore_bindings = {}
         self.check_protocol()
         self.check_identity()
@@ -591,6 +625,7 @@ class Stage:
                 "Parallel client profile requires its verified spawn extension",
             )
             self.check_parallel_config(self.inference_config)
+        self.load_account_epoch_inference()
         self.signature = self.config_signature(self.inference_config)
 
     def verified_checkpoint(self, checkpoint, *, manifest_id, clock, cursor):
@@ -666,6 +701,138 @@ class Stage:
             hashlib.sha256(blob).hexdigest() == digest == self.reader.hash_file(path),
             "Extension bytes differ from published source: " + relative,
         )
+
+    def verify_account_epoch_identity(self, extension, commit):
+        """Inspect operator evidence only; never construct or initialize a pool."""
+        exact_keys(extension, ("policy", "provider_ref", "manifest_ref", "pool_root", "roster_digest",
+                               "worker_setup_hook", "expected_capacity"), "Account pool epoch identity")
+        need(extension["policy"] == ACCOUNT_EPOCH_POLICY
+             and extension["pool_root"] == ACCOUNT_EPOCH_ROOT
+             and extension["worker_setup_hook"] == ACCOUNT_EPOCH_HOOK
+             and type(extension["expected_capacity"]) is int and extension["expected_capacity"] == 128,
+             "Account pool epoch policy, hook, root or capacity differs")
+        provider = extension["provider_ref"]
+        exact_keys(provider, ("path", "sha256"), "Account pool epoch provider reference")
+        self.verify_published_source(ACCOUNT_EPOCH_PROVIDER, commit, provider["path"], provider["sha256"])
+        ref = extension["manifest_ref"]
+        exact_keys(ref, ("path", "sha256"), "Account pool epoch operator manifest reference")
+        path = Path(ref["path"])
+        need(path == path.resolve() and self.reader.hash_file(path) == ref["sha256"],
+             "Account pool epoch operator manifest path/hash differs")
+        value = self.reader.json(path)
+        exact_keys(value, ("schema_version", "kind", "policy", "epoch", "pool_root", "roster", "roster_digest",
+                           "isolation_policy", "fenced_pool", "created_at_ns"), "Account pool epoch operator manifest")
+        roster = [{"name": f"alfworld_ep3_{index:03d}", "uid": 30000 + index, "gid": 30000 + index}
+                  for index in range(128)]
+        need(value["schema_version"] == 1 and value["kind"] == "operator_provisioned_account_pool_epoch"
+             and value["policy"] == ACCOUNT_EPOCH_POLICY and value["epoch"] == 3
+             and value["pool_root"] == extension["pool_root"] and value["roster"] == roster
+             and value["roster_digest"] == extension["roster_digest"] == INDEX.digest(roster)
+             and value["isolation_policy"] == "alfworld-uid-landlock-v1"
+             and type(value["created_at_ns"]) is int and value["created_at_ns"] > 0
+             and value["fenced_pool"] == {
+                 "root": "/var/lib/alfworld-skill-harness/account_pool_v2", "uid_min": 20000, "uid_max": 20127,
+                 "protected_uid": 20071, "operation": "preserve-without-reset-release-remap",
+             }, "Account pool epoch manifest roster or old-pool fence differs")
+        return extension
+
+    def verify_account_epoch_activations(self, extension, directory, *, required_refs=(), learner_owner=None):
+        expected_directory = self.root / "runtime/account_pool_epoch/activations"
+        need(Path(directory) == expected_directory == Path(directory).resolve(),
+             "Account pool epoch activation directory differs")
+        need(isinstance(required_refs, list | tuple), "Account pool epoch activation references are not a list")
+        markers, refs = [], []
+        pattern = r"([0-9]+)-([0-9]+)\.(driver|ray_worker|learner|task_account_pool|probe_account_pool)\.json"
+        # Only explicitly named provider artifacts participate; unrelated files
+        # remain outside this evidence chain, as for historical driver receipts.
+        for path in sorted(expected_directory.glob("*.json")):
+            match = re.fullmatch(pattern, path.name)
+            if match is None:
+                continue
+            need(path == path.resolve(), "Account pool epoch activation is a symlink")
+            value = self.reader.json(path)
+            exact_keys(value, ("schema_version", "kind", "policy", "owner", "activation_role", "provider_ref",
+                               "manifest_ref", "pool_root", "roster_digest", "worker_setup_hook", "binding_modules",
+                               "preserved_core_account_policy", "native_spawn_account_pool"),
+                       "Account pool epoch worker activation")
+            owner = value["owner"]
+            exact_keys(owner, ("pid", "start_ticks"), "Account pool epoch activation owner")
+            need(value["schema_version"] == 1 and value["kind"] == "activated_account_pool_epoch"
+                 and value["policy"] == extension["policy"]
+                 and all(value[key] == extension[key] for key in
+                         ("provider_ref", "manifest_ref", "pool_root", "roster_digest", "worker_setup_hook"))
+                 and type(owner["pid"]) is int and owner["pid"] > 0
+                 and type(owner["start_ticks"]) is int and owner["start_ticks"] > 0
+                 and (str(owner["pid"]), str(owner["start_ticks"]), value["activation_role"]) == match.groups()
+                 and value["binding_modules"] == ACCOUNT_EPOCH_BINDINGS
+                 and value["native_spawn_account_pool"] == extension
+                 and value["preserved_core_account_policy"] == "alfworld-uid-landlock-v1",
+                 "Account pool epoch worker activation owner, bindings or provider differs")
+            refs.append({"path": str(path), "sha256": self.reader.hash_file(path)})
+            markers.append(value)
+        need(all(ref in refs for ref in required_refs), "Account pool epoch initialized activation reference differs")
+        workers = [row["owner"] for row in markers if row["activation_role"] == "ray_worker"]
+        need(any(row["activation_role"] == "driver" for row in markers)
+             and any(row["activation_role"] == "task_account_pool" and row["owner"] in workers for row in markers),
+             "Account pool epoch lacks actual driver and primary worker activation")
+        if learner_owner is not None:
+            need(learner_owner in workers
+                 and any(row["activation_role"] == "learner" and row["owner"] == learner_owner for row in markers)
+                 and any(row["activation_role"] == "probe_account_pool" and row["owner"] == learner_owner
+                         for row in markers)
+                 and any(self.reader.json(Path(ref["path"]))["activation_role"] == "learner"
+                         and self.reader.json(Path(ref["path"]))["owner"] == learner_owner for ref in required_refs),
+                 "Account pool epoch lacks linked actual learner/probe worker activation")
+        return {"activation_directory": directory, "activation_refs": refs,
+                "actual_roles": sorted({row["activation_role"] for row in markers}),
+                "scope": "Observed process-local bindings and pool construction; no per-case worker identity inference"}
+
+    def apply_account_epoch_config(self, config, extension):
+        runtime = config["ray_kwargs"]["ray_init"]["runtime_env"]
+        runtime["worker_process_setup_hook"] = extension["worker_setup_hook"]
+        runtime.setdefault("env_vars", {}).update({
+            "ALFWORLD_ACCOUNT_POOL_MANIFEST": extension["manifest_ref"]["path"],
+            "ALFWORLD_ACCOUNT_POOL_MANIFEST_SHA256": extension["manifest_ref"]["sha256"],
+        })
+
+    def load_account_epoch_inference(self):
+        path = self.root / ACCOUNT_EPOCH_EXPECTED_RECEIPT
+        if self.base and path.is_file():
+            value = self.reader.json(path)
+            exact_keys(value, ("schema_version", "kind", "account_pool_epoch_extension", "activation_directory",
+                               "baseline_extension"),
+                       "Base account pool epoch inference observation")
+            need(value["schema_version"] == 1 and value["kind"] == "account_pool_epoch_inference_expected"
+                 and self.parallel_extension is not None and self.prospective_runtime_evidence is not None,
+                 "Base account pool epoch must retain its original zero-epoch inference entry")
+            self.account_epoch_extension = self.verify_account_epoch_identity(
+                value["account_pool_epoch_extension"], self.manifest["source_commit"])
+            self.account_epoch_evidence = self.verify_account_epoch_activations(
+                self.account_epoch_extension, value["activation_directory"])
+            self.account_epoch_evidence["expected_receipt_ref"] = {
+                "path": str(path), "sha256": self.reader.hash_file(path),
+            }
+            self.account_epoch_evidence["baseline_extension"] = self.verify_account_epoch_baseline(value)
+        if self.account_epoch_extension is not None:
+            expected = copy.deepcopy(self.inference_config)
+            self.apply_account_epoch_config(expected, self.account_epoch_extension)
+            need(expected == self.inference_config, "Actual account pool epoch worker hook or manifest binding differs")
+
+    def verify_account_epoch_baseline(self, receipt):
+        extension = receipt["baseline_extension"]
+        exact_keys(extension, ("policy", "actual_entry", "entry_ref", "original_entry_ref", "task_runner_class"),
+                   "Account pool epoch baseline entry")
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        need(extension["policy"] == ACCOUNT_EPOCH_BASELINE_POLICY
+             and extension["actual_entry"] == str(source / ACCOUNT_EPOCH_BASELINE_DRIVER)
+             and extension["task_runner_class"] == "verl.experimental.skill_harness.train.SkillTaskRunner",
+             "Account pool epoch baseline must use the unchanged original trainer")
+        for key, relative in (("entry_ref", ACCOUNT_EPOCH_BASELINE_DRIVER),
+                              ("original_entry_ref", "verl/experimental/skill_harness/train.py")):
+            ref = extension[key]
+            exact_keys(ref, ("path", "sha256"), "Account pool epoch baseline " + key)
+            self.verify_published_source(relative, self.manifest["source_commit"], ref["path"], ref["sha256"])
+        return extension
 
     def verify_setup_identity(self, identity, *, require_loaded=False):
         spawn = identity.get("policy") == SPAWN_POLICY
@@ -796,7 +963,7 @@ class Stage:
             exact_keys(extension, ("policy", "files", "controller_class"), "Curate generation extension")
             need(
                 extension["policy"] == CURATE_GENERATION_NAMESPACE_POLICY
-                and extension["controller_class"] == CURATE_GENERATION_CONTROLLER,
+                and extension["controller_class"] == shape["controller"],
                 "Curate generation policy or controller class differs",
             )
             exact_keys(extension["files"], CURATE_GENERATION_PROVIDER_FILES, "Curate generation source providers")
@@ -815,7 +982,7 @@ class Stage:
                 guards["policy"] == CURATE_RUNTIME_GUARDS_POLICY
                 and guards["learner_start_method"] == "spawn"
                 and type(guards["credit_probe_concurrency"]) is int
-                and guards["credit_probe_concurrency"] == 2,
+                and guards["credit_probe_concurrency"] == shape["probe_limit"],
                 "Curate runtime guard intent differs from the bounded operational profile",
             )
             exact_keys(guards["files"], CURATE_RUNTIME_GUARDS_FILES, "Curate runtime guard source providers")
@@ -823,6 +990,8 @@ class Stage:
                 ref = guards["files"][name]
                 exact_keys(ref, ("path", "sha256"), "Curate runtime guard " + name + " source")
                 self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+        if shape["account_epoch"]:
+            self.verify_account_epoch_identity(identity["account_pool_epoch_extension"], commit)
         for name in ("checkpoint_core", "trainer_core"):
             relative = DIRECT_FILES[name]
             path = source / relative
@@ -952,7 +1121,7 @@ class Stage:
             == field(config, "skill_harness.joint.credit_concurrency")
             == 8
             and type(observed["physical_credit_probe_concurrency"]) is int
-            and observed["physical_credit_probe_concurrency"] == 2
+            and observed["physical_credit_probe_concurrency"] == all_native_shape(identity)["probe_limit"]
             and observed["provider_ref"] == identity["runtime_guards_extension"]["files"]["learner"]
             and observed["scope"] == CURATE_LEARNER_DEFAULT_SCOPE,
             "Observed learner spawn default, owner, timing or unchanged configuration differs",
@@ -1013,7 +1182,7 @@ class Stage:
             "constructor_observation_ref": ref,
             "observed_default_start_method": "spawn",
             "loader_transport_observation": transport,
-            "delegated_probe_limit": 2,
+            "delegated_probe_limit": all_native_shape(identity)["probe_limit"],
             "scope": (
                 "Observed defaults and loader transport; worker context is source-linked inference, not attestation"
             ),
@@ -1108,7 +1277,7 @@ class Stage:
             and activated["kind"] == "activated_curate_generation_controller"
             and activated["namespace"] == namespace
             and activated["namespace_ref"] == ref
-            and activated["controller_class"] == CURATE_GENERATION_CONTROLLER
+            and activated["controller_class"] == all_native_shape(identity)["controller"]
             and activated["optimizer_step"] == source_clock,
             "Curate generation activation namespace/controller/source clock differs",
         )
@@ -1130,7 +1299,7 @@ class Stage:
                 and guards["observed_default_start_method"] == "spawn"
                 and guards["probe_semaphore_class"] == "asyncio.locks.Semaphore"
                 and type(guards["probe_semaphore_initial_value"]) is int
-                and guards["probe_semaphore_initial_value"] == 2
+                and guards["probe_semaphore_initial_value"] == all_native_shape(identity)["probe_limit"]
                 and type(guards["configured_credit_concurrency"]) is int
                 and guards["configured_credit_concurrency"] == 8,
                 "Activated controller spawn default or delegated probe semaphore differs",
@@ -1159,7 +1328,7 @@ class Stage:
             "prepared_ref": ref,
             "activation_ref": activation_ref,
             "namespace": namespace,
-            "controller_class": CURATE_GENERATION_CONTROLLER,
+            "controller_class": all_native_shape(identity)["controller"],
             "source_optimizer_step": source_clock,
         }
         if guarded:
@@ -1200,6 +1369,8 @@ class Stage:
                 "component_receipt_scope",
                 *(("curate_generation_ref",) if shape["generation"] else ()),
                 *(("learner_runtime_ref", "learner_runtime_observation") if shape["runtime_guards"] else ()),
+                *(("account_pool_epoch_activation_refs", "account_pool_epoch_activation_directory")
+                  if shape["account_epoch"] else ()),
             ),
             "Actual AllNative initialized receipt",
         )
@@ -1212,7 +1383,9 @@ class Stage:
             and value["registered_curator_scope"]
             == "Actual NativeCuratorRuntime account, work root, package and clean environment"
             and value["primary_worker_scope"]
-            == "Unchanged SpawnSafeRunner installs the solver-only component in episode workers"
+            == ("Official Ray setup_worker selects the fresh pool in actual episode workers; unchanged SpawnSafeRunner"
+                if shape["account_epoch"]
+                else "Unchanged SpawnSafeRunner installs the solver-only component in episode workers")
             and value["component_receipt_scope"]
             == "Frozen final-fit body identity is a component; lifecycle extension uses this receipt"
             and (
@@ -1228,6 +1401,13 @@ class Stage:
         )
         if shape["generation"]:
             self.curate_generation_evidence = self.verify_curate_generation_activation(value, identity, seal)
+        if shape["account_epoch"]:
+            owner = self.reader.json(Path(value["curate_generation_ref"]["path"]))["owner"]
+            self.account_epoch_extension = identity["account_pool_epoch_extension"]
+            self.account_epoch_evidence = self.verify_account_epoch_activations(
+                self.account_epoch_extension, value["account_pool_epoch_activation_directory"],
+                required_refs=value["account_pool_epoch_activation_refs"], learner_owner=owner,
+            )
         return path, value, identity
 
     def verify_all_native_observation(self, value, path):
@@ -1360,6 +1540,7 @@ class Stage:
         if value.get("kind") in (
             "prelaunch_all_native_spawn_parallel_components",
             "prelaunch_curate_generation_parallel_components",
+            "prelaunch_curate_epoch_parallel_components",
         ):
             return self.verify_all_native_observation(value, path)
         if value.get("kind") == "prelaunch_direct_checkpoint_parallel_components":
@@ -1405,8 +1586,14 @@ class Stage:
         need(spawn["policy"] == SPAWN_POLICY, "Parallel observation lacks the public spawn boundary")
         commit = spawn["driver_source_commit"]
         if prospective:
+            epoch_path = self.root / ACCOUNT_EPOCH_EXPECTED_RECEIPT
+            epoch = self.reader.json(epoch_path) if epoch_path.is_file() else None
+            expected_entry = (ACCOUNT_EPOCH_BASELINE_MODULE if epoch is not None
+                              else "verl.experimental.skill_harness.train")
+            if epoch is not None:
+                self.verify_account_epoch_baseline(epoch)
             need(
-                value["entrypoint"] == "verl.experimental.skill_harness.train"
+                value["entrypoint"] == expected_entry
                 and value["source_commit"] == self.manifest["source_commit"] == commit,
                 "Base prospective identity must bind its actual original-entry source",
             )
@@ -1555,6 +1742,7 @@ class Stage:
                     *(self.root / "driver_runs").glob("*.direct_checkpoint.json"),
                     *(self.root / "driver_runs").glob("*.all_native_spawn.json"),
                     *(self.root / "driver_runs").glob("*.curate_generation.json"),
+                    *(self.root / "driver_runs").glob("*.curate_epoch.json"),
                 ]
             )
         )
@@ -1568,7 +1756,7 @@ class Stage:
         all_native = [
             (path, value)
             for path, value in observed
-            if path.name.endswith((".all_native_spawn.json", ".curate_generation.json"))
+            if path.name.endswith((".all_native_spawn.json", ".curate_generation.json", ".curate_epoch.json"))
         ]
         # A direct continuation establishes its own outer-entry/service chain.
         # Historical parallel observers are not substitutes or dependencies.
@@ -1875,6 +2063,7 @@ class Stage:
             ALL_NATIVE_POLICY,
             CURATE_GENERATION_POLICY,
             CURATE_GENERATION_V2_POLICY,
+            CURATE_EPOCH_POLICY,
         )
         if all_native:
             direct = self.all_native_initialized(extension, ref, seal)
@@ -2006,6 +2195,8 @@ class Stage:
                 "Parallel observation and initialized loaded spawn sources differ",
             )
             self.apply_parallel_config(expected)
+        if all_native and all_native_shape(identity)["account_epoch"]:
+            self.apply_account_epoch_config(expected, identity["account_pool_epoch_extension"])
         runner = field(expected, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task")
         sampler = field(expected, "trainer.v1.sampler.custom_sampler")
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
@@ -2670,6 +2861,9 @@ class Stage:
         if path == "ray_kwargs.ray_init.runtime_env.env_vars.ALFWORLD_SOLVER_INSTRUCTIONS_FILE":
             need(value == self.env["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"], "Runtime instruction path differs")
             return "<validated-solver-instruction-bytes>"
+        if path == "ray_kwargs.ray_init.runtime_env.worker_process_setup_hook" and value == ACCOUNT_EPOCH_HOOK:
+            need(self.account_epoch_extension is not None, "Account pool epoch worker hook lacks its evidence chain")
+            return value
         if (
             path == "ray_kwargs.ray_init.runtime_env.env_vars.ALFWORLD_ENV_PYTHON"
             and self.parallel_extension is not None
@@ -2846,6 +3040,12 @@ class Stage:
                 need(reader.hash_file(source_game) == metadata["game_sha256"], "Underlying benchmark game bytes differ")
                 budget = pure_module("alfworld.budget")
                 registration = reader.json(output / "budget-registration.json")
+                if self.account_epoch_extension is not None:
+                    account = registration["account"]
+                    index = account["uid"] - 30000 if type(account.get("uid")) is int else -1
+                    need(0 <= index < 128 and account.get("gid") == 30000 + index
+                         and account.get("name") == f"alfworld_ep3_{index:03d}",
+                         "Official case did not use the selected account pool epoch UID/GID/name")
                 if self.parallel_extension is not None:
                     self.check_parallel_case_service(registration)
                 need(registration["account"]["owner"]["run_root"] == str(self.root), "Budget registered to another run")
@@ -3054,6 +3254,11 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
                 parallel_signature(base.parallel_extension) == parallel_signature(trained.parallel_extension),
                 "Base and final environment/client/interpreter/source bytes differ",
             )
+        need((base.account_epoch_extension is None) == (trained.account_epoch_extension is None),
+             "Base and final account pool epoch policies differ")
+        if base.account_epoch_extension is not None:
+            need(base.account_epoch_extension == trained.account_epoch_extension,
+                 "Base and final account pool manifest, hook, roster or provider source differs")
         need(
             base.source_blobs == trained.source_blobs
             and base.manifest["dirty_diff_sha256"] == trained.manifest["dirty_diff_sha256"]
@@ -3144,6 +3349,12 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
                 "evidence. The untouched zero-epoch base retains the identical primary SpawnSafeRunner/solver/client "
                 "inference profile and does not need to load or execute the unused curator helper."
             )
+        if trained.account_epoch_extension is not None:
+            report["explicit_allowed_differences"].append(
+                "Both original-trainer zero-epoch base and trained v3 use the same explicit operator manifest, "
+                "fresh UID/GID roster and official Ray worker hook. Actual worker bindings and every official "
+                "case's registered account are verified; the base does not construct the unused curator runtime."
+            )
         if base.prospective_runtime_evidence:
             report["explicit_allowed_differences"].append(
                 "Base uses its original zero-epoch driver with actual SpawnSafeRunner/concurrency32 configuration; "
@@ -3190,6 +3401,11 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
         }
         report["direct_checkpoint_restore_evidence"] = trained.direct_evidence
         report["all_native_spawn_evidence"] = trained.all_native_evidence
+        report["account_pool_epoch_evidence"] = {
+            "shared_identity": trained.account_epoch_extension,
+            "base": base.account_epoch_evidence,
+            "trained": trained.account_epoch_evidence,
+        }
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:
         report["reasons"].append(f"{type(error).__name__}: {error}")
     changed = reader.changed()

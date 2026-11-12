@@ -41,11 +41,13 @@ def provider_ref():
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def prepare_learner(config):
+def prepare_learner(config, *, physical_probe_concurrency=PROBE_CONCURRENCY):
     """Call in the actual Ray learner before constructing its trainer."""
     from skill_harness_examples import curate_generation
 
     workers, credit = _configured(config)
+    if type(physical_probe_concurrency) is not int or not 1 <= physical_probe_concurrency <= credit:
+        raise ValueError("The physical probe concurrency must fit the configured credit ceiling")
     previous = multiprocessing.get_start_method(allow_none=True)
     # Ray may already have selected the platform default. Only future process
     # creation in this owned learner is changed; existing Ray resources stay as-is.
@@ -59,7 +61,7 @@ def prepare_learner(config):
         "owner": curate_generation.process_identity(), "observed_before": "trainer_construct",
         "previous_default_start_method": previous, "observed_default_start_method": observed,
         "configured_dataloader_workers": workers, "configured_credit_concurrency": credit,
-        "physical_credit_probe_concurrency": PROBE_CONCURRENCY, "provider_ref": provider_ref(),
+        "physical_credit_probe_concurrency": physical_probe_concurrency, "provider_ref": provider_ref(),
         "scope": DEFAULT_SCOPE,
     })
 

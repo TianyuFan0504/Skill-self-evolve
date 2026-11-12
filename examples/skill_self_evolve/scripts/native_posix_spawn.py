@@ -17,6 +17,37 @@ from pathlib import Path
 
 POLICY_ID = "native-posix-spawn-v1"
 ACCOUNTS = "/workspace/verl-0.9.1/verl/experimental/skill_harness/alfworld/accounts.py"
+_account_pool_epoch = None
+_account_uid_gid_pairs = None
+
+
+def register_account_pool_epoch(identity, roster):
+    """Explicitly register a verified operational roster in this owned process.
+
+    The historical default remains UID20000..20127. A selected epoch cannot
+    silently use that default or replace an earlier registered epoch.
+    """
+    global _account_pool_epoch, _account_uid_gid_pairs
+    from skill_harness_examples import account_pool_epoch
+
+    if identity != account_pool_epoch.identity() or roster != account_pool_epoch.roster():
+        raise ValueError("Native account roster differs from the verified operator manifest")
+    if _account_pool_epoch is not None and _account_pool_epoch != identity:
+        raise ValueError("Native spawn cannot switch an active account pool epoch")
+    _account_pool_epoch = identity
+    _account_uid_gid_pairs = frozenset((item["uid"], item["gid"]) for item in roster)
+
+
+def _account_uid_gid_allowed(uid, gid):
+    if _account_pool_epoch is not None:
+        from skill_harness_examples import account_pool_epoch
+
+        if _account_pool_epoch != account_pool_epoch.identity():
+            raise ValueError("Native account pool registration changed after worker activation")
+        return (uid, gid) in _account_uid_gid_pairs
+    if "ALFWORLD_ACCOUNT_POOL_MANIFEST" in os.environ or "ALFWORLD_ACCOUNT_POOL_MANIFEST_SHA256" in os.environ:
+        raise ValueError("Selected account epoch is missing its worker setup registration")
+    return 20000 <= uid <= 20127 and gid == uid
 
 
 def _helper_path(path=None):
@@ -250,7 +281,7 @@ def _native_arguments(program, args, options):
             or argv[15] != "--ready-fd" or argv[17] != "--read-roots"
             or argv[19] != "--write-roots" or argv[21] != "--"
             or not argv[12].isdigit() or not argv[14].isdigit() or not argv[16].isdigit()
-            or not 20000 <= int(argv[12]) <= 20127 or argv[14] != argv[12]
+            or not _account_uid_gid_allowed(int(argv[12]), int(argv[14])) or argv[14] != argv[12]
             or argv[1] != "--reuid=" + argv[12] or argv[2] != "--regid=" + argv[14]):
         raise ValueError("Unrecognized native isolation launch")
     ready = int(argv[16])
