@@ -66,6 +66,26 @@ selects `train_spawn_safe.py` and its public runner class while preserving the
 same sampler, N4, concurrency32 and existing supervision. Launch receipts also
 include the composed resilient driver, C/Python adapter and built helper hashes.
 
+The separate `--parallel-environment` profile includes that spawn boundary and
+selects four independent TextWorld processes, four durable-I/O workers and the
+request-ID-aware action client together:
+
+```bash
+bash examples/skill_self_evolve/run_resilient.sh --parallel-environment \
+  --run-dir /root/nas_chaohuang/skill_training/runs/my_joint_experiment
+```
+
+Sessions remain attached to one process. Each session waits for its ordered
+durable writes while other sessions can continue. Retries query the original
+request result and retain the same action ID. The launcher refuses an existing
+legacy service rather than silently changing a live service. Resume requires
+the same profile and the separately reconciled service transition.
+
+Training and actor/reference logprob microbatch sizes remain explicit Hydra
+overrides. Choose them from the isolated memory, throughput and numerical
+checks for the actual model and trajectory lengths; process parallelism alone
+does not establish that a larger GPU microbatch fits.
+
 ## Shared implementation and receipts
 
 The new Python adapter calls the existing `launch.py --prepare-only` in the

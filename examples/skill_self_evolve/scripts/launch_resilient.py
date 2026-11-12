@@ -39,12 +39,16 @@ def arguments(argv):
     parser.add_argument("--joint", action="store_true", help="Accepted for clarity; this launcher is joint-only")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--spawn-safe", action="store_true", help="Use the installed Native posix_spawn extension")
+    parser.add_argument("--parallel-environment", action="store_true",
+                        help="Use four environment processes, durable I/O and idempotent actions")
     parser.add_argument("--foreground", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare-only", action="store_true")
     mode.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--allow-busy-gpus", action="store_true")
     args, overrides = parser.parse_known_args(argv)
+    if args.parallel_environment:
+        args.spawn_safe = True
     if overrides[:1] == ["--"]:
         overrides = overrides[1:]
     if any("=" not in value or value.startswith("--") for value in overrides):
@@ -168,12 +172,21 @@ def launch_receipt(launcher, run, command, *, fresh_manifest, args):
             "spawn_c": RECIPE / "scripts/native_posix_spawn.c",
             "spawn_helper": RECIPE / "scripts/native_posix_spawn_helper.so",
         })
+    if getattr(args, "parallel_environment", False):
+        assets.update({
+            "driver": RECIPE / "scripts/train_parallel_client.py",
+            "spawn_driver": RECIPE / "scripts/train_spawn_safe.py",
+            "environment_server": RECIPE / "scripts/parallel_environment_server.py",
+            "environment_launcher": RECIPE / "scripts/parallel_environment_launcher.py",
+            "environment_request_client": RECIPE / "scripts/alfworld_request_client.py",
+        })
     folder = run / "launcher_runs"
     folder.mkdir(exist_ok=True, mode=0o700)
     path = folder / (str(time.time_ns()) + ".resilient.json")
     launcher.write_json(path, {
         "schema_version": 1, "kind": "public_resilient_joint_launch",
         "native_spawn_extension": getattr(args, "spawn_safe", False),
+        "parallel_environment_extension": getattr(args, "parallel_environment", False),
         "command": command, "run_dir": str(run), "resume_requested": args.resume,
         "fresh_training_manifest_created": fresh_manifest,
         "original_training_manifest_preserved": (run / "training-manifest.json").exists() and not fresh_manifest,
@@ -206,14 +219,19 @@ def main(argv=None):
     original = json.loads((run / "launch_manifest.json").read_bytes())["command"]
     if original[1:3] != ["-m", "verl.experimental.skill_harness.train"]:
         raise ValueError("Unexpected existing preparation command")
-    driver = "train_spawn_safe.py" if args.spawn_safe else "train_resilient_setup.py"
+    driver = ("train_parallel_client.py" if args.parallel_environment else
+              "train_spawn_safe.py" if args.spawn_safe else "train_resilient_setup.py")
     command = [original[0], str(RECIPE / "scripts" / driver), *original[3:]]
     if args.prepare_only:
         launcher.write_json(run / "status.json", {"state": "prepared", "command": command})
         receipt = launch_receipt(launcher, run, command, fresh_manifest=False, args=args)
         print(json.dumps({"state": "prepared", "run_dir": str(run), "resilient_launch_receipt": str(receipt)}))
         return 0
-    service_pid, started = launcher.start_environment(
+    start_environment = launcher.start_environment
+    if args.parallel_environment:
+        from skill_harness_examples.parallel_environment_launcher import start_environment
+
+    service_pid, started = start_environment(
         run, Path(os.environ["ALFWORLD_BENCHMARK_ROOT"]), Path(os.environ["VERL_SOURCE_ROOT"])
     )
     preflight = [sys.executable, str(RECIPE / "scripts/preflight.py"), "--run-dir", str(run),

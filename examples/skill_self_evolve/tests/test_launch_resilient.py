@@ -105,6 +105,36 @@ class LaunchTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             module.arguments(["--spawn-safe", key + "=skill_harness_examples.train_resilient_setup.safe_run_task"])
 
+    def test_parallel_profile_also_selects_the_spawn_safe_runner(self):
+        args, overrides = module.arguments(["--parallel-environment"])
+        self.assertTrue(args.parallel_environment)
+        self.assertTrue(args.spawn_safe)
+        values = dict(value.split("=", 1) for value in overrides)
+        self.assertEqual(values[
+            "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn"],
+            "skill_harness_examples.train_spawn_safe.SpawnSafeRunner")
+
+    def test_parallel_submission_selects_service_and_client_driver_together(self):
+        spawn_module = types.ModuleType("skill_harness_examples.native_posix_spawn")
+        spawn_module.NativeSpawnPolicy = lambda _: None
+        service_module = types.ModuleType("skill_harness_examples.parallel_environment_launcher")
+
+        def start(*args):
+            self.events.append("parallel-service")
+            return 56789, True
+
+        service_module.start_environment = start
+        with patch.dict(sys.modules, {spawn_module.__name__: spawn_module, service_module.__name__: service_module}), \
+                patch.object(module, "launch_receipt", return_value=self.run / "receipt.json"), \
+                patch.object(module.subprocess, "Popen", return_value=types.SimpleNamespace(pid=1234)) as spawn:
+            self.assertEqual(self.execute("--parallel-environment"), 0)
+        command = spawn.call_args.args[0]
+        payload = json.loads(Path(command[3]).read_text())
+        self.assertTrue(payload["command"][1].endswith("train_parallel_client.py"))
+        self.assertEqual(payload["environment_pid"], 56789)
+        self.assertIn("parallel-service", self.events)
+        self.assertNotIn("service", self.events)
+
     def test_spawn_helper_failure_precedes_preparation(self):
         fake = types.ModuleType("skill_harness_examples.native_posix_spawn")
 
