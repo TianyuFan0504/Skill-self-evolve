@@ -51,3 +51,35 @@ ordering. The local lightweight runner extracts the actual `LLMServerClient`
 class from repository source to avoid optional Torch/Ray imports; it does not
 replace its implementation. Full dependency-stack CPU and real backend
 acceptance are performed separately by the operator.
+
+## Unexpected RPC failure input evidence
+
+The v5 engine watchdog dump anonymized prompt token values, so it could not
+support exact failed-input replay. Future unexpected backend RPC exceptions
+retain the exact copied client `prompt_ids` and `sampling_params` under
+`binding.directory/failed-inputs/<request_nonce>.json`. The private artifact
+binds the attempt, Gateway/environment sessions, admission index and assigned
+backend UUID/server when available. Separate canonical digests cover the
+tokens and sampling parameters; its payload digest is linked into the existing
+failure request journal as `failed_input_ref`.
+
+This is explicitly `CLIENT_INPUT_PRE_SUBMIT` evidence. Sampling parameters are
+the client's values before backend defaults or clamping, and
+`actual_model_observed=false` means observation is unproven. It does not capture
+KV-cache state, effective kernel inputs or an exact scheduler replay. The
+artifact is archive-only, incomplete, reward-ineligible and excluded from
+gradients, with no invented EOS. It never substitutes for the completed
+admission-zero `first-observed-input.json` proof.
+
+Normal successful requests add no archival I/O. Controlled MDP and host stops
+keep their existing raw-tail path. Unexpected errors are not retried. A failed
+input archive or subsequent failure-journal write cannot replace the original
+backend exception: secondary errors are attached as exception notes and, when
+the journal remains writable, `failed_input_archive_error` diagnostics. An
+incomplete write never becomes positive observation or successful drainage.
+
+CPU regressions inject an engine failure and an acquisition RPC failure,
+verify exact tokens/parameters and bound digests, retain the original exception
+through archive/journal `ENOSPC`, and confirm that successful or controlled-stop
+paths do not publish these failure inputs. These checks do not rehabilitate
+v5's failed cases or establish that the next backend configuration is fixed.

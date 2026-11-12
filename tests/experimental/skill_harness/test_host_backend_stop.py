@@ -2,8 +2,10 @@
 
 import asyncio
 import dataclasses
+import errno
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import test_backend_terminal as base
 
@@ -55,6 +57,7 @@ class HostBackendStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(tail["behavior_gradient"])
         self.assertFalse(tail["model_eos_invented"])
         self.assertIsNone(terminal.read_first_observed_input(one))
+        self.assertFalse((one.directory / "failed-inputs").exists())
         self.server.requests[other]["finished"].set()
         await second
         self.assertTrue((await terminal.wait_for_terminal_drain(two, 0.2))["backend_stop_confirmed"])
@@ -132,6 +135,7 @@ class HostBackendStopTest(unittest.IsolatedAsyncioTestCase):
         await second
         terminal.fence_host_stop(binding, "host_error", reason="later_task_python_failure")
         self.assertEqual(terminal.read_first_observed_input(binding), proof)
+        self.assertFalse((binding.directory / "failed-inputs").exists())
         with self.assertRaises(terminal.HostBackendStopped):
             await self.generate("first_proof", 913)
         self.assertEqual(terminal.read_first_observed_input(binding), proof)
@@ -149,6 +153,138 @@ class HostBackendStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(receipt["backend_stop_confirmed"])
         self.assertEqual(receipt["status"], "backend_failed")
         self.assertEqual(receipt["backend_error_types"], ["RuntimeError"])
+        self.assertIsNone(terminal.read_first_observed_input(binding))
+
+    async def test_engine_failure_retains_exact_client_input_without_claiming_observation(self):
+        class EngineDeadError(RuntimeError):
+            pass
+
+        binding = self.bind("retained_failed_input")
+        primary = EngineDeadError("injected RPC failure, not a real model")
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def failed(*args, **kwargs):
+            entered.set()
+            await release.wait()
+            raise primary
+
+        self.server.generate = base.Remote(failed)
+        prompts = [194, 27, 98, 6]
+        params = {"temperature": 0.0, "logprobs": True, "max_tokens": 29418, "stop_token_ids": [248044]}
+        task = asyncio.create_task(
+            self.client.generate("retained_failed_input", prompt_ids=prompts, sampling_params=params)
+        )
+        await entered.wait()
+        prompts[0] = 999  # Caller mutations cannot rewrite the retained submission.
+        params["stop_token_ids"].append(999)
+        release.set()
+        with self.assertRaises(EngineDeadError) as caught:
+            await task
+        self.assertIs(caught.exception, primary)
+        receipt = await terminal.wait_for_terminal_drain(binding, 0.2)
+        self.assertFalse(receipt["backend_stop_confirmed"])
+        request = receipt["requests"][0]
+        ref = request["failed_input_ref"]
+        payload = terminal._read(Path(ref["path"]))
+        self.assertEqual(Path(ref["path"]), binding.directory / "failed-inputs" / (request["request_nonce"] + ".json"))
+        self.assertEqual(payload["prompt_ids"], [194, 27, 98, 6])
+        self.assertEqual(
+            payload["sampling_params"],
+            {"temperature": 0.0, "logprobs": True, "max_tokens": 29418, "stop_token_ids": [248044]},
+        )
+        self.assertEqual(payload["prompt_ids_sha256"], terminal._digest(payload["prompt_ids"]))
+        self.assertEqual(payload["sampling_params_sha256"], terminal._digest(payload["sampling_params"]))
+        self.assertEqual(ref["sha256"], terminal._digest(payload))
+        self.assertEqual(payload["actual_request_id"], request["actual_request_id"])
+        self.assertEqual(payload["request_nonce"], request["request_nonce"])
+        self.assertEqual(payload["binding_sha256"], binding.binding_sha256)
+        self.assertEqual(payload["environment_session_id"], binding.environment_session_id)
+        self.assertEqual(payload["evidence_stage"], "CLIENT_INPUT_PRE_SUBMIT")
+        for field in (
+            "actual_model_observed",
+            "behavior_gradient",
+            "model_eos_invented",
+            "reward_eligible",
+            "cache_state_captured",
+            "trajectory_complete",
+        ):
+            self.assertIs(payload[field], False)
+        self.assertIs(payload["archive_only"], True)
+        self.assertIsNone(terminal.read_first_observed_input(binding))
+        self.assertEqual(receipt["tail_archive_refs"], [])
+
+    async def test_failed_input_archive_io_error_does_not_replace_backend_exception(self):
+        binding = self.bind("archive_disk_full")
+        primary = RuntimeError("EngineDeadError injected primary")
+
+        async def failed(*args, **kwargs):
+            raise primary
+
+        self.server.generate = base.Remote(failed)
+        original = terminal._write
+
+        def disk_full(path, payload):
+            if path.parent.name == "failed-inputs":
+                raise OSError(errno.ENOSPC, "injected evidence disk full")
+            return original(path, payload)
+
+        with patch.object(terminal, "_write", side_effect=disk_full):
+            with self.assertRaises(RuntimeError) as caught:
+                await self.generate("archive_disk_full")
+        self.assertIs(caught.exception, primary)
+        self.assertTrue(any("evidence disk full" in note for note in getattr(primary, "__notes__", [])))
+        receipt = await terminal.wait_for_terminal_drain(binding, 0.2)
+        request = receipt["requests"][0]
+        self.assertIn("evidence disk full", request["failed_input_archive_error"])
+        self.assertNotIn("failed_input_ref", request)
+        self.assertEqual(request["error_type"], "RuntimeError")
+        self.assertFalse(receipt["backend_stop_confirmed"])
+        self.assertIsNone(terminal.read_first_observed_input(binding))
+
+    async def test_acquire_rpc_failure_archives_client_input_without_an_actual_request_id(self):
+        binding = self.bind("acquire_rpc_failed")
+        primary = RuntimeError("injected load-balancer RPC failure")
+
+        async def failed_acquire(**kwargs):
+            raise primary
+
+        self.balancer.acquire_server = base.Remote(failed_acquire)
+        with self.assertRaises(RuntimeError) as caught:
+            await self.generate("acquire_rpc_failed", 461)
+        self.assertIs(caught.exception, primary)
+        receipt = await terminal.wait_for_terminal_drain(binding, 0.2)
+        request = receipt["requests"][0]
+        payload = terminal._read(Path(request["failed_input_ref"]["path"]))
+        self.assertEqual(payload["prompt_ids"], [461, 2, 3])
+        self.assertIsNone(payload["actual_request_id"])
+        self.assertIsNone(payload["server_id"])
+        self.assertIs(payload["actual_model_observed"], False)
+        self.assertFalse(receipt["backend_stop_confirmed"])
+        self.assertIsNone(terminal.read_first_observed_input(binding))
+
+    async def test_failure_journal_io_error_preserves_primary_and_retained_input(self):
+        binding = self.bind("failure_journal_full")
+        primary = RuntimeError("EngineDeadError injected primary")
+
+        async def failed(*args, **kwargs):
+            raise primary
+
+        self.server.generate = base.Remote(failed)
+        original = terminal._write
+
+        def journal_full(path, payload):
+            if path.parent.name == "requests" and payload.get("error_type"):
+                raise OSError(errno.ENOSPC, "injected failure journal full")
+            return original(path, payload)
+
+        with patch.object(terminal, "_write", side_effect=journal_full):
+            with self.assertRaises(RuntimeError) as caught:
+                await self.generate("failure_journal_full")
+        self.assertIs(caught.exception, primary)
+        self.assertTrue(any("failure journal full" in note for note in getattr(primary, "__notes__", [])))
+        files = list((binding.directory / "failed-inputs").glob("*.json"))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(terminal._read(files[0])["prompt_ids"], [1, 2, 3])
         self.assertIsNone(terminal.read_first_observed_input(binding))
 
     async def test_unknown_raw_stop_retains_mu_but_never_becomes_completed_output(self):

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import copy
 import hashlib
 import ipaddress
 import json
@@ -354,6 +355,8 @@ class _Lease:
     reason: str | None = None
     stop_kind: str | None = None
     admission_index: int | None = None
+    failed_input_ref: dict | None = None
+    failed_input_archive_error: str | None = None
 
 
 class TerminalAwareLLMServerClient(LLMServerClient):
@@ -396,7 +399,62 @@ class TerminalAwareLLMServerClient(LLMServerClient):
             "tail_archive_ref": tail,
             "error_type": error_type,
         }
+        if lease.failed_input_ref is not None:
+            data["failed_input_ref"] = lease.failed_input_ref
+        if lease.failed_input_archive_error is not None:
+            data["failed_input_archive_error"] = lease.failed_input_archive_error
         _write(lease.binding.directory / "requests" / (lease.nonce + ".json"), data)
+
+    @staticmethod
+    def _archive_failed_client_input(lease, kwargs, error):
+        """Retain client submission evidence, never a model-observed input proof."""
+        prompt_ids = list(kwargs["prompt_ids"])
+        sampling_params = kwargs["sampling_params"]
+        payload = {
+            "schema_version": 1,
+            "kind": "unexpected_backend_rpc_client_input",
+            "evidence_stage": "CLIENT_INPUT_PRE_SUBMIT",
+            "binding_id": lease.binding.binding_id,
+            "binding_sha256": lease.binding.binding_sha256,
+            "attempt_id": lease.binding.attempt_id,
+            "gateway_session_id": lease.binding.gateway_session_id,
+            "environment_session_id": lease.binding.environment_session_id,
+            "request_nonce": lease.nonce,
+            "admission_index": lease.admission_index,
+            "server_id": lease.server_id,
+            "actual_request_id": lease.actual_request_id,
+            "prompt_ids": prompt_ids,
+            "prompt_ids_sha256": _digest(prompt_ids),
+            "sampling_params": sampling_params,
+            "sampling_params_sha256": _digest(sampling_params),
+            "sampling_params_scope": "client_input_before_server_defaults_or_clamping",
+            "backend_exception_type": type(error).__name__,
+            "actual_model_observed": False,
+            "cache_state_captured": False,
+            "trajectory_complete": False,
+            "archive_only": True,
+            "reward_eligible": False,
+            "behavior_gradient": False,
+            "model_eos_invented": False,
+        }
+        path = lease.binding.directory / "failed-inputs" / (lease.nonce + ".json")
+        _write(path, payload)
+        lease.failed_input_ref = {
+            "path": str(path),
+            "sha256": _digest(payload),
+            "prompt_ids_sha256": payload["prompt_ids_sha256"],
+            "evidence_stage": payload["evidence_stage"],
+            "actual_model_observed": False,
+            "archive_only": True,
+        }
+
+    @staticmethod
+    def _note_secondary_failure(error, detail):
+        # Python 3.10 lacks add_note but still permits diagnostic attributes.
+        if callable(getattr(error, "add_note", None)):
+            error.add_note(detail)
+        else:
+            error.__notes__ = [*getattr(error, "__notes__", []), detail]
 
     async def _acquire_server(self, request_id, **extra):
         result = await super()._acquire_server(request_id, **extra)
@@ -500,7 +558,11 @@ class TerminalAwareLLMServerClient(LLMServerClient):
         binding = _load(self.binding_root, str(request_id))
         if binding is None:
             return await super().generate(request_id, **kwargs)
-        kwargs = dict(kwargs, prompt_ids=list(kwargs["prompt_ids"]))
+        kwargs = dict(
+            kwargs,
+            prompt_ids=list(kwargs["prompt_ids"]),
+            sampling_params=copy.deepcopy(kwargs["sampling_params"]),
+        )
         lease = _Lease(binding)
         with _admission_lock(binding.directory):
             proof = _fenced(binding)
@@ -538,6 +600,8 @@ class TerminalAwareLLMServerClient(LLMServerClient):
         binding = lease.binding
         token = _CURRENT.set(lease)
         watcher = future = None
+        rpc_failure = False
+        backend_failure_error = None
         self._record(lease)
         try:
             proof = _fenced(binding)
@@ -559,10 +623,14 @@ class TerminalAwareLLMServerClient(LLMServerClient):
                     break
                 except asyncio.CancelledError:
                     if future.cancelled():
+                        rpc_failure = True
                         raise RuntimeError("The original backend future was cancelled without drain proof") from None
                     fence_host_stop(binding, "task_cancel", reason="owned_client_task_cancelled")
                     # Cancellation of this control task does not prove kernel drain.
                     # Keep the original future plus its UUID-targeted watcher alive.
+                except Exception:
+                    rpc_failure = True
+                    raise
             self._first_observed(lease, kwargs, output)
             proof = _fenced(binding)
             if lease.terminal or proof or output.stop_reason != "completed":
@@ -619,19 +687,43 @@ class TerminalAwareLLMServerClient(LLMServerClient):
                 self._record(lease, finished=True)
             raise
         except BaseException as error:
-            previous = _read(binding.directory / "requests" / (lease.nonce + ".json"))
+            if rpc_failure:
+                backend_failure_error = error
+                try:
+                    self._archive_failed_client_input(lease, kwargs, error)
+                except Exception as archive_error:
+                    lease.failed_input_archive_error = type(archive_error).__name__ + ": " + str(archive_error)
+                    self._note_secondary_failure(
+                        error, "Failed client-input archive: " + lease.failed_input_archive_error
+                    )
+            previous = {}
+            try:
+                previous = _read(binding.directory / "requests" / (lease.nonce + ".json"))
+            except Exception as journal_error:
+                self._note_secondary_failure(error, "Failure journal read: " + str(journal_error))
             lease.phase = "failed"
-            self._record(
-                lease,
-                finished=future is None or future.done(),
-                tail=previous.get("tail_archive_ref"),
-                raw_stop_reason=previous.get("raw_stop_reason"),
-                error_type=type(error).__name__,
-            )
+            try:
+                self._record(
+                    lease,
+                    finished=future is None or future.done(),
+                    tail=previous.get("tail_archive_ref"),
+                    raw_stop_reason=previous.get("raw_stop_reason"),
+                    error_type=type(error).__name__,
+                )
+            except Exception as journal_error:
+                self._note_secondary_failure(error, "Failure journal write: " + str(journal_error))
             raise
         finally:
             if watcher is not None:
                 watcher.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await watcher
+                except asyncio.CancelledError:
+                    pass
+                except Exception as watcher_error:
+                    if backend_failure_error is None:
+                        raise
+                    self._note_secondary_failure(
+                        backend_failure_error, "Failure watcher cleanup: " + str(watcher_error)
+                    )
             _CURRENT.reset(token)
