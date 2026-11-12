@@ -17,6 +17,7 @@ import importlib.metadata
 import importlib.util
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -36,12 +37,41 @@ SETUP_DRIVER = "examples/skill_self_evolve/scripts/train_resilient_setup.py"
 SETUP_NAMESPACE = "skill_harness_examples/__init__.py"
 SETUP_POLICY = "exact-pre-create-no-native-v1"
 SETUP_RUNNER = "skill_harness_examples.train_resilient_setup.safe_run_task"
+SPAWN_DRIVER = "examples/skill_self_evolve/scripts/train_spawn_safe.py"
+SPAWN_MODULE = "skill_harness_examples.native_posix_spawn"
+SPAWN_POLICY = "native-posix-spawn-boundary-v1"
+SPAWN_RUNNER = "skill_harness_examples.train_spawn_safe.SpawnSafeRunner"
+SPAWN_FILES = {
+    "python": "examples/skill_self_evolve/scripts/native_posix_spawn.py",
+    "c": "examples/skill_self_evolve/scripts/native_posix_spawn.c",
+    "helper": "examples/skill_self_evolve/scripts/native_posix_spawn_helper.so",
+}
+SPAWN_EXPECTED_RECEIPT = "runtime/spawn_safe.expected.json"
+PARALLEL_EXPECTED_RECEIPT = "runtime/parallel_client.expected.json"
+PARALLEL_DRIVER = "examples/skill_self_evolve/scripts/train_parallel_client.py"
+PARALLEL_CLIENT = "examples/skill_self_evolve/scripts/alfworld_request_client.py"
+PARALLEL_SERVER = "examples/skill_self_evolve/scripts/parallel_environment_server.py"
+PARALLEL_POLICY = "parallel-environment-idempotent-client-v1"
+ENVIRONMENT_POLICY = "sticky-process-environments-durable-io-v1"
+ACTION_PROTOCOL = "alfworld-step-request-id-v1"
+TASK_PROFILE_FIELD = (
+    "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path"
+)
 LIFECYCLE_IDENTITY = (
-    "driver_path", "driver_sha256", "driver_source_commit", "original_training_manifest_sha256",
+    "driver_path",
+    "driver_sha256",
+    "driver_source_commit",
+    "original_training_manifest_sha256",
 )
 LIFECYCLE_SEAL = (
-    "seal_origin", "optimizer_step", "checkpoint_cursor", "checkpoint_dir", "manifest_id",
-    "snapshot_id", "store_root", "checkpoint_core_versions",
+    "seal_origin",
+    "optimizer_step",
+    "checkpoint_cursor",
+    "checkpoint_dir",
+    "manifest_id",
+    "snapshot_id",
+    "store_root",
+    "checkpoint_core_versions",
 )
 TRAINING_ONLY_SECTIONS = {
     "actor_rollout_ref.actor",
@@ -399,27 +429,64 @@ class Stage:
         self.games = {row["game_id"]: row for row in self.catalog["games"]}
         self.read_parquet, self.expected_fingerprint = read_parquet, expected_fingerprint
         self.parquets, self.cases, self.allowed_differences = {}, {}, []
+        self.parallel_extension, self.parallel_evidence = None, None
+        self.parallel_test_services, self.parallel_test_evidence = {}, {}
+        self.setup_extension = None
+        self.initialized_evidence = None
+        self.prospective_runtime_evidence = None
+        self.restore_bindings = {}
         self.check_protocol()
         self.check_identity()
         self.inference_config = self.config
-        self.setup_extension = None
-        self.initialized_evidence = None
-        self.restore_bindings = {}
         self.check_lifecycle_binding()
         if self.setup_extension is None and optional_field(
             self.config, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn"
-        ) == SETUP_RUNNER:
+        ) in (SETUP_RUNNER, SPAWN_RUNNER):
             need(self.base, "A trained safe-setup profile requires its initialized lifecycle receipt")
             source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
-            identity = {
-                "policy": SETUP_POLICY, "driver_path": str(source / SETUP_DRIVER),
-                "driver_sha256": self.reader.hash_file(source / SETUP_DRIVER),
-                "namespace_path": str(source / SETUP_NAMESPACE),
-                "namespace_sha256": self.reader.hash_file(source / SETUP_NAMESPACE),
-                "driver_source_commit": self.manifest["source_commit"],
-            }
+            runner = field(
+                self.config, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn"
+            )
+            if runner == SPAWN_RUNNER:
+                if self.parallel_extension is not None:
+                    identity = self.parallel_extension["spawn_extension"]
+                    path = self.root / PARALLEL_EXPECTED_RECEIPT
+                else:
+                    path = self.root / SPAWN_EXPECTED_RECEIPT
+                    receipt = self.reader.json(path)
+                    exact_keys(receipt, ("schema_version", "kind", "extension"), "Prospective spawn runtime identity")
+                    need(
+                        receipt["schema_version"] == 1 and receipt["kind"] == "prospective_spawn_safe_runtime_identity",
+                        "Unknown prospective spawn runtime identity",
+                    )
+                    identity = receipt["extension"]
+                need(
+                    identity["policy"] == SPAWN_POLICY
+                    and identity["driver_source_commit"] == self.manifest["source_commit"],
+                    "Base prospective runtime identity differs from its actual source commit",
+                )
+                self.prospective_runtime_evidence = {
+                    "path": str(path),
+                    "sha256": self.reader.hash_file(path),
+                    "scope": "Prelaunch helper/source identity; actual runner/concurrency use the original manifest.",
+                }
+            else:
+                identity = {
+                    "policy": SETUP_POLICY,
+                    "driver_path": str(source / SETUP_DRIVER),
+                    "driver_sha256": self.reader.hash_file(source / SETUP_DRIVER),
+                    "namespace_path": str(source / SETUP_NAMESPACE),
+                    "namespace_sha256": self.reader.hash_file(source / SETUP_NAMESPACE),
+                    "driver_source_commit": self.manifest["source_commit"],
+                }
             self.setup_extension = self.verify_setup_identity(identity)
             self.check_safe_setup_profile(self.config)
+        if self.parallel_extension is not None:
+            need(
+                self.setup_extension is not None and self.setup_extension["policy"] == SPAWN_POLICY,
+                "Parallel client profile requires its verified spawn extension",
+            )
+            self.check_parallel_config(self.inference_config)
         self.signature = self.config_signature(self.inference_config)
 
     def verified_checkpoint(self, checkpoint, *, manifest_id, clock, cursor):
@@ -429,12 +496,15 @@ class Stage:
         payload = envelope["payload"]
         need(
             envelope["manifest_id"] == manifest_id == "sha256:" + INDEX.digest(payload)
-            and payload.get("schema_version") == 1 and payload.get("state") == "complete",
+            and payload.get("schema_version") == 1
+            and payload.get("state") == "complete",
             "Checkpoint is not the intact sealed COMPLETE publication",
         )
         spec = pure_module("joint_checkpoint").JointCheckpointSpec(**payload["spec"])
-        need(spec.optimizer_step == clock and spec.global_step == cursor and spec.world_size == 4,
-             "COMPLETE checkpoint clock/cursor/world differs")
+        need(
+            spec.optimizer_step == clock and spec.global_step == cursor and spec.world_size == 4,
+            "COMPLETE checkpoint clock/cursor/world differs",
+        )
         need(payload["training_state_paths"] == ["data.pt"], "Unsupported synchronous checkpoint data inventory")
         actual = set()
         for component in ("actor", "joint_state", "data.pt"):
@@ -449,102 +519,529 @@ class Stage:
             safe = PurePosixPath(relative)
             need(not safe.is_absolute() and ".." not in safe.parts and str(safe) == relative, "Unsafe checkpoint file")
             file = checkpoint / relative
-            need(identity == {"sha256": self.reader.hash_file(file), "size": file.stat().st_size},
-                 "COMPLETE checkpoint file digest differs: " + relative)
+            need(
+                identity == {"sha256": self.reader.hash_file(file), "size": file.stat().st_size},
+                "COMPLETE checkpoint file digest differs: " + relative,
+            )
         need(
-            all(f"actor/{kind}_world_size_4_rank_{rank}.pt" in actual
-                for rank in range(4) for kind in ("model", "optim", "extra_state")),
+            all(
+                f"actor/{kind}_world_size_4_rank_{rank}.pt" in actual
+                for rank in range(4)
+                for kind in ("model", "optim", "extra_state")
+            ),
             "Online model/optimizer/RNG rank inventory is incomplete",
         )
         ema = payload["ema_metadata"]
         need(
-            len(ema) == 4 and {row["file"] for row in ema} == {f"ema_rank_{rank:05d}.pt" for rank in range(4)}
+            len(ema) == 4
+            and {row["file"] for row in ema} == {f"ema_rank_{rank:05d}.pt" for rank in range(4)}
             and all(row["last_optimizer_step"] == clock and "joint_state/ema/" + row["file"] in actual for row in ema),
             "COMPLETE checkpoint lacks all four matching EMA acknowledgements",
         )
         saved = self.reader.json(checkpoint / "joint_state/controller.json")
-        need(saved["optimizer_step"] == clock and saved["prepared_update"] is None
-             and saved["protocol_fingerprint"] == spec.protocol_fingerprint,
-             "Saved controller does not match its sealed applied policy")
+        need(
+            saved["optimizer_step"] == clock
+            and saved["prepared_update"] is None
+            and saved["protocol_fingerprint"] == spec.protocol_fingerprint,
+            "Saved controller does not match its sealed applied policy",
+        )
         return payload, spec
 
-    def verify_setup_identity(self, identity):
+    def verify_published_source(self, relative, commit, path, digest):
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        need(path == str(source / relative), "Unexpected extension source binding: " + relative)
+        try:
+            blob = subprocess.check_output(
+                ["git", "-C", str(source), "show", commit + ":" + relative],
+                stderr=subprocess.PIPE,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise Error("Published extension source is unavailable: " + relative) from error
+        need(
+            hashlib.sha256(blob).hexdigest() == digest == self.reader.hash_file(path),
+            "Extension bytes differ from published source: " + relative,
+        )
+
+    def verify_setup_identity(self, identity, *, require_loaded=False):
+        spawn = identity.get("policy") == SPAWN_POLICY
         keys = ("policy", "driver_path", "driver_sha256", "namespace_path", "namespace_sha256", "driver_source_commit")
+        if spawn:
+            keys += ("composed_extensions",)
         exact_keys(identity, keys, "Safe-setup extension identity")
-        need(identity["policy"] == SETUP_POLICY, "Unknown safe-setup admission policy")
+        need(identity["policy"] in (SETUP_POLICY, SPAWN_POLICY), "Unknown safe-setup admission policy")
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
         commit = identity["driver_source_commit"]
         need(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40,64}", commit), "Missing setup source commit")
-        for kind, relative in (("driver", SETUP_DRIVER), ("namespace", SETUP_NAMESPACE)):
-            path = source / relative
-            need(identity[kind + "_path"] == str(path), "Unexpected setup " + kind + " source binding")
-            try:
-                blob = subprocess.check_output(
-                    ["git", "-C", str(source), "show", commit + ":" + relative],
-                    stderr=subprocess.PIPE, timeout=15,
+        for kind, relative in (("driver", SPAWN_DRIVER if spawn else SETUP_DRIVER), ("namespace", SETUP_NAMESPACE)):
+            self.verify_published_source(relative, commit, identity[kind + "_path"], identity[kind + "_sha256"])
+        if spawn:
+            composed = identity["composed_extensions"]
+            exact_keys(composed, ("resilient_setup", "quiescent_final", "native_spawn"), "Composed spawn extensions")
+            resilient = self.verify_setup_identity(composed["resilient_setup"])
+            need(
+                resilient["policy"] == SETUP_POLICY
+                and resilient["driver_source_commit"] == commit
+                and resilient["namespace_sha256"] == identity["namespace_sha256"],
+                "Composed resilient source identity differs",
+            )
+            quiescent = composed["quiescent_final"]
+            exact_keys(quiescent, ("path", "sha256"), "Composed quiescent source")
+            self.verify_published_source(LIFECYCLE_DRIVER, commit, quiescent["path"], quiescent["sha256"])
+            native = composed["native_spawn"]
+            exact_keys(native, ("policy", *SPAWN_FILES), "Native spawn identity")
+            need(native["policy"] == "native-posix-spawn-v1", "Unknown native spawn policy")
+            for kind, relative in SPAWN_FILES.items():
+                entry = native[kind]
+                loaded = kind == "helper" and "loaded_sha256" in entry
+                exact_keys(
+                    entry,
+                    ("path", "sha256", *(("loaded_sha256",) if loaded else ())),
+                    "Native spawn " + kind + " identity",
                 )
-            except (OSError, subprocess.SubprocessError) as error:
-                raise Error("Published setup extension/namespace source is unavailable") from error
-            need(hashlib.sha256(blob).hexdigest() == identity[kind + "_sha256"] == self.reader.hash_file(path),
-                 "Setup extension/namespace bytes differ from published source")
+                if kind != "helper":
+                    self.verify_published_source(relative, commit, entry["path"], entry["sha256"])
+                else:
+                    need(
+                        entry["path"] == str(source / relative)
+                        and self.reader.hash_file(entry["path"]) == entry["sha256"],
+                        "Native spawn helper binding/bytes differ",
+                    )
+                    need(not require_loaded or loaded, "Initialized native spawn helper lacks loaded identity")
+                    need(
+                        not loaded or entry["loaded_sha256"] == entry["sha256"],
+                        "Loaded native spawn helper differs from retained bytes",
+                    )
         need(runtime_blobs(source, commit) == self.source_blobs, "Setup extension changed runtime source inventory")
         return dict(identity)
 
-    def check_safe_setup_profile(self, config):
+    def check_safe_setup_profile(self, config, *, spawn=None):
+        if spawn is None:
+            spawn = self.setup_extension["policy"] == SPAWN_POLICY
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
         runner = field(config, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task")
         sampler = field(config, "trainer.v1.sampler.custom_sampler")
-        need(runner["runner_fqn"] == SETUP_RUNNER and type(runner["max_concurrent_sessions"]) is int
-             and runner["max_concurrent_sessions"] == 32
-             and sampler == {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
-             "Actual safe-setup runner/concurrency/sampler profile differs")
+        need(
+            runner["runner_fqn"] == (SPAWN_RUNNER if spawn else SETUP_RUNNER)
+            and type(runner["max_concurrent_sessions"]) is int
+            and runner["max_concurrent_sessions"] == 32
+            and sampler == {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
+            "Actual safe-setup runner/concurrency/sampler profile differs",
+        )
+
+    def check_parallel_health(self, health, extension):
+        need(
+            isinstance(health, dict)
+            and health.get("ready") is True
+            and health.get("catalog_digest") == self.split["catalog_digest"]
+            and health.get("environment_processes") == health.get("io_concurrency") == 4
+            and health.get("environment_policy") == ENVIRONMENT_POLICY
+            and health.get("action_request_protocol") == ACTION_PROTOCOL
+            and health.get("budget_seconds") == 900
+            and health.get("max_steps") == 50
+            and health.get("environment_extension") == extension
+            and isinstance(health.get("server_instance_id"), str)
+            and re.fullmatch(r"[0-9a-f]{32}", health["server_instance_id"])
+            and len(set(health.get("environment_worker_pids", []))) == 4,
+            "Parallel environment capability/topology/budget/source identity differs",
+        )
+
+    def verify_parallel_observation(self, value, path):
+        prospective = value.get("kind") == "prospective_parallel_environment_runtime_identity"
+        common = (
+            "schema_version",
+            "kind",
+            "observed_at_ns",
+            "client_adapter",
+            "environment_health",
+            "environment_config_ref",
+            "spawn_extension",
+            "not_a_post_init_or_served_model_receipt",
+        )
+        extra = (
+            (
+                "entrypoint",
+                "source_commit",
+                "client_source_ref",
+                "original_entry_command",
+                "effective_config_before_entry",
+            )
+            if prospective
+            else (
+                "driver_path",
+                "driver_sha256",
+                "effective_config_before_spawn_entry",
+                "core_fingerprint_scope",
+                "hash_link_scope",
+            )
+        )
+        exact_keys(value, (*common, *extra), "Parallel environment/client observation")
+        need(
+            value["schema_version"] == 1
+            and type(value["observed_at_ns"]) is int
+            and value["observed_at_ns"] > 0
+            and value["not_a_post_init_or_served_model_receipt"] is True,
+            "Parallel observation cannot claim post-init/served-model evidence",
+        )
+        need(prospective is self.base, "Use a prospective original-entry base and observed trained client entry")
+        spawn = self.verify_setup_identity(value["spawn_extension"])
+        need(spawn["policy"] == SPAWN_POLICY, "Parallel observation lacks the public spawn boundary")
+        commit = spawn["driver_source_commit"]
+        if prospective:
+            need(
+                value["entrypoint"] == "verl.experimental.skill_harness.train"
+                and value["source_commit"] == self.manifest["source_commit"] == commit,
+                "Base prospective identity must bind its actual original-entry source",
+            )
+            ref = value["client_source_ref"]
+            exact_keys(ref, ("path", "sha256"), "Prospective client source")
+            command = value["original_entry_command"]
+            need(
+                isinstance(command, list) and command[1:3] == ["-m", value["entrypoint"]],
+                "Prospective base did not use the supported original zero-epoch entry",
+            )
+        else:
+            need(
+                value["kind"] == "prelaunch_parallel_environment_client_observation",
+                "Unknown trained parallel observer",
+            )
+            ref = {"path": value["driver_path"], "sha256": value["driver_sha256"]}
+        self.verify_published_source(PARALLEL_DRIVER, commit, ref["path"], ref["sha256"])
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        adapter = value["client_adapter"]
+        need(
+            adapter.get("policy") == PARALLEL_POLICY
+            and adapter.get("action_request_protocol") == ACTION_PROTOCOL
+            and adapter.get("instruction_bytes_unchanged") is True
+            and adapter.get("only_task_profile_change") == "agent.codex_bin"
+            and adapter.get("tool_and_wrapper_same_inode") is True,
+            "Unknown public client/Task-profile behavior",
+        )
+        for key in ("original_task_profile", "task_profile", "instructions", "wrapper", "environment_python_adapter"):
+            item = adapter[key]
+            exact_keys(item, ("path", "sha256"), "Parallel adapter " + key)
+            need(self.reader.hash_file(item["path"]) == item["sha256"], "Parallel adapter file changed: " + key)
+        original = self.root / "task_config.yaml"
+        need(
+            adapter["original_task_profile"]["path"] == str(original)
+            and adapter["original_task_profile"]["sha256"] == self.reader.hash_file(original),
+            "Parallel adapter does not preserve its original prepared Task profile",
+        )
+        task_path = self.root / "client_adapter" / ("task_profile_" + adapter["task_profile"]["sha256"] + ".json")
+        need(adapter["task_profile"]["path"] == str(task_path), "Parallel Task profile escaped its content binding")
+        task = json.loads(self.reader.bytes(task_path))
+        original_task = json.loads(self.reader.bytes(original))
+        need(
+            isinstance(task, list) and len(task) == len(original_task) == 1,
+            "Parallel Task profile must preserve the single original task",
+        )
+        original_task[0]["agent"]["codex_bin"] = adapter["wrapper"]["path"]
+        need(task == original_task, "Parallel Task profile changed fields beyond its verified public wrapper")
+        instructions = self.reader.bytes(adapter["instructions"]["path"])
+        need(
+            hashlib.sha256(instructions).hexdigest() == self.launch["solver_system_sha256"],
+            "Parallel instructions differ from the prepared solver prompt",
+        )
+        client, shell = source / PARALLEL_CLIENT, source / "examples/skill_self_evolve/scripts/codex_entrypoint.sh"
+        self.verify_published_source(PARALLEL_CLIENT, commit, str(client), adapter["client_source_sha256"])
+        self.verify_published_source(
+            shell.relative_to(source).as_posix(), commit, str(shell), adapter["native_shell_source_sha256"]
+        )
+        helper = load_source("_comparison_parallel_client_" + str(id(self)), source / PARALLEL_DRIVER)
+        expected_wrapper = helper.public_wrapper(self.reader.bytes(client).decode(), self.reader.bytes(shell).decode())
+        need(
+            self.reader.bytes(adapter["wrapper"]["path"]) == expected_wrapper,
+            "Public Native/client wrapper differs from the published producer",
+        )
+        route = adapter["environment_python_route"]
+        need(
+            route["environment_processes"] == route["io_workers"] == 4
+            and route["translated_server"] == str(source / "verl/experimental/skill_harness/alfworld/server.py"),
+            "Environment interpreter wrapper changed the exact core server route/topology",
+        )
+        self.verify_published_source(
+            PARALLEL_SERVER, commit, route["parallel_server"]["path"], route["parallel_server"]["sha256"]
+        )
+        need(
+            self.reader.hash_file(route["original_python"]["path"]) == route["original_python"]["sha256"],
+            "Original ALFWorld interpreter bytes changed",
+        )
+        # Render with an isolated module-local os view, without changing the
+        # comparison process environment or executing either public wrapper.
+        helper.os = types.SimpleNamespace(environ={"VERL_SOURCE_ROOT": str(source)}, access=os.access, X_OK=os.X_OK)
+        expected_environment, expected_route = helper.environment_python_wrapper(
+            route["original_python"]["path"], route["parallel_server"]["path"]
+        )
+        need(
+            expected_route == route
+            and self.reader.bytes(adapter["environment_python_adapter"]["path"]) == expected_environment,
+            "Environment wrapper bytes/venv route differ from the verified producer",
+        )
+        public = Path(adapter["wrapper"]["path"]).parent
+        asset = hashlib.sha256(
+            str(self.root).encode() + expected_wrapper + instructions + expected_environment
+        ).hexdigest()[:24]
+        need(
+            public.name == "idempotent-" + asset
+            and Path(adapter["tool_path"]) == public / "alfworld-step"
+            and Path(adapter["tool_path"]).is_symlink()
+            and os.readlink(adapter["tool_path"]) == "codex-entrypoint"
+            and Path(adapter["tool_path"]).stat().st_ino == Path(adapter["wrapper"]["path"]).stat().st_ino
+            and Path(adapter["environment_python_adapter"]["path"]) == public / "environment-python"
+            and Path(adapter["instructions"]["path"]) == public / "solver_system.md",
+            "Public tool does not share the verified allowed wrapper inode/asset binding",
+        )
+        changes = {
+            "ALFWORLD_TASK_CONFIG": str(task_path),
+            "ALFWORLD_SOLVER_INSTRUCTIONS_FILE": adapter["instructions"]["path"],
+            "ALFWORLD_ENV_PYTHON": adapter["environment_python_adapter"]["path"],
+        }
+        need(adapter["environment_variable_changes"] == changes, "Unknown parallel environment overrides")
+        settings_ref = value["environment_config_ref"]
+        exact_keys(settings_ref, ("path", "sha256"), "Observed environment config reference")
+        need(
+            settings_ref["path"] == str(self.root / "runtime/environment.json")
+            and self.reader.hash_file(settings_ref["path"]) == settings_ref["sha256"],
+            "Observed training environment configuration changed",
+        )
+        settings = self.reader.json(settings_ref["path"])
+        extension = {
+            "source_path": route["parallel_server"]["path"],
+            "source_sha256": route["parallel_server"]["sha256"],
+            "policy": ENVIRONMENT_POLICY,
+        }
+        self.check_parallel_health(value["environment_health"], extension)
+        need(
+            settings.get("environment_extension") == extension
+            and settings.get("server_instance_id") == value["environment_health"]["server_instance_id"]
+            and set(settings.get("allowed_splits", [])) == {"train"},
+            "Parallel observation no longer binds its train-only service",
+        )
+        return {
+            "spawn_extension": spawn,
+            "client_adapter": adapter,
+            "environment_extension": extension,
+            "client_source_ref": ref,
+            "source_commit": commit,
+            "observation": value,
+            "environment_config_sha256": settings_ref["sha256"],
+        }
+
+    def load_parallel_identity(self):
+        expected_hash = self.protocol["budgets"]["alfworld_task_config_sha256"]
+        candidates = (
+            [self.root / PARALLEL_EXPECTED_RECEIPT]
+            if self.base
+            else sorted((self.root / "driver_runs").glob("*.parallel_client.json"))
+        )
+        matches = []
+        for path in candidates:
+            if path.is_file():
+                value = self.reader.json(path)
+                if value.get("client_adapter", {}).get("task_profile", {}).get("sha256") == expected_hash:
+                    matches.append((path, self.verify_parallel_observation(value, path)))
+        if not matches:
+            need(
+                not (self.root / "client_adapter").exists(), "Parallel Task artifacts lack matching runtime observation"
+            )
+            return
+        signatures = [parallel_signature(value) for _, value in matches]
+        need(all(value == signatures[0] for value in signatures), "Conflicting matching parallel observations")
+        self.parallel_extension = matches[0][1]
+        self.parallel_evidence = [
+            {
+                "path": str(path),
+                "sha256": self.reader.hash_file(path),
+                "scope": "Prelaunch source/helper/client/service observation; not post-init or served-model proof",
+            }
+            for path, _ in matches
+        ]
+        adapter = self.parallel_extension["client_adapter"]
+        self.env = {**self.env, **adapter["environment_variable_changes"]}
+        for path in sorted(self.path.glob("service-*/environment.json")):
+            settings = self.reader.json(path)
+            instance = settings.get("server_instance_id")
+            if isinstance(instance, str):
+                need(instance not in self.parallel_test_services, "Duplicate official environment service identity")
+                self.parallel_test_services[instance] = (path, settings)
+        self.restore_bindings.update(
+            {
+                TASK_PROFILE_FIELD: adapter["task_profile"]["path"],
+                "ray_kwargs.ray_init.runtime_env.env_vars.ALFWORLD_TASK_CONFIG": adapter["task_profile"]["path"],
+            }
+        )
+
+    def apply_parallel_config(self, expected):
+        adapter = self.parallel_extension["client_adapter"]
+        set_existing_field(
+            expected,
+            "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path",
+            adapter["task_profile"]["path"],
+        )
+        environment = expected["ray_kwargs"]["ray_init"]["runtime_env"].setdefault("env_vars", {})
+        environment.update(adapter["environment_variable_changes"])
+
+    def check_parallel_config(self, config):
+        adapter = self.parallel_extension["client_adapter"]
+        if self.base:
+            need(
+                field(config, "trainer.total_epochs") == 0 and field(config, "trainer.resume_mode") == "disable",
+                "Prospective parallel base must use the fresh zero-epoch route",
+            )
+        need(
+            field(
+                config,
+                "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_kwargs.task_config_path",
+            )
+            == adapter["task_profile"]["path"],
+            "Actual runner does not bind the observed public client profile",
+        )
+        environment = field(config, "ray_kwargs.ray_init.runtime_env.env_vars")
+        need(
+            all(environment.get(key) == value for key, value in adapter["environment_variable_changes"].items()),
+            "Actual worker environment does not bind the observed client/interpreter/instructions",
+        )
+        for key in (
+            "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu",
+            "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu",
+            "actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu",
+        ):
+            need(optional_field(config, key) == 1, "Matched parallel profile must retain measured microbatch1: " + key)
+
+    def check_parallel_case_service(self, registration):
+        instance = registration["server_instance_id"]
+        need(instance in self.parallel_test_services, "Official case lacks its actual request-ID test-service config")
+        path, settings = self.parallel_test_services[instance]
+        need(
+            set(settings.get("allowed_splits", [])) == set(SPLITS.values())
+            and settings.get("catalog_digest") == self.split["catalog_digest"]
+            and settings.get("environment_processes")
+            == settings.get("io_workers")
+            == settings.get("io_concurrency")
+            == 4
+            and settings.get("environment_policy") == ENVIRONMENT_POLICY
+            and settings.get("action_request_protocol") == ACTION_PROTOCOL
+            and settings.get("environment_extension") == self.parallel_extension["environment_extension"]
+            and settings.get("max_steps") == 50
+            and settings.get("budget_seconds") == 900
+            and len(set(settings.get("environment_worker_pids", []))) == 4,
+            "Actual official service differs from the observed parallel/client profile",
+        )
+        pure_module("alfworld.protocol").validate_loopback_url(settings["url"])
+        self.parallel_test_evidence[instance] = {
+            "path": str(path),
+            "sha256": self.reader.hash_file(path),
+            "environment_extension": settings["environment_extension"],
+            "environment_processes": 4,
+            "io_concurrency": 4,
+            "action_request_protocol": ACTION_PROTOCOL,
+            "scope": "Retained test-only service configuration matched to each private budget registration",
+        }
 
     def check_initialized_setup(self, extension, ref, seal, final_spec):
-        extension = self.verify_setup_identity(extension)
+        spawn = extension.get("policy") == SPAWN_POLICY
+        extension = self.verify_setup_identity(extension, require_loaded=spawn)
         exact_keys(ref, ("path", "sha256"), "Initialized setup receipt reference")
         path = Path(ref["path"])
-        need(path.is_absolute() and path == path.resolve() and path.parent == self.root / "driver_runs"
-             and re.fullmatch(r"[0-9]+\.resilient\.initialized\.json", path.name),
-             "Initialized setup receipt escaped its explicit run directory")
+        need(
+            path.is_absolute()
+            and path == path.resolve()
+            and path.parent == self.root / "driver_runs"
+            and re.fullmatch(
+                r"[0-9]+\." + ("spawn_safe" if spawn else "resilient") + r"\.initialized\.json", path.name
+            ),
+            "Initialized setup receipt escaped its explicit run directory",
+        )
         need(self.reader.hash_file(path) == ref["sha256"], "Initialized setup receipt hash differs")
         initialized = self.reader.json(path)
-        exact_keys(initialized, (*extension, "imports", "effective_config_after_trainer_init",
-                                "original_training_manifest_sha256", "restored_checkpoint"),
-                   "Initialized setup receipt")
-        need(all(initialized[key] == value for key, value in extension.items())
-             and initialized["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"],
-             "Initialized setup source/original-manifest identity differs")
+        spawn_fields = (
+            ("counterfactual_loop_class", "event_loop_policy_class", "primary_runner_policy_install") if spawn else ()
+        )
+        exact_keys(
+            initialized,
+            (
+                *extension,
+                "imports",
+                "effective_config_after_trainer_init",
+                "original_training_manifest_sha256",
+                "restored_checkpoint",
+                *spawn_fields,
+            ),
+            "Initialized setup receipt",
+        )
+        need(
+            all(initialized[key] == value for key, value in extension.items())
+            and initialized["original_training_manifest_sha256"] == seal["original_training_manifest_sha256"],
+            "Initialized setup source/original-manifest identity differs",
+        )
+        if spawn:
+            need(
+                initialized["counterfactual_loop_class"] == SPAWN_MODULE + ".NativeSpawnSelectorLoop"
+                and initialized["event_loop_policy_class"] == SPAWN_MODULE + ".NativeSpawnPolicy"
+                and initialized["primary_runner_policy_install"]
+                == "synchronous runner constructor before SDK asyncio.run",
+                "Initialized native spawn policy/loop/primary-runner installation differs",
+            )
+            need(
+                all(seal[key] == value for key, value in extension.items()),
+                "Spawn lifecycle and initialized composite identities differ",
+            )
         for key in ("verl_source", "verl_version", "uni_agent_source", "uni_agent_adapter_sha256"):
-            need(initialized["imports"].get(key) == self.manifest["import_provenance"].get(key),
-                 "Initialized setup runtime/adapter import identity differs")
+            need(
+                initialized["imports"].get(key) == self.manifest["import_provenance"].get(key),
+                "Initialized setup runtime/adapter import identity differs",
+            )
         restored = initialized["restored_checkpoint"]
         exact_keys(restored, ("checkpoint_dir", "manifest_id", "spec"), "Explicit source checkpoint")
         checkpoint = Path(restored["checkpoint_dir"])
-        need(checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_4"
-             and checkpoint == checkpoint.resolve(), "Safe-setup continuation did not bind retained source checkpoint4")
+        need(
+            checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_4"
+            and checkpoint == checkpoint.resolve(),
+            "Safe-setup continuation did not bind retained source checkpoint4",
+        )
         _, source_spec = self.verified_checkpoint(checkpoint, manifest_id=restored["manifest_id"], clock=4, cursor=4)
-        need(source_spec.to_dict() == restored["spec"] and dict(source_spec.versions) == dict(final_spec.versions)
-             and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
-             "Source checkpoint4 does not preserve final core/protocol compatibility")
+        need(
+            source_spec.to_dict() == restored["spec"]
+            and dict(source_spec.versions) == dict(final_spec.versions)
+            and source_spec.protocol_fingerprint == final_spec.protocol_fingerprint,
+            "Source checkpoint4 does not preserve final core/protocol compatibility",
+        )
         effective = initialized["effective_config_after_trainer_init"]
         expected = copy.deepcopy(self.config)
+        if self.parallel_extension is not None:
+            need(
+                extension_signature(extension) == extension_signature(self.parallel_extension["spawn_extension"]),
+                "Parallel observation and initialized loaded spawn sources differ",
+            )
+            self.apply_parallel_config(expected)
         runner = field(expected, "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task")
         sampler = field(expected, "trainer.v1.sampler.custom_sampler")
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
-        need(runner["runner_fqn"] in ("verl.experimental.skill_harness.alfworld.runner.run_task", SETUP_RUNNER)
-             and runner["max_concurrent_sessions"] in (32, 64)
-             and sampler in (
-                 {"path": str(source / "verl/experimental/skill_harness/group_sampler.py"),
-                  "name": "ArchiveAwareReplayBuffer"},
-                 {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
-             ), "Unknown original profile cannot be silently replaced by setup extension")
-        runner.update(runner_fqn=SETUP_RUNNER, max_concurrent_sessions=32)
+        need(
+            runner["runner_fqn"]
+            in ("verl.experimental.skill_harness.alfworld.runner.run_task", SETUP_RUNNER, SPAWN_RUNNER)
+            and runner["max_concurrent_sessions"] in (32, 64)
+            and sampler
+            in (
+                {
+                    "path": str(source / "verl/experimental/skill_harness/group_sampler.py"),
+                    "name": "ArchiveAwareReplayBuffer",
+                },
+                {"path": str(source / SETUP_DRIVER), "name": "ResilientReplayBuffer"},
+            ),
+            "Unknown original profile cannot be silently replaced by setup extension",
+        )
+        runner.update(runner_fqn=SPAWN_RUNNER if spawn else SETUP_RUNNER, max_concurrent_sessions=32)
         sampler.update(path=str(source / SETUP_DRIVER), name="ResilientReplayBuffer")
         store = Path(seal["store_root"])
-        need(re.fullmatch(r"step_4_[0-9a-f]{32}", store.parent.name),
-             "Restored store is not bound to source checkpoint4")
-        for key, value in (("store_root", store), ("replay_root", store.parent / "replay"),
-                           ("ledger_root", store.parent / "ledger")):
+        need(
+            re.fullmatch(r"step_4_[0-9a-f]{32}", store.parent.name), "Restored store is not bound to source checkpoint4"
+        )
+        for key, value in (
+            ("store_root", store),
+            ("replay_root", store.parent / "replay"),
+            ("ledger_root", store.parent / "ledger"),
+        ):
             set_existing_field(expected, "skill_harness." + key, str(value))
             self.restore_bindings["skill_harness." + key] = str(value)
         need(field(effective, "trainer.resume_mode") in ("auto", "resume_path"), "Unknown initialized resume mode")
@@ -554,9 +1051,11 @@ class Stage:
         if "resume_from_path" in expected["trainer"]:
             set_existing_field(expected, "trainer.resume_from_path", resume_from)
         if optional_field(expected, "data.gen_batch_size") in (None, 1):
-            need(optional_field(effective, "data.gen_batch_size") == 1
-                 and optional_field(expected, "trainer.v1.sampler.sync_refill_failed_groups") is True,
-                 "Unknown exact-refill dataloader normalization")
+            need(
+                optional_field(effective, "data.gen_batch_size") == 1
+                and optional_field(expected, "trainer.v1.sampler.sync_refill_failed_groups") is True,
+                "Unknown exact-refill dataloader normalization",
+            )
             set_existing_field(expected, "data.gen_batch_size", 1)
         horizon = expected["trainer"]["total_training_steps"] * optional_field(
             expected, "trainer.v1.sync.parameter_sync_step", 1
@@ -568,18 +1067,26 @@ class Stage:
                 need(old in (-1, horizon), "Unknown optimizer schedule initialization")
                 set_existing_field(expected, key, horizon)
         if optional_field(expected, "reward.reward_model.enable") is False:
-            need(optional_field(expected, "reward.reward_model.enable_resource_pool") is False,
-                 "Separate reward-model topology cannot be normalized")
-            for name, value in (("n_gpus_per_node", expected["trainer"]["n_gpus_per_node"]),
-                                ("nnodes", expected["trainer"]["nnodes"])):
+            need(
+                optional_field(expected, "reward.reward_model.enable_resource_pool") is False,
+                "Separate reward-model topology cannot be normalized",
+            )
+            for name, value in (
+                ("n_gpus_per_node", expected["trainer"]["n_gpus_per_node"]),
+                ("nnodes", expected["trainer"]["nnodes"]),
+            ):
                 set_existing_field(expected, "reward.reward_model." + name, value)
-        need(effective == expected,
-             "Unknown initialized configuration change outside explicit setup/restore/constructor bindings")
-        self.check_safe_setup_profile(effective)
+        need(
+            effective == expected,
+            "Unknown initialized configuration change outside explicit setup/restore/constructor bindings",
+        )
+        self.check_safe_setup_profile(effective, spawn=spawn)
         self.setup_extension = extension
         self.inference_config = effective
         self.initialized_evidence = {
-            "path": str(path), "sha256": ref["sha256"], "restored_checkpoint": restored,
+            "path": str(path),
+            "sha256": ref["sha256"],
+            "restored_checkpoint": restored,
             "effective_config_sha256": INDEX.digest(effective),
         }
 
@@ -602,19 +1109,27 @@ class Stage:
             return  # Original fresh runs keep their original configured store.
         receipt = self.reader.json(path)
         links = ("checkpoint_seal", "evaluation_entry", "evaluation_complete")
+        spawn = receipt.get("policy") == SPAWN_POLICY
+        identity_fields = LIFECYCLE_IDENTITY + (
+            ("policy", "namespace_path", "namespace_sha256", "composed_extensions") if spawn else ()
+        )
         exact_keys(
-            receipt, ("schema_version", "kind", *LIFECYCLE_IDENTITY, *LIFECYCLE_SEAL, "evaluation_cursor", *links),
+            receipt,
+            ("schema_version", "kind", *identity_fields, *LIFECYCLE_SEAL, "evaluation_cursor", *links),
             "Final lifecycle receipt",
         )
         need(
-            receipt["schema_version"] == 1 and receipt["kind"] == "quiescent_final_evaluation"
-            and type(receipt["optimizer_step"]) is int and receipt["optimizer_step"] == self.version
-            and type(receipt["checkpoint_cursor"]) is int and receipt["checkpoint_cursor"] == 64
-            and isinstance(receipt["snapshot_id"], str) and re.fullmatch(r"[0-9a-f]{64}", receipt["snapshot_id"])
+            receipt["schema_version"] == 1
+            and receipt["kind"] == "quiescent_final_evaluation"
+            and type(receipt["optimizer_step"]) is int
+            and receipt["optimizer_step"] == self.version
+            and type(receipt["checkpoint_cursor"]) is int
+            and receipt["checkpoint_cursor"] == 64
+            and isinstance(receipt["snapshot_id"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", receipt["snapshot_id"])
             and receipt["evaluation_cursor"] == self.protocol["global_step"]
-            and receipt["seal_origin"] in (
-                "final_checkpoint_saved_after_quiescence", "restored_complete_final_checkpoint"
-            ),
+            and receipt["seal_origin"]
+            in ("final_checkpoint_saved_after_quiescence", "restored_complete_final_checkpoint"),
             "Final lifecycle stage/clock/seal differs",
         )
         need(
@@ -623,7 +1138,8 @@ class Stage:
         )
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
         driver = Path(receipt["driver_path"])
-        need(driver == source / LIFECYCLE_DRIVER, "Unexpected lifecycle driver source binding")
+        relative = SPAWN_DRIVER if spawn else LIFECYCLE_DRIVER
+        need(driver == source / relative, "Unexpected lifecycle driver source binding")
         commit = receipt["driver_source_commit"]
         need(
             isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40,64}", commit),
@@ -631,8 +1147,9 @@ class Stage:
         )
         try:
             blob = subprocess.check_output(
-                ["git", "-C", str(source), "show", commit + ":" + LIFECYCLE_DRIVER],
-                stderr=subprocess.PIPE, timeout=15,
+                ["git", "-C", str(source), "show", commit + ":" + relative],
+                stderr=subprocess.PIPE,
+                timeout=15,
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise Error("Published lifecycle driver source is unavailable") from error
@@ -647,7 +1164,8 @@ class Stage:
             exact_keys(ref, ("path", "sha256"), "Lifecycle record reference")
             target = Path(ref["path"])
             need(
-                target.is_absolute() and target == target.resolve()
+                target.is_absolute()
+                and target == target.resolve()
                 and target.name == key + ".json"
                 and target.parent.parent == self.root / "evaluation_lifecycle"
                 and re.fullmatch(r"driver_[0-9a-f]{32}", target.parent.name),
@@ -661,7 +1179,7 @@ class Stage:
             record = self.reader.json(target)
             need(
                 record.get("schema_version") == 1
-                and all(record.get(field) == receipt[field] for field in (*LIFECYCLE_IDENTITY, *LIFECYCLE_SEAL)),
+                and all(record.get(field) == receipt[field] for field in (*identity_fields, *LIFECYCLE_SEAL)),
                 "Lifecycle identity/store/head/clock copies disagree",
             )
             records[key] = record
@@ -675,7 +1193,9 @@ class Stage:
         )
         store = Path(receipt["store_root"])
         need(
-            store.is_absolute() and store == store.resolve() and store.name == "skill_store"
+            store.is_absolute()
+            and store == store.resolve()
+            and store.name == "skill_store"
             and store.parent.parent == self.root / "restored_state"
             and re.fullmatch(r"step_[0-9]+_[0-9a-f]{32}", store.parent.name),
             "Sealed restored skill store is outside its explicit run restore binding",
@@ -690,9 +1210,12 @@ class Stage:
             checkpoint, manifest_id=receipt["manifest_id"], clock=self.version, cursor=receipt["checkpoint_cursor"]
         )
         need(
-            spec.optimizer_step == self.version and spec.global_step == receipt["checkpoint_cursor"]
-            and spec.world_size == 4 and dict(spec.versions) == receipt["checkpoint_core_versions"]
-            and spec.versions["verl"] == "0.9.1" and spec.versions["model"] == self.expected_fingerprint
+            spec.optimizer_step == self.version
+            and spec.global_step == receipt["checkpoint_cursor"]
+            and spec.world_size == 4
+            and dict(spec.versions) == receipt["checkpoint_core_versions"]
+            and spec.versions["verl"] == "0.9.1"
+            and spec.versions["model"] == self.expected_fingerprint
             and spec.versions["tokenizer"] == self.tokenizer
             and spec.protocol_fingerprint == self.controller["protocol_fingerprint"],
             "Final checkpoint sealed policy/core/protocol identity differs",
@@ -703,7 +1226,8 @@ class Stage:
         captured_snapshot = self.reader.json(checkpoint / "joint_state/skill_store/snapshots" / (snapshot_id + ".json"))
         need(
             head == {"branch": "main", "snapshot_id": snapshot_id}
-            and INDEX.digest(snapshot) == snapshot_id and snapshot == captured_snapshot
+            and INDEX.digest(snapshot) == snapshot_id
+            and snapshot == captured_snapshot
             and payload["snapshots"]["skill_heads"]["main"] == snapshot_id,
             "Final restored store/head differs from its COMPLETE checkpoint seal",
         )
@@ -711,15 +1235,22 @@ class Stage:
         extensions = [record.get("lifecycle_extension") for record in records.values()]
         initialized_refs = [record.get("initialized_receipt_ref") for record in records.values()]
         if any(value is not None for value in (*extensions, *initialized_refs)):
-            need(all(value == extensions[0] for value in extensions) and extensions[0] is not None
-                 and all(value == initialized_refs[0] for value in initialized_refs)
-                 and initialized_refs[0] is not None,
-                 "Lifecycle setup extension/initialized receipt copies disagree")
+            need(
+                all(value == extensions[0] for value in extensions)
+                and extensions[0] is not None
+                and all(value == initialized_refs[0] for value in initialized_refs)
+                and initialized_refs[0] is not None,
+                "Lifecycle setup extension/initialized receipt copies disagree",
+            )
             self.check_initialized_setup(extensions[0], initialized_refs[0], receipt, spec)
         else:
-            need(not (self.root / "setup_adapter").exists()
-                 and not any((self.root / "driver_runs").glob("*.resilient.initialized.json")),
-                 "Safe-setup run lacks its lifecycle extension/initialized receipt")
+            need(
+                not (self.root / "setup_adapter").exists()
+                and not spawn
+                and not any((self.root / "driver_runs").glob("*.resilient.initialized.json"))
+                and not any((self.root / "driver_runs").glob("*.spawn_safe.initialized.json")),
+                "Safe-setup run lacks its lifecycle extension/initialized receipt",
+            )
         self.lifecycle = {"receipt_path": str(path), "receipt_sha256": self.reader.hash_file(path), **receipt}
 
     def check_protocol(self):
@@ -880,6 +1411,7 @@ class Stage:
         provenance = self.manifest["import_provenance"]
         need(provenance["verl_version"] == "0.9.1", "Wrong verl version")
         self.source_blobs = runtime_blobs(provenance["verl_source"], self.manifest["source_commit"])
+        self.load_parallel_identity()
         need(
             re.fullmatch(r"[0-9a-f]{64}", self.manifest["dirty_diff_sha256"]) is not None,
             "Missing dirty source identity",
@@ -926,7 +1458,12 @@ class Stage:
         )
         task_path = Path(self.env["ALFWORLD_TASK_CONFIG"])
         need(
-            task_path.resolve() == self.root / "task_config.yaml"
+            task_path.resolve()
+            == (
+                Path(self.parallel_extension["client_adapter"]["task_profile"]["path"])
+                if self.parallel_extension is not None
+                else self.root / "task_config.yaml"
+            )
             and reader.hash_file(task_path) == self.protocol["budgets"]["alfworld_task_config_sha256"],
             "Task config is not the recorded run-local file",
         )
@@ -1041,11 +1578,16 @@ class Stage:
             expected = self.restore_bindings.get(path, str(self.root / RUN_PATHS[path]))
             need(value == expected, "Unknown host path change: " + path)
             return "<run>/" + RUN_PATHS[path]
-        if path in ("reward.reward_model.n_gpus_per_node", "reward.reward_model.nnodes") and optional_field(
-            self.inference_config, "reward.reward_model.enable"
-        ) is False:
-            need(optional_field(self.inference_config, "reward.reward_model.enable_resource_pool") is False
-                 and type(value) is int and value >= 0, "Unknown disabled reward-model placement")
+        if (
+            path in ("reward.reward_model.n_gpus_per_node", "reward.reward_model.nnodes")
+            and optional_field(self.inference_config, "reward.reward_model.enable") is False
+        ):
+            need(
+                optional_field(self.inference_config, "reward.reward_model.enable_resource_pool") is False
+                and type(value) is int
+                and value >= 0,
+                "Unknown disabled reward-model placement",
+            )
             return "<unused-disabled-reward-model-placement>"
         if path in ("trainer.experiment_name", "actor_rollout_ref.rollout.trace.experiment_name"):
             need(value == self.root.name, "Unknown run-name binding")
@@ -1059,6 +1601,12 @@ class Stage:
         if path == "ray_kwargs.ray_init.runtime_env.env_vars.ALFWORLD_SOLVER_INSTRUCTIONS_FILE":
             need(value == self.env["ALFWORLD_SOLVER_INSTRUCTIONS_FILE"], "Runtime instruction path differs")
             return "<validated-solver-instruction-bytes>"
+        if (
+            path == "ray_kwargs.ray_init.runtime_env.env_vars.ALFWORLD_ENV_PYTHON"
+            and self.parallel_extension is not None
+        ):
+            need(value == self.env["ALFWORLD_ENV_PYTHON"], "Parallel environment interpreter path differs")
+            return "<validated-parallel-environment-interpreter-wrapper>"
         source = self.manifest["import_provenance"]["verl_source"]
         if path in (
             "ray_kwargs.ray_init.runtime_env.env_vars.VLLM_LOGGING_LEVEL",
@@ -1101,13 +1649,20 @@ class Stage:
             need(value is None or Path(value).resolve() == self.model_path.resolve(), "Unknown model metadata path")
             return "<intended-model-metadata-source>"
         if path == "trainer.resume_mode":
-            need(value == "disable" if self.base else value in ("auto", "disable")
-                 or value == "resume_path" and self.initialized_evidence is not None, "Unsupported resume mode")
+            need(
+                value == "disable"
+                if self.base
+                else value in ("auto", "disable") or value == "resume_path" and self.initialized_evidence is not None,
+                "Unsupported resume mode",
+            )
             return "<explicit-zero-base-or-trained-run>"
         if path == "trainer.resume_from_path":
-            need(value is None or self.initialized_evidence is not None
-                 and value == self.initialized_evidence["restored_checkpoint"]["checkpoint_dir"],
-                 "Unknown resume checkpoint binding")
+            need(
+                value is None
+                or self.initialized_evidence is not None
+                and value == self.initialized_evidence["restored_checkpoint"]["checkpoint_dir"],
+                "Unknown resume checkpoint binding",
+            )
             return "<explicit-zero-base-or-retained-source-checkpoint>"
         if path in ("skill_harness.evaluation.initial", "skill_harness.evaluation.final"):
             need(
@@ -1222,6 +1777,8 @@ class Stage:
                 need(reader.hash_file(source_game) == metadata["game_sha256"], "Underlying benchmark game bytes differ")
                 budget = pure_module("alfworld.budget")
                 registration = reader.json(output / "budget-registration.json")
+                if self.parallel_extension is not None:
+                    self.check_parallel_case_service(registration)
                 need(registration["account"]["owner"]["run_root"] == str(self.root), "Budget registered to another run")
                 budget.validate_budget_registration(
                     registration,
@@ -1331,6 +1888,41 @@ class Stage:
             self.cases[phase] = cases
 
 
+def extension_signature(identity):
+    """Compare source/helper bytes while retaining each run's full path/commit evidence."""
+    result = {key: identity[key] for key in ("policy", "driver_sha256", "namespace_sha256")}
+    if identity["policy"] == SPAWN_POLICY:
+        composed = identity["composed_extensions"]
+        native = composed["native_spawn"]
+        result["composed_extensions"] = {
+            "resilient_setup": extension_signature(composed["resilient_setup"]),
+            "quiescent_final": {"sha256": composed["quiescent_final"]["sha256"]},
+            "native_spawn": {
+                "policy": native["policy"],
+                **{key: {"sha256": native[key]["sha256"]} for key in SPAWN_FILES},
+            },
+        }
+    return result
+
+
+def parallel_signature(value):
+    adapter = value["client_adapter"]
+    route = adapter["environment_python_route"]
+    return {
+        "policy": adapter["policy"],
+        "action_request_protocol": adapter["action_request_protocol"],
+        "spawn_extension": extension_signature(value["spawn_extension"]),
+        "client_driver_sha256": value["client_source_ref"]["sha256"],
+        "client_source_sha256": adapter["client_source_sha256"],
+        "native_shell_source_sha256": adapter["native_shell_source_sha256"],
+        **{name: adapter[name]["sha256"] for name in ("wrapper", "instructions", "environment_python_adapter")},
+        "original_python_sha256": route["original_python"]["sha256"],
+        "parallel_server_sha256": route["parallel_server"]["sha256"],
+        "environment_processes": route["environment_processes"],
+        "io_workers": route["io_workers"],
+    }
+
+
 def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_FINGERPRINT, parquet_reader=None):
     reader = Reader()
     report = {
@@ -1367,12 +1959,24 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             base.signature == trained.signature,
             "Unknown resolved configuration difference beyond explicit host paths/execution modes",
         )
-        need((base.setup_extension is None) == (trained.setup_extension is None),
-             "Base and final safe-setup execution policies differ")
+        need(
+            (base.setup_extension is None) == (trained.setup_extension is None),
+            "Base and final safe-setup execution policies differ",
+        )
         if base.setup_extension is not None:
-            need(all(base.setup_extension[key] == trained.setup_extension[key]
-                     for key in ("policy", "driver_sha256", "namespace_sha256")),
-                 "Base and final safe-setup driver/namespace identities differ")
+            need(
+                extension_signature(base.setup_extension) == extension_signature(trained.setup_extension),
+                "Base and final execution driver/namespace/composed-source/helper identities differ",
+            )
+        need(
+            (base.parallel_extension is None) == (trained.parallel_extension is None),
+            "Base and final parallel environment/client policies differ",
+        )
+        if base.parallel_extension is not None:
+            need(
+                parallel_signature(base.parallel_extension) == parallel_signature(trained.parallel_extension),
+                "Base and final environment/client/interpreter/source bytes differ",
+            )
         need(
             base.source_blobs == trained.source_blobs
             and base.manifest["dirty_diff_sha256"] == trained.manifest["dirty_diff_sha256"]
@@ -1451,6 +2055,13 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
                 "Resumed original manifest is preserved; inference uses only its verified initialized32/safe-runner "
                 "profile and explicit checkpoint4/store bindings, matched to the base's original actual profile."
             )
+        if base.prospective_runtime_evidence:
+            report["explicit_allowed_differences"].append(
+                "Base uses its original zero-epoch driver with actual SpawnSafeRunner/concurrency32 configuration; "
+                "its prospective helper/source receipt is matched to the trained initialized loaded-helper identity. "
+                "Base policy installation is inferred from the verified runner constructor; "
+                "there is no baseline loaded-helper receipt."
+            )
         report["identity_scope"] = {
             "untouched_base_hf_fingerprint": base.model_fingerprint,
             "trained_parameter_fingerprint_compared_to_base": False,
@@ -1467,11 +2078,25 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
         report["backend_evidence"] = {"base": base.backend_evidence, "trained": trained.backend_evidence}
         report["lifecycle_evidence"] = {"base": base.lifecycle, "trained": trained.lifecycle}
         report["execution_extension_evidence"] = {
-            "base": base.setup_extension, "trained": trained.setup_extension,
+            "base": base.setup_extension,
+            "trained": trained.setup_extension,
+            "base_prospective_runtime_receipt": base.prospective_runtime_evidence,
             "trained_initialized_receipt": trained.initialized_evidence,
             "inference_configuration_sources": {
                 "base": "original_manifest_actual_profile",
                 "trained": "validated_initialized_receipt" if trained.initialized_evidence else "original_manifest",
+            },
+        }
+        report["parallel_environment_client_evidence"] = {
+            "base": base.parallel_evidence,
+            "trained": trained.parallel_evidence,
+            "matched_signature": None
+            if base.parallel_extension is None
+            else parallel_signature(base.parallel_extension),
+            "scope": "Source/profile/real prelaunch observations; baseline loading remains source-linked inference",
+            "actual_official_service_configs": {
+                "base": base.parallel_test_evidence,
+                "trained": trained.parallel_test_evidence,
             },
         }
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:

@@ -132,6 +132,50 @@ Original quiescent and fresh legacy comparisons remain supported when both
 sides use that same original profile. This code launches neither reference nor
 final evaluation.
 
+## Spawn boundary and parallel environment/client profile
+
+The spawn-safe continuation adds published C/Python boundary sources and the
+generated helper identity to its composed lifecycle. The initialized receipt
+must identify the installed Native policy and counterfactual loop, the public
+`SpawnSafeRunner` constructor, and a loaded helper digest matching the retained
+binary. The base's original zero-epoch entry can use that public runner without
+running the continuation wrapper, which intentionally rejects initial tests.
+Its prospective helper identity is an observation of bytes before launch;
+baseline policy/helper installation remains source-linked inference.
+
+The parallel service and request-ID client are additional behavior outside the
+legacy core fingerprint. The comparer therefore requires their separate real
+observation and immutable Task-profile binding. It verifies the published
+client producer, request client and environment server; regenerates the public
+Native/client wrapper and exact environment-interpreter adapter; checks the
+tool's shared allowed inode; and permits only the documented `agent.codex_bin`
+Task change. Solver instructions remain identical. Actual configuration must
+bind those generated assets, `SpawnSafeRunner` with32 sessions, four environment
+processes/four I/O workers, and the measured1/1/1 microbatch profile.
+
+For the trained stage, `driver_runs/*.parallel_client.json` is a prelaunch
+observer. Its immutable profile must agree with the final initialized config
+and official protocol's Task-file hash. For the deferred base,
+`runtime/parallel_client.expected.json` is produced from actual fresh
+preparation, generated assets, current source/helper bytes, resolved config and
+live health before the original zero-epoch command. Its kind is explicitly
+`prospective_parallel_environment_runtime_identity`; it must never be presented
+as a post-init or served-model receipt. Existing spawn-only profiles retain
+their older prospective source bundle format.
+
+Both observations must bind the request-ID capability, stable service instance,
+source digest and4/4 service profile. Each official case's private budget
+registration must also identify a retained **test-only** service configuration
+with those source/profile values; the train service observation alone cannot
+stand in for the service that actually produced held-out cases. Reports retain
+hash references and selected public metadata, never the private administration
+token. Base and final source/helper/client/interpreter bytes must match even
+though their run paths, service instances and intended policy/library differ.
+
+The deferred launch plan remains gated on the main driver's successful64-update
+completion, its COMPLETE checkpoint and finished sealed274-case final stage.
+This offline comparer does not execute that plan or start a baseline.
+
 ## Backend evidence tiers
 
 A genuine owned vLLM Worker kernel-selection line is direct log evidence. When
@@ -177,4 +221,5 @@ engineering evidence, not actual ALFWorld results:
 
 ```bash
 python examples/skill_self_evolve/tests/test_compare_official_runs.py -q
+python examples/skill_self_evolve/tests/test_compare_parallel_profile.py -q
 ```
