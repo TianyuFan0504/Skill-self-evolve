@@ -103,6 +103,9 @@ def install_codex_runtime(run: Path, benchmark: Path, capacity: int) -> tuple[Pa
         model["display_name"] = "Qwen3.5-4B-nothink"
         model["context_window"] = capacity
         model["supports_parallel_tool_calls"] = True
+        # Codex 0.167 ModelInfo otherwise defaults to accepting text and images.
+        # ALFWorld is a text environment; this is independent of tool flags.
+        model["input_modalities"] = ["text"]
         model["base_instructions"] = instructions.read_text()
     catalog_path = run / "model_catalog.json"
     write_json(catalog_path, catalog)

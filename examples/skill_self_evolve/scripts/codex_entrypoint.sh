@@ -11,4 +11,24 @@ if [[ ! -x "$native_bin" || ! -r "$instructions_file" ]]; then
 fi
 
 override=$(/usr/bin/python3 -c 'import json,sys; print("model_instructions_file=" + json.dumps(sys.argv[1]))' "$instructions_file")
-exec "$native_bin" -c "$override" -c allow_login_shell=false --enable skip_host_skill_discovery -c skills.include_instructions=false "$@"
+# ALFWorld exposes a text MDP through alfworld-step. Keep native terminal/file
+# operations, but do not advertise unrelated agents, media, or external tools.
+# This tool boundary does not replace per-attempt Unix-account isolation.
+disabled_features=(
+  multi_agent multi_agent_v2 apps plugins hooks
+  browser_use browser_use_external computer_use image_generation view_image
+  skill_search workspace_dependencies sleep_tool goals
+)
+native_policy=(
+  -c "$override"
+  -c allow_login_shell=false
+  --enable skip_host_skill_discovery
+  --enable shell_tool --enable unified_exec --enable unified_exec_tty
+  -c skills.include_instructions=false
+  -c 'web_search="disabled"'
+  -c tools.experimental_request_user_input.enabled=false
+)
+for feature in "${disabled_features[@]}"; do
+  native_policy+=(--disable "$feature")
+done
+exec "$native_bin" "${native_policy[@]}" "$@"
