@@ -23,6 +23,7 @@ import re
 import signal
 import stat
 import sys
+import tarfile
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +37,7 @@ POOL_SIZE = 128
 ACCOUNT_PREFIX = "alfworld_ep2_"
 ACCOUNT_COMMENT = "ALFWorld private attempt account v1"
 INCIDENT_DIRECTORY = "diagnostics/account_isolation_incidents"
+DATA_INCIDENT_DIRECTORY = "diagnostics/local_archive_data_incidents"
 WORK_ROOT = Path("/tmp/alfworld-skill-episodes")
 _NAME = re.compile(r"[0-9a-f]{32}\Z")
 _GROUP = re.compile(r"[0-9a-f]{64}\Z")
@@ -43,6 +45,33 @@ _GROUP = re.compile(r"[0-9a-f]{64}\Z")
 
 class AccountIsolationError(RuntimeError):
     """A host isolation/lifecycle failure; never an agent outcome reward."""
+
+
+class LocalArchiveDataError(RuntimeError):
+    """A drained attempt's raw bundle is unavailable; never an RL outcome."""
+
+    def __init__(self, reason, disposition=None):
+        super().__init__(str(reason))
+        self.disposition = disposition or {}
+
+
+def is_local_archive_failure(error):
+    """Recognize storage/readback failures, not owner/path/source races."""
+    native = Path(__file__).with_name("native_files.py").resolve()
+    frames = []
+    current = error.__traceback__
+    while current is not None:
+        code = current.tb_frame.f_code
+        if Path(code.co_filename).resolve() == native:
+            frames.append(code.co_name)
+        current = current.tb_next
+    if "verify_native_archive" in frames:
+        return isinstance(error, ValueError | OSError | EOFError | tarfile.TarError)
+    return (
+        "archive_native_files" in frames
+        and isinstance(error, OSError)
+        and error.errno in (errno.ENOSPC, errno.EDQUOT, errno.EIO, errno.EROFS, errno.EFBIG)
+    )
 
 
 def _canonical(value):
@@ -105,6 +134,30 @@ def assert_no_isolation_incidents(run_root):
     path = Path(run_root) / INCIDENT_DIRECTORY
     if path.exists() or path.is_symlink():
         raise AccountIsolationError("An unresolved host isolation incident forbids an optimizer update: " + str(path))
+
+
+def local_archive_failed_groups(run_root, *, pool_root=POOL_ROOT):
+    """Read settled local archive failures before sampling any sibling rows."""
+    failed = set()
+    run_root = str(Path(run_root).resolve())
+    for path in (Path(pool_root) / "quarantined-uids").glob("*/local-archive.json"):
+        value = json.loads(path.read_text())
+        if value.get("account", {}).get("owner", {}).get("run_root") != run_root:
+            continue
+        identity = value.get("identity", {})
+        if identity.get("dataset_phase") != "train" or identity.get("role") not in (None, "solver"):
+            continue
+        if (
+            value.get("kind") != "local_archive_data_invalid"
+            or value.get("training_data_valid") is not False
+            or value.get("uid_drained") is not True
+            or value.get("backend_drained") is not True
+            or not isinstance(identity.get("rollout_uid"), str)
+            or not identity["rollout_uid"]
+        ):
+            raise AccountIsolationError("The local archive failure registry has an invalid prompt identity")
+        failed.add(identity["rollout_uid"])
+    return failed
 
 
 def expected_roster(*, base=UID_BASE, size=POOL_SIZE):
@@ -255,6 +308,16 @@ class AccountPool:
         if any(value.get(key) != ref.get(key) for key in ("lease_id", "token", "uid", "gid", "name", "owner")):
             raise AccountIsolationError("Lease fencing or owner identity differs")
         if self._blocked(value["uid"]) and not allow_released:
+            marker = self.root / "quarantined-uids" / str(value["uid"]) / "local-archive.json"
+            if marker.is_file():
+                disposition = json.loads(marker.read_text())
+                if (
+                    disposition.get("kind") == "local_archive_data_invalid"
+                    and disposition.get("account", {}).get("lease_id") == ref["lease_id"]
+                    and disposition.get("uid_drained") is True
+                    and disposition.get("backend_drained") is True
+                ):
+                    raise LocalArchiveDataError(disposition["reason"], disposition)
             raise AccountIsolationError("The UID has a sticky quarantine; no active operation is allowed")
         if value["status"] != "leased" and not (allow_released and value["status"] == "released"):
             raise AccountIsolationError("Lease is not active; explicit host reconciliation is required")
@@ -459,6 +522,68 @@ class AccountPool:
             lease.update(status="quarantined", quarantine_reason=str(reason), quarantined_at=time.time())
             self._save(lease)
 
+    def quarantine_local_archive(self, ref, reason, *, attempt_id, backend_receipt, backend_binding, metadata=None):
+        """Hold only this drained UID; incomplete raw bundles are not RL labels.
+
+        The caller classifies a known archive storage/readback error. This
+        method rechecks the exclusive owner and actual process/backend drain.
+        Existing global incidents and older quarantine markers are never reset.
+        """
+        keys = ("binding_id", "binding_sha256", "attempt_id", "gateway_session_id", "environment_session_id")
+        bound = {
+            key: backend_binding.get(key) if isinstance(backend_binding, dict) else getattr(backend_binding, key, None)
+            for key in keys
+        }
+        if (
+            not isinstance(backend_receipt, dict)
+            or backend_receipt.get("backend_stop_confirmed") is not True
+            or backend_receipt.get("active_requests") != 0
+            or backend_receipt.get("backend_error_types", [])
+            or bound["attempt_id"] != attempt_id
+            or any(not isinstance(bound[k], str) or not bound[k] or backend_receipt.get(k) != bound[k] for k in keys)
+        ):
+            raise AccountIsolationError("A local archive disposition requires this exact confirmed backend drain")
+        with self._lock():
+            lease = self._lease(ref)
+            if lease["active_attempt"] != attempt_id or self.processes(ref["uid"]):
+                raise AccountIsolationError("A local archive disposition requires the exclusive drained UID")
+            attempt = lease["attempts"][attempt_id]
+            disposition = {
+                "schema_version": 1,
+                "kind": "local_archive_data_invalid",
+                "policy_version": POLICY_VERSION,
+                "account": self.public(ref),
+                "attempt_id": attempt_id,
+                "output_dir": attempt["output"],
+                "reason": str(reason),
+                "time": time.time(),
+                "backend_binding": bound,
+                "backend_receipt_sha256": hashlib.sha256(_canonical(backend_receipt)).hexdigest(),
+                "uid_drained": True,
+                "backend_drained": True,
+                "training_data_valid": False,
+                "resources_retained_for_reconciliation": list(attempt["resources"]),
+                "identity": {
+                    k: metadata[k]
+                    for k in ("rollout_uid", "session_index", "game_id", "dataset_phase", "role", "global_step")
+                    if metadata is not None and k in metadata
+                },
+            }
+            marker = _private(self.root / "quarantined-uids" / str(ref["uid"])) / "local-archive.json"
+            _atomic(marker, disposition)  # Local persistent control state, even if NAS archival is unavailable.
+            lease.update(status="quarantined", quarantine_kind="local_archive", quarantine_reason=str(reason))
+            self._save(lease)
+        try:
+            report = _private(Path(ref["owner"]["run_root"]) / DATA_INCIDENT_DIRECTORY) / (attempt_id + ".json")
+            _atomic(report, disposition)
+            disposition["report_path"] = str(report)
+        except OSError as error:
+            # Whole-group failure accounting uses the Task error, not this
+            # optional NAS copy. The durable per-UID marker still forbids reuse.
+            disposition["report_copy_error"] = type(error).__name__
+        disposition["uid_marker_path"] = str(marker)
+        return disposition
+
     def close_empty_attempt(self, ref, attempt_id, *, backend_drained):
         """No program/resource was started; still persist an explicit closure."""
         with self._lock():
@@ -538,6 +663,8 @@ class AccountPool:
                 "backend_drained": True,
                 "uid_drained": True,
             }
+        except LocalArchiveDataError:
+            raise
         except Exception as error:
             with contextlib.suppress(Exception):
                 self.quarantine(ref, error, attempt_id=attempt_id)
@@ -575,10 +702,14 @@ class AccountPool:
                     state["slots"][str(ref["uid"])] = None
                     state["owners"].pop(lease["owner_key"], None)
                     _atomic(self.root / "state.json", state)
+                except LocalArchiveDataError:
+                    raise
                 except Exception:
                     _private(Path(ref["owner"]["run_root"]) / INCIDENT_DIRECTORY)
                     _private(self.root / "quarantined-uids" / str(ref["uid"]))
                     raise
+        except LocalArchiveDataError:
+            raise
         except Exception as error:
             with contextlib.suppress(Exception):
                 self.quarantine(ref, error)

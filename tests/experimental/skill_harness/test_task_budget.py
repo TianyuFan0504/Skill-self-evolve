@@ -52,6 +52,7 @@ scope = {
     "os": os,
     "asyncio": asyncio,
     "AccountIsolationError": accounts.AccountIsolationError,
+    "LocalArchiveDataError": accounts.LocalArchiveDataError,
     "record_isolation_incident": accounts.record_isolation_incident,
     "_validated_state": guard._validated_state,
 }

@@ -26,7 +26,9 @@ from .accounts import (
     POLICY_VERSION,
     AccountIsolationError,
     AccountPool,
+    LocalArchiveDataError,
     decode_launcher_proof,
+    is_local_archive_failure,
     launch_arguments,
     record_isolation_incident,
 )
@@ -741,6 +743,10 @@ class AlfworldSkillTrainingTask(Task):
             return await self._run_episode()
         except asyncio.CancelledError:
             raise
+        except LocalArchiveDataError:
+            # The failed prompt group must be rejected/refilled. Its owned UID
+            # remains locally quarantined, without poisoning unrelated groups.
+            raise
         except BudgetOutcomeUnknown as budget_error:
             if (
                 self.config.metadata.get("role") == "counterfactual_probe"
@@ -830,8 +836,40 @@ class AlfworldSkillTrainingTask(Task):
             account = account_pool = account_lease = None
             account_summary = None
             isolation_error = None
+            local_archive_error = None
             agent_started = False
             uid_drained = False
+
+            def handle_archive_failure(exc):
+                nonlocal isolation_error, local_archive_error
+                if (
+                    isolation_error is None
+                    and uid_drained
+                    and raw_drained
+                    and account_pool is not None
+                    and account_lease is not None
+                    and is_local_archive_failure(exc)
+                ):
+                    try:
+                        disposition = account_pool.quarantine_local_archive(
+                            account_lease,
+                            exc,
+                            attempt_id=attempt_id,
+                            backend_receipt=backend_receipt,
+                            backend_binding=backend_binding,
+                            metadata=identity,
+                        )
+                        local_archive_error = LocalArchiveDataError(exc, disposition)
+                        return
+                    except LocalArchiveDataError as prior:
+                        local_archive_error = prior
+                        return
+                    except Exception as quarantine_error:
+                        isolation_error = AccountIsolationError(
+                            "Local archive quarantine could not be established: " + str(quarantine_error)
+                        )
+                        return
+                isolation_error = AccountIsolationError("Native resource archive failed: " + str(exc))
 
             def request_host_stop(stop_kind, reason):
                 nonlocal isolation_error
@@ -1073,11 +1111,10 @@ class AlfworldSkillTrainingTask(Task):
                                 )
                                 native_files = workspace_provenance["native_files"]
                         except Exception as exc:
-                            error = (error + "; " if error else "") + f"Paired workspace cleanup failed: {exc}"
                             workspace_provenance = paired_workspace.provenance
-                            isolation_error = AccountIsolationError(
-                                "Paired native resource archive failed: " + str(exc)
-                            )
+                            handle_archive_failure(exc)
+                            if local_archive_error is None:
+                                error = (error + "; " if error else "") + f"Paired workspace cleanup failed: {exc}"
                     elif paired_workspace is None and workdir is not None:
                         if workdir.is_dir() and not workdir.is_symlink():
                             normal_workspace = workdir
@@ -1098,12 +1135,21 @@ class AlfworldSkillTrainingTask(Task):
                     except Exception as exc:
                         # Preserve the primary execution/ENOSPC error and every
                         # unarchived source; cleanup never invents a task reward.
-                        error = (error + "; " if error else "") + f"Native file archival failed: {exc}"
-                        isolation_error = AccountIsolationError("Native file archival failed: " + str(exc))
+                        handle_archive_failure(exc)
+                        if local_archive_error is None:
+                            error = (error + "; " if error else "") + f"Native file archival failed: {exc}"
                     if account_pool is not None and account_lease is not None:
                         try:
                             if isolation_error is not None:
                                 account_pool.quarantine(account_lease, isolation_error, attempt_id=attempt_id)
+                            elif local_archive_error is not None:
+                                account_summary = {
+                                    "policy_version": POLICY_VERSION,
+                                    **account_pool.public(account_lease),
+                                    "status": "local_archive_data_quarantined",
+                                    "backend_drained": True,
+                                    "uid_drained": True,
+                                }
                             else:
                                 if native_files and native_files.get("status") == "archived_and_removed":
                                     account_summary = account_pool.close_attempt(
@@ -1238,13 +1284,18 @@ class AlfworldSkillTrainingTask(Task):
                 "budget_reward_eligible": False,
                 "account_isolation": account_summary,
                 "account_isolation_error": str(isolation_error) if isolation_error is not None else None,
+                **(
+                    {"training_data_valid": False, "local_archive_data_incident": local_archive_error.disposition}
+                    if local_archive_error is not None
+                    else {}
+                ),
                 **({"skill_context": skill_context} if skill_context is not None else {}),
                 **({"paired_workdir": workspace_provenance} if workspace_provenance is not None else {}),
                 **({"native_files": native_files} if native_files is not None else {}),
             }
             budget_proof = None
             budget_unknown = None
-            if result["budget_exhausted"] and isolation_error is None:
+            if result["budget_exhausted"] and isolation_error is None and local_archive_error is None:
                 from .budget import BudgetOutcomeUnknown, verify_budget_failure
 
                 try:
@@ -1257,6 +1308,8 @@ class AlfworldSkillTrainingTask(Task):
             print("ALFWORLD_EPISODE_RESULT " + json.dumps(result), flush=True)
             if isolation_error is not None:
                 raise isolation_error
+            if local_archive_error is not None:
+                raise local_archive_error  # No TaskResult/reward is admitted from unavailable raw data.
             if budget_unknown is not None:
                 safely_closed_cf = bool(
                     metadata.get("role") == "counterfactual_probe"

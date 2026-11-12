@@ -90,11 +90,27 @@ class NativeFilesTest(unittest.TestCase):
                 self.archive()
         self.assertTrue(self.home.exists())
         self.assertTrue(self.catalog.exists())
-        with patch.object(FILES.os, "fsync", side_effect=OSError("fsync failed")):
+        for path in self.output.glob("native-*"):
+            path.unlink()
+        with patch.object(FILES.os, "fsync", side_effect=OSError(errno.EIO, "fsync failed")) as sync:
             with self.assertRaises(OSError):
                 self.archive()
+            self.assertTrue(sync.called)
         self.assertTrue(self.home.exists())
         self.assertTrue(self.catalog.exists())
+
+    def test_local_archive_classifier_does_not_downgrade_identity_or_generic_errors(self):
+        with patch.object(FILES.tarfile, "open", side_effect=OSError(errno.ENOSPC, "archive disk full")):
+            try:
+                self.archive()
+            except OSError as error:
+                self.assertTrue(ACCOUNTS.is_local_archive_failure(error))
+        self.assertFalse(ACCOUNTS.is_local_archive_failure(ValueError("unknown host failure")))
+        with patch.object(FILES.gzip, "open", side_effect=gzip.BadGzipFile("corrupt archive")):
+            try:
+                FILES.verify_native_archive(self.output / "native-files.tar.gz", {}, b"{}")
+            except OSError as readback:
+                self.assertTrue(ACCOUNTS.is_local_archive_failure(readback))
 
     def test_catalog_only_cleanup_keeps_existing_paired_home_and_workspace_archives_untouched(self):
         before = self.home.joinpath("state.sqlite").read_bytes()
@@ -326,7 +342,15 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
     async def test_proven_mdp_stop_closes_task_without_rewriting_raw_native_finish(self):
         await self._task_case(completed_native_stop=True)
 
-    async def _task_case(self, *, drain_failure=False, host_failure=None, completed_native_stop=False):
+    async def test_safely_drained_archive_storage_failure_is_local_data_not_global_isolation(self):
+        await self._task_case(completed_native_stop=True, archive_failure="storage")
+
+    async def test_unknown_archive_failure_stays_fatal(self):
+        await self._task_case(completed_native_stop=True, archive_failure="unknown")
+
+    async def _task_case(
+        self, *, drain_failure=False, host_failure=None, completed_native_stop=False, archive_failure=None
+    ):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output, work = root / "attempt", root / "work"
@@ -420,6 +444,9 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 register_resource=Mock(),
                 quarantine=Mock(),
+                quarantine_local_archive=Mock(
+                    return_value={"kind": "local_archive_data_invalid", "training_data_valid": False}
+                ),
                 close_attempt=Mock(
                     return_value={"status": "attempt_closed", "uid_drained": True, "backend_drained": True}
                 ),
@@ -431,6 +458,8 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                 "Task": object,
                 "AccountPool": lambda: pool,
                 "AccountIsolationError": ACCOUNTS.AccountIsolationError,
+                "LocalArchiveDataError": ACCOUNTS.LocalArchiveDataError,
+                "is_local_archive_failure": ACCOUNTS.is_local_archive_failure,
                 "POLICY_VERSION": ACCOUNTS.POLICY_VERSION,
                 "record_isolation_incident": incidents,
                 "asyncio": asyncio,
@@ -531,6 +560,11 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
             original_archive = FILES.archive_native_files
 
             def fixture_archive(*args, **kwargs):
+                if archive_failure == "storage":
+                    with patch.object(FILES.tarfile, "open", side_effect=OSError(errno.ENOSPC, "archive full")):
+                        return original_archive(*args, workspace_root=work, **kwargs)
+                if archive_failure == "unknown":
+                    raise ValueError("unknown archive integrity/identity category")
                 return original_archive(*args, workspace_root=work, **kwargs)
 
             try:
@@ -556,6 +590,30 @@ class MissingWorkspaceTaskTest(unittest.IsolatedAsyncioTestCase):
                             archived.assert_not_called()
                             incidents.assert_called_once()
                             self.assertEqual(Path(incidents.call_args.args[0]), root.resolve())
+                            return
+                        if archive_failure is not None:
+                            expected_error = (
+                                ACCOUNTS.LocalArchiveDataError
+                                if archive_failure == "storage"
+                                else ACCOUNTS.AccountIsolationError
+                            )
+                            with self.assertRaises(expected_error):
+                                await task.run()
+                            saved = json.loads((output / "result.json").read_text())
+                            self.assertEqual(saved["reward"], 1.0)  # Retained raw outcome; no TaskResult was returned.
+                            if archive_failure == "storage":
+                                self.assertFalse(saved["training_data_valid"])
+                                self.assertIsNone(saved["account_isolation_error"])
+                                self.assertNotIn("archive full", saved["agent_error"])
+                                self.assertTrue(native_home.exists())
+                                self.assertTrue(Path(saved["workdir"]).exists())
+                                pool.quarantine_local_archive.assert_called_once()
+                                pool.quarantine.assert_not_called()
+                                incidents.assert_not_called()
+                            else:
+                                pool.quarantine.assert_called_once()
+                                incidents.assert_called()
+                            pool.close_attempt.assert_not_called()
                             return
                         if completed_native_stop:
                             result = await task.run()

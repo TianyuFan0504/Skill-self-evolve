@@ -361,6 +361,164 @@ class AccountLeaseTests(unittest.TestCase):
         with self.assertRaises(self.module.AccountIsolationError):
             self.module.assert_no_isolation_incidents(self.run)
 
+    def test_local_archive_quarantine_holds_only_owned_uid_and_preserves_sources(self):
+        ref = self.lease(pair=True)
+        attempt, output, workspace = self.begin(ref, "with_skill")
+        bound = {
+            "binding_id": "a" * 64,
+            "binding_sha256": "b" * 64,
+            "attempt_id": attempt,
+            "gateway_session_id": "cpu-owned-session",
+            "environment_session_id": "c" * 32,
+        }
+        receipt = {
+            **bound,
+            "schema_version": 1,
+            "backend_stop_confirmed": True,
+            "active_requests": 0,
+            "backend_error_types": [],
+        }
+        disposition = self.pool.quarantine_local_archive(
+            ref,
+            "archive disk full",
+            attempt_id=attempt,
+            backend_receipt=receipt,
+            backend_binding=bound,
+            metadata={"rollout_uid": "prompt-a", "session_index": 1, "dataset_phase": "train"},
+        )
+        self.assertFalse(disposition["training_data_valid"])
+        self.assertEqual(
+            disposition["identity"], {"rollout_uid": "prompt-a", "session_index": 1, "dataset_phase": "train"}
+        )
+        self.assertEqual(self.state(ref)["quarantine_kind"], "local_archive")
+        self.assertTrue(workspace.exists())
+        self.assertTrue(Path(disposition["uid_marker_path"]).is_file())
+        self.assertTrue(Path(disposition["report_path"]).is_file())
+        self.module.assert_no_isolation_incidents(self.run)
+        self.assertEqual(self.module.local_archive_failed_groups(self.run, pool_root=self.pool.root), {"prompt-a"})
+        self.assertEqual(self.pool.available(), 1)
+        with self.assertRaises(self.module.LocalArchiveDataError):
+            self.pool.finish(ref, abandoned=True)
+        self.module.assert_no_isolation_incidents(self.run)
+        self.assertNotEqual(self.lease()["uid"], ref["uid"])
+        self.signals.assert_not_called()
+
+    def test_local_archive_disposition_refuses_live_or_unconfirmed_or_other_backend(self):
+        ref = self.lease()
+        attempt, _, _ = self.begin(ref)
+        bound = {
+            "binding_id": "a" * 64,
+            "binding_sha256": "b" * 64,
+            "attempt_id": attempt,
+            "gateway_session_id": "cpu-owned-session",
+            "environment_session_id": "c" * 32,
+        }
+        good = {
+            **bound,
+            "schema_version": 1,
+            "backend_stop_confirmed": True,
+            "active_requests": 0,
+            "backend_error_types": [],
+        }
+        for changes in (
+            {"backend_stop_confirmed": False},
+            {"active_requests": 1},
+            {"binding_sha256": "d" * 64},
+            {"backend_error_types": ["EngineDeadError"]},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(self.module.AccountIsolationError):
+                self.pool.quarantine_local_archive(
+                    ref,
+                    "unobserved",
+                    attempt_id=attempt,
+                    backend_receipt={**good, **changes},
+                    backend_binding=bound,
+                )
+        self.live[ref["uid"]] = [123456]
+        with self.assertRaises(self.module.AccountIsolationError):
+            self.pool.quarantine_local_archive(
+                ref,
+                "live",
+                attempt_id=attempt,
+                backend_receipt=good,
+                backend_binding=bound,
+            )
+        self.assertFalse(self.pool._blocked(ref["uid"]))
+        self.assertEqual(self.state(ref)["status"], "leased")
+
+    def test_local_archive_nas_report_failure_keeps_durable_local_uid_block(self):
+        ref = self.lease()
+        attempt, _, _ = self.begin(ref)
+        bound = {
+            "binding_id": "a" * 64,
+            "binding_sha256": "b" * 64,
+            "attempt_id": attempt,
+            "gateway_session_id": "cpu-owned-session",
+            "environment_session_id": "c" * 32,
+        }
+        receipt = {**bound, "backend_stop_confirmed": True, "active_requests": 0, "backend_error_types": []}
+        original = self.module._atomic
+
+        def unavailable(path, value):
+            if Path(path).resolve().is_relative_to((self.run / self.module.DATA_INCIDENT_DIRECTORY).resolve()):
+                raise OSError("NAS report copy unavailable")
+            return original(path, value)
+
+        with mock.patch.object(self.module, "_atomic", side_effect=unavailable):
+            disposition = self.pool.quarantine_local_archive(
+                ref,
+                "archive unavailable",
+                attempt_id=attempt,
+                backend_receipt=receipt,
+                backend_binding=bound,
+            )
+        self.assertEqual(disposition["report_copy_error"], "OSError")
+        self.assertTrue(Path(disposition["uid_marker_path"]).exists())
+        self.module.assert_no_isolation_incidents(self.run)
+        with self.assertRaises(self.module.LocalArchiveDataError):
+            self.pool.finish(ref)
+
+    def test_local_failure_lookup_ignores_counterfactuals_and_other_runs(self):
+        path = self.pool.root / "quarantined-uids/45000/local-archive.json"
+        path.parent.mkdir(parents=True)
+        value = {
+            "kind": "local_archive_data_invalid",
+            "training_data_valid": False,
+            "uid_drained": True,
+            "backend_drained": True,
+            "account": {"owner": {"run_root": str(self.run.resolve())}},
+            "identity": {"rollout_uid": "original-b", "dataset_phase": "train", "role": "counterfactual_probe"},
+        }
+        path.write_text(json.dumps(value))
+        self.assertEqual(self.module.local_archive_failed_groups(self.run, pool_root=self.pool.root), set())
+        value["identity"]["role"] = "solver"
+        value["account"]["owner"]["run_root"] = str(self.root / "another-run")
+        path.write_text(json.dumps(value))
+        self.assertEqual(self.module.local_archive_failed_groups(self.run, pool_root=self.pool.root), set())
+        value["account"]["owner"]["run_root"] = str(self.run.resolve())
+        path.write_text(json.dumps(value))
+        self.assertEqual(self.module.local_archive_failed_groups(self.run, pool_root=self.pool.root), {"original-b"})
+
+    def test_local_archive_path_never_resets_an_existing_isolation_quarantine(self):
+        ref = self.lease()
+        attempt, _, _ = self.begin(ref)
+        self.pool.quarantine(ref, "existing unsafe identity")
+        bound = {
+            "binding_id": "a" * 64,
+            "binding_sha256": "b" * 64,
+            "attempt_id": attempt,
+            "gateway_session_id": "cpu-owned-session",
+            "environment_session_id": "c" * 32,
+        }
+        receipt = {**bound, "backend_stop_confirmed": True, "active_requests": 0, "backend_error_types": []}
+        with self.assertRaises(self.module.AccountIsolationError):
+            self.pool.quarantine_local_archive(
+                ref, "later data error", attempt_id=attempt, backend_receipt=receipt, backend_binding=bound
+            )
+        self.assertFalse((self.pool.root / "quarantined-uids" / str(ref["uid"]) / "local-archive.json").exists())
+        with self.assertRaises(self.module.AccountIsolationError):
+            self.module.assert_no_isolation_incidents(self.run)
+
 
 if __name__ == "__main__":
     unittest.main()
