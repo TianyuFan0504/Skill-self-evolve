@@ -4,7 +4,8 @@
 # you may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
 """Read-only stdlib evidence index; this is not an experiment acceptance oracle.
 
-No model/package imports, network, subprocesses, pickle loading, or evaluations.
+No model/runtime package imports, network, subprocesses, pickle loading, or evaluations.
+Budget cases load only the shared standard-library verifier by its source path.
 Reports distinguish declarations from linked Task/native/token evidence. Outputs
 are new files only; raw metrics and artifacts are never repaired or overwritten.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 import math
 import re
@@ -103,6 +105,12 @@ def section(status, reasons=(), paths=(), **facts):
 def _path(root, value):
     path = Path(value)
     return path if path.is_absolute() else root / path
+
+
+def _paired_group_id(root, window_id, probe_id):
+    """Match probes.probe_group_id(request, run_root), without runtime imports."""
+    physical = hashlib.sha256(json.dumps([window_id, probe_id], separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([str(Path(root).resolve()), physical], separators=(",", ":")).encode()).hexdigest()
 
 
 def _tokens(capture):
@@ -237,6 +245,36 @@ def _expected_terminal_end(result, engine, transitions):
     )
 
 
+def _verified_budget_end(reader, result, engine, directory):
+    """Use the production proof rules; flags or old timeout records cannot pass."""
+    source = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/budget.py"
+    reader.bytes(source)
+    spec = importlib.util.spec_from_file_location("_private_budget_evidence_verifier", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    raw_read, raw_hash = module.read_private_json, module.sha256_file
+
+    def tracked_read(path):
+        reader.bytes(path)
+        return raw_read(path)
+
+    def tracked_hash(path):
+        info = Path(path).stat()
+        reader.observed[str(Path(path))] = (info.st_size, info.st_mtime_ns)
+        return raw_hash(path)
+
+    # Track the shared verifier's complete private proof dependencies without
+    # changing its parsing, envelope hashing, or admission rules.
+    module.read_private_json, module.sha256_file = tracked_read, tracked_hash
+    try:
+        proof = module.verify_budget_failure(task=result, engine=engine, output_dir=directory)
+        if result.get("budget_reward_eligible") is not True or result.get("budget_failure_proof") != proof:
+            raise EvidenceError("Stored budget admission does not equal the independently verified private proof")
+        return proof
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        raise EvidenceError(f"{directory}: budget outcome is unobserved or inconsistent ({error})") from error
+
+
 def episode(reader, directory):
     directory = Path(directory).resolve()
     files = {
@@ -269,14 +307,21 @@ def episode(reader, directory):
             raise EvidenceError(f"{directory}: environment transitions do not cover engine steps")
         outcome_valid = True
         expected_stop = _expected_terminal_end(result, engine, transitions)
-        if not expected_stop and (
+        budget_proof = None
+        if any(
+            result.get(name) is True
+            for name in ("budget_exhausted", "expected_budget_failure", "budget_reward_eligible")
+        ):
+            budget_proof = _verified_budget_end(reader, result, engine, directory)
+        controlled_end = expected_stop or budget_proof is not None
+        if not controlled_end and (
             result.get("agent_ok") is not True or result.get("agent_error") or result.get("agent_exit_code") != 0
         ):
             raise EvidenceError(f"{directory}: environment outcome exists but native completion is not clean")
         native_complete = any(event.get("type") == "turn.completed" for event in events)
-        if not expected_stop and not native_complete:
+        if not controlled_end and not native_complete:
             raise EvidenceError(f"{directory}: no raw native turn.completed event")
-        if not expected_stop and any(event.get("type") in ("turn.failed", "error") for event in events):
+        if not controlled_end and any(event.get("type") in ("turn.failed", "error") for event in events):
             raise EvidenceError(f"{directory}: raw native execution contains an error")
         return {
             "valid": True,
@@ -285,6 +330,8 @@ def episode(reader, directory):
             "result": result,
             "engine_win": won,
             "expected_terminal_stop_validated": expected_stop,
+            "expected_budget_failure_validated": budget_proof is not None,
+            **({"budget_failure_proof": budget_proof} if budget_proof is not None else {}),
             "native_bookkeeping_error": result.get("agent_error"),
             "native_completion_event_observed": native_complete,
             "evidence_paths": list(map(str, files.values())),
@@ -754,7 +801,7 @@ class RunAudit:
                 issues, outcomes, attempts = [], {}, {}
                 ambiguous = set()
                 observed_engine = {}
-                native_errors, expected_stops = {}, set()
+                native_errors, expected_stops, expected_budget_stops = {}, set(), set()
                 sidecar_path = None
                 try:
                     joined, files, audit_issues, sidecar_path = self._case_audit_rows(
@@ -801,6 +848,10 @@ class RunAudit:
                             native_errors[item["path"]] = item["reason"]
                         elif item.get("expected_terminal_stop_validated"):
                             expected_stops.add(item["path"])
+                            if item.get("native_bookkeeping_error"):
+                                native_errors[item["path"]] = item["native_bookkeeping_error"]
+                        elif item.get("expected_budget_failure_validated"):
+                            expected_budget_stops.add(item["path"])
                             if item.get("native_bookkeeping_error"):
                                 native_errors[item["path"]] = item["native_bookkeeping_error"]
                         game = data.get("game_id")
@@ -884,6 +935,7 @@ class RunAudit:
                     observed_raw_engine_attempts=len(observed_engine),
                     native_errors=native_errors,
                     validated_expected_terminal_stops=len(expected_stops),
+                    validated_expected_budget_failures=len(expected_budget_stops),
                     reward_mean=sum(row["won"] for row in outcomes.values()) / len(outcomes) if outcomes else None,
                     accuracy=sum(row["won"] for row in outcomes.values()) / len(outcomes) if outcomes else None,
                 )
@@ -1048,7 +1100,7 @@ class RunAudit:
                     if probe_dir is None or self.reader.json(probe_dir / "paired-event.json") != event:
                         raise EvidenceError("Ledger credit has no identical durable native paired-probe event")
                     positive, control = event["with_skill"], event["without_skill"]
-                    group = digest([event["window_id"], event["probe_id"]])
+                    group = _paired_group_id(self.root, event["window_id"], event["probe_id"])
                     expected_cwd = "/tmp/alfworld-skill-episodes/credit_" + group
                     if (
                         event["skill_ref"] != ref

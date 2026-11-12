@@ -434,7 +434,10 @@ class Fixture:
             "model_path": str(self.root / "model"),
             "lifecycle_id": "one",
         }
-        group = sha(["window_1", "probe_1"])
+        physical = hashlib.sha256(json.dumps(["window_1", "probe_1"], separators=(",", ":")).encode()).hexdigest()
+        group = hashlib.sha256(
+            json.dumps([str(self.root.resolve()), physical], separators=(",", ":")).encode()
+        ).hexdigest()
         for loaded in (True, False):
             name = "with_skill" if loaded else "without_skill"
             episode_dir, _ = self.episode(
@@ -543,6 +546,24 @@ class RunAuditTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+
+    def budget_episode(self):
+        """Use the existing full shared-verifier fixture, not a mocked proof."""
+        path = SCRIPT.parents[3] / "tests/experimental/skill_harness/test_budget.py"
+        spec = importlib.util.spec_from_file_location("_run_audit_budget_fixture", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        case = module.BudgetProofTest()
+        self.addCleanup(case.doCleanups)
+        value = case.fixture()
+        value.task.update(budget_reward_eligible=True, budget_failure_proof=case.verify(value))
+        write(value.output / "attempt.json", value.task)
+        write(value.output / "result.json", value.task)
+        write(value.output / "engine-result.json", value.engine)
+        write(value.output / "initial-state.json", {"observation": "Synthetic initial world", "steps": 0})
+        rows(value.output / "environment-trace.jsonl", [{"step": 1, "action": "look", "after": {"won": False}}])
+        (value.output / "codex-stderr.log").write_text("Actual timeout diagnostic fixture; not a real Native run\n")
+        return value
 
     def test_missing_or_manifest_only_run_is_explicitly_incomplete(self):
         empty = audit.audit_run(self.root)
@@ -909,6 +930,75 @@ class RunAuditTest(unittest.TestCase):
             failed = audit.episode(audit.Reader(), directory)
             self.assertFalse(failed["valid"])
             self.assertTrue(failed["engine_win"])
+
+    def test_budget_failure_requires_shared_private_proof_and_preserves_raw_timeout(self):
+        value = self.budget_episode()
+        before = {str(p): p.read_bytes() for p in value.root.rglob("*") if p.is_file()}
+        reader = audit.Reader()
+        result = audit.episode(reader, value.output)
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["expected_budget_failure_validated"])
+        self.assertFalse(result["expected_terminal_stop_validated"])
+        self.assertFalse(result["native_completion_event_observed"])
+        self.assertFalse(result["result"]["native_finished"])
+        self.assertEqual(result["result"]["agent_error"], "agent process timed out")
+        self.assertEqual(result["budget_failure_proof"], value.task["budget_failure_proof"])
+        self.assertEqual(before, {str(p): p.read_bytes() for p in value.root.rglob("*") if p.is_file()})
+        # The shared verifier's private dependencies participate in the index's
+        # existing changed-during-read check, including ordered world evidence.
+        path = value.output / "budget-ordered-state.json"
+        path.write_text(path.read_text() + " ")
+        self.assertIn(str(path), reader.changed())
+
+    def test_budget_flags_forged_stored_proof_and_unknown_backend_never_pass(self):
+        for changed in ("stored_proof", "backend_pending", "ordered_state_missing", "native_error"):
+            value = self.budget_episode()
+            if changed == "stored_proof":
+                value.task["budget_failure_proof"]["score"] = 1.0
+            elif changed == "backend_pending":
+                value.receipt.update(active_requests=1, backend_stop_confirmed=False)
+                write(value.output / "backend-terminal-drain.json", value.receipt)
+            elif changed == "ordered_state_missing":
+                (value.output / "budget-ordered-state.json").unlink()
+            else:
+                rows(value.output / "codex-events.jsonl", [{"type": "error", "message": "Unexplained transport error"}])
+            write(value.output / "result.json", value.task)
+            observed = audit.episode(audit.Reader(), value.output)
+            with self.subTest(changed=changed):
+                self.assertFalse(observed["valid"])
+                self.assertFalse(observed["engine_win"])
+                self.assertIn("budget outcome", observed["reason"])
+        fixture = Fixture(self.root)
+        directory, result = fixture.episode("train_a", "train", "preprotocol", False)
+        result.update(budget_exhausted=True, budget_reward_eligible=True, budget_failure_proof={"score": 0.0})
+        write(directory / "result.json", result)
+        self.assertFalse(audit.episode(audit.Reader(), directory)["valid"])
+
+    def test_delayed_lineage_requires_current_run_scoped_pair_workdir(self):
+        fixture = Fixture(self.root)
+        fixture.lineage()
+        self.assertEqual(audit.audit_run(self.root)["delayed_skill_lineage"]["complete_lineages"], 1)
+        physical = hashlib.sha256(json.dumps(["window_1", "probe_1"], separators=(",", ":")).encode()).hexdigest()
+        wrong_run_group = hashlib.sha256(
+            json.dumps([str((self.root / "other-run").resolve()), physical], separators=(",", ":")).encode()
+        ).hexdigest()
+        for wrong_group in (physical, wrong_run_group):
+            for name in ("with_skill", "without_skill"):
+                path = self.root / "episodes/train_b" / ("attempt_" + name) / "result.json"
+                result = json.loads(path.read_text())
+                workspace = result["paired_workdir"]
+                old = workspace["workdir"]
+                workspace.update(
+                    credit_probe_group=wrong_group, workdir="/tmp/alfworld-skill-episodes/credit_" + wrong_group
+                )
+                for archive in workspace["archives"]:
+                    if archive["source"] == old:
+                        archive["source"] = workspace["workdir"]
+                write(path, result)
+            observed = audit.audit_run(self.root)["delayed_skill_lineage"]
+            with self.subTest(wrong_group=wrong_group):
+                self.assertEqual(observed["complete_lineages"], 0)
+                self.assertIn("controlled empty-cwd", observed["lineages"][0]["reason"])
 
 
 if __name__ == "__main__":
