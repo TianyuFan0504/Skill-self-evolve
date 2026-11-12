@@ -36,9 +36,11 @@ from .credit import CreditLedger, CreditProtocol
 from .curate import (
     SKILL_FIELDS,
     SKILL_SCHEMA,
+    CurateAbstention,
     CurateCollection,
     CurateProtocolError,
     CurateRequest,
+    CurateSourceCensored,
     CuratorBehavior,
     collect_curate_candidate,
     load_completed_solver_episode,
@@ -140,6 +142,10 @@ class JointSettings:
     seed: int = 42
     curator_native_prefix_reserve_tokens: int = 4096
     curator_output_headroom_tokens: int = 2048
+    background_enabled: bool = False
+    curator_concurrency: int = 8
+    credit_concurrency: int = 8
+    max_source_backlog: int = 16384
 
     @classmethod
     def from_config(cls, config):
@@ -161,6 +167,9 @@ class JointSettings:
             "max_pending_windows",
             "max_label_updates",
             "curator_output_headroom_tokens",
+            "curator_concurrency",
+            "credit_concurrency",
+            "max_source_backlog",
         ):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"joint.{key} must be a positive integer")
@@ -175,6 +184,8 @@ class JointSettings:
                 raise ValueError(f"joint.{key} must be a nonnegative integer")
         if self.window_seconds <= 0 or self.lease_seconds <= 0 or self.cost_weight < 0:
             raise ValueError("Credit windows/leases must be positive and costs nonnegative")
+        if type(self.background_enabled) is not bool:
+            raise ValueError("joint.background_enabled must be a boolean")
         if self.solver_gpus + self.curator_gpus + self.credit_gpus > self.available_gpus:
             raise ValueError("Joint policy reservations exceed the actual GPU budget")
         if self.probes_per_step and self.probes_per_step < self.candidates_per_source:
@@ -312,6 +323,15 @@ class SkillJointController:
         )
         self.dp_size, self.pad_token_id = self.actor.world_size, trainer.tokenizer.pad_token_id
         self._busy = False
+        self._writes_allowed = asyncio.Event()
+        self._writes_allowed.set()
+        self._background_tasks = {}
+        self._background_pump = None
+        self._background_stopping = False
+        self._ema_syncing = False
+        self._learner_active = True
+        self._ema_refresh_requested = False
+        self._ema_publication_task = None
         self._gateway_factory = gateway_factory
         self._collect_curate = collect_curate_candidate
         self._collect_probe = collect_counterfactual_probe
@@ -379,6 +399,8 @@ class SkillJointController:
             gateway_factory=gateway_factory,
         )
         await self._refresh_ema_gateway()
+        if settings.background_enabled:
+            self._initialize_background()
         return self
 
     def _configure_protocol(self):
@@ -520,7 +542,12 @@ class SkillJointController:
                     "task_type": metadata["task_type"],
                 },
             )
-        return list(unique.values()), [sources[key] for key in sorted(sources)][: self.settings.sources_per_step]
+        selected = [sources[key] for key in sorted(sources)]
+        # Background collection queues every logical episode. The legacy
+        # synchronous mode retains its explicit small smoke-test source budget.
+        if not self.settings.background_enabled:
+            selected = selected[: self.settings.sources_per_step]
+        return list(unique.values()), selected
 
     def _protocol(self, baseline):
         return CreditProtocol(
@@ -617,9 +644,11 @@ class SkillJointController:
                 frozen_attestation=self.frozen_gateway.skill_route_attestation,
             )
         except ProbeNotObserved as error:
+            await self._writes_allowed.wait()
             pending["unobserved"][logical_id] = type(error).__name__
             self.save_state()
             return
+        await self._writes_allowed.wait()
         self.ledger.add_usage(event)
         pending["observed"].append(logical_id)
         self.save_state()
@@ -661,6 +690,10 @@ class SkillJointController:
             raise RuntimeError("Joint controller operations cannot overlap")
         self._busy = True
         try:
+            await self._writes_allowed.wait()
+            if self._background_pump is not None and self._background_pump.done():
+                self._background_pump.result()
+                raise RuntimeError("The background skill dispatcher stopped unexpectedly")
             if self.state["prepared_update"] is not None:
                 raise ControllerRecoveryRequired(
                     "Finish/reconcile the previous single optimizer update before preparing another"
@@ -671,7 +704,10 @@ class SkillJointController:
                     "Actor/controller optimizer clocks require coherent checkpoint reconciliation"
                 )
             fields, sources = self._sample_fields(solver_TensorDict)
-            await self._observe_pending(fields, global_step)
+            if self.settings.background_enabled:
+                self._enqueue_probe_jobs(fields, global_step)
+            else:
+                await self._observe_pending(fields, global_step)
             update_id = "update_" + _digest([self.protocol_fingerprint, global_step, clock + 1])
             prepared = {
                 "update_id": update_id,
@@ -929,6 +965,9 @@ class SkillJointController:
             "Generated skill identity/family differs from the trusted curator request",
             "Reusable skill text must not contain host paths or network endpoints",
             "Curator must complete successfully without any native tool invocation",
+            "Curator abstention must contain only decision and reason",
+            "Curator abstention reason must be nonempty text of at most 2048 characters",
+            "Curator abstention reason must not contain host paths or network endpoints",
         }
         semantic_origin = isinstance(error, CurateProtocolError) and str(error) in known_messages
         current = error.__traceback__
@@ -1062,12 +1101,28 @@ class SkillJointController:
                 self._censor_cohort(jobs, rejecting)
                 continue
             for job in jobs:
-                if job["status"] in {"retained", "registered"}:
+                if job["status"] in {"retained", "registered", "abstained"}:
                     continue
                 if job["status"] != "queued":
                     raise ControllerRecoveryRequired("Unknown curator job lifecycle requires reconciliation")
-                source = self._load_source(job["episode_output_dir"])
                 request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
+                try:
+                    source = self._load_source(job["episode_output_dir"])
+                except CurateSourceCensored as error:
+                    job["status"] = "source_censored"
+                    self._job_audit(
+                        job,
+                        request,
+                        {
+                            "reason": error.reason,
+                            "source_evidence": error.evidence,
+                            "sampled": False,
+                            "reward_event_created": False,
+                            "training_label_created": False,
+                        },
+                    )
+                    rejecting = job
+                    break
                 gate = self._curate_source_gate(source, request)
                 job["input_policy"] = gate
                 self.save_state()
@@ -1096,8 +1151,10 @@ class SkillJointController:
                         request=request,
                         runtime=self.runtime,
                         output_root=self.artifact_root / "curate",
+                        **({"before_commit": self._writes_allowed.wait} if self.settings.background_enabled else {}),
                     )
                 except Exception as error:
+                    await self._writes_allowed.wait()
                     rejection = self._semantic_curate_rejection(error, source, request, behavior)
                     if rejection is None:
                         raise
@@ -1105,6 +1162,18 @@ class SkillJointController:
                     self._job_audit(job, request, rejection)
                     rejecting = job
                     break
+                await self._writes_allowed.wait()
+                if isinstance(result, CurateAbstention):
+                    job["status"] = "abstained"
+                    self._job_audit(job, request, {
+                        "reason": result.reason,
+                        "sampled": True,
+                        "action_record_path": result.action_record_path,
+                        "action_record_sha256": result.action_record_sha256,
+                        "reward_event_created": False,
+                        "training_label_created": False,
+                    })
+                    continue
                 job.update(
                     status="retained",
                     collection_id=result.collection_id,
@@ -1118,7 +1187,7 @@ class SkillJointController:
                 continue
             # All actions are durably retained before any window/probe admission.
             for job in jobs:
-                if job["status"] == "registered":
+                if job["status"] in {"registered", "abstained"}:
                     continue
                 request = CurateRequest(**{key: job[key] for key in CurateRequest.__dataclass_fields__})
                 result = self._retained_collection(job, request)
@@ -1130,7 +1199,8 @@ class SkillJointController:
                     "output_dir": result.output_dir,
                 }
                 self.save_state()
-            self.state["cohorts"][cohort_id]["status"] = "registered"
+            cohort = self.state["cohorts"].setdefault(cohort_id, {"probe_ids": [], "assignments": {}})
+            cohort["status"] = "abstained" if all(job["status"] == "abstained" for job in jobs) else "registered"
             self.save_state()
 
     def _complete_post_update(self, current, prepared, optimizer_step):
@@ -1156,9 +1226,11 @@ class SkillJointController:
         if path.exists() and _read_state(path) != report:
             raise ControllerRecoveryRequired("An optimizer post-update disposition cannot be rewritten")
         _write_state(path, report)
-        final_state = self.export_state()
-        final_state.setdefault("post_update_reports", {})[prepared.update_id] = report
-        totals = final_state.setdefault("curate_metrics", {})
+        # Keep live background job/queue references attached to the state.
+        final_state = dict(self.state)
+        final_state["post_update_reports"] = dict(final_state.get("post_update_reports", {}))
+        final_state["post_update_reports"][prepared.update_id] = report
+        totals = final_state["curate_metrics"] = dict(final_state.get("curate_metrics", {}))
         for key in (
             "new_curate_windows",
             "curate_semantic_rejections",
@@ -1171,6 +1243,243 @@ class SkillJointController:
         _write_state(self.state_path, final_state)
         self.state = final_state
         return report
+
+    def _initialize_background(self):
+        from .source_queue import SourceQueue
+
+        self.source_queue = SourceQueue(
+            self.state.setdefault("source_queue", {}),
+            persist=self.save_state,
+            max_backlog=self.settings.max_source_backlog,
+        )
+        self.state.setdefault("probe_jobs", {})
+        # A checkpoint may cut through a generation. Never silently resample an
+        # uncertain model action with a new EMA and call it the original draw.
+        for key, _entry in self.source_queue.recovery_required():
+            self.source_queue.finish(key, "failed", reason="interrupted_background_generation")
+        for job in self.state["probe_jobs"].values():
+            if job["status"] == "running":
+                job.update(status="unobserved", reason="interrupted_background_pair")
+        self.save_state()
+        self._background_pump = asyncio.create_task(self._pump_background(), name="skill-background-pump")
+
+    def _offer_sources(self, sources, step, update_id):
+        prepared = [{**source, "update_id": update_id} for source in sources]
+        self.source_queue.offer_many(prepared, source_step=step)
+
+    def _enqueue_probe_jobs(self, fields, step):
+        """Bind real future B inputs now; generation is performed off the learner path."""
+        self.state["latest_train_fields"] = copy.deepcopy(fields)
+        self.state["latest_train_step"] = step
+        if self.state.get("probe_budget_step") != step:
+            self.state.update(probe_budget_step=step, probe_budget_used=0)
+        jobs = self.state["probe_jobs"]
+        for window_id, pending in list(self.state["pending"].items()):
+            if pending["status"] != "pending" or step < pending["opened_step"] + self.settings.min_delay_steps:
+                continue
+            status = self.ledger.window_status(window_id)
+            if status["state"] == "censored":
+                pending["status"] = "censored"
+                continue
+            if status["state"] in {"matured", "settled"}:
+                self._settle_window(window_id, pending)
+                continue
+            cohort = self.state["cohorts"][pending["cohort_id"]]
+            for logical_id in cohort["probe_ids"]:
+                identity = window_id + ":" + logical_id
+                if identity in jobs or logical_id in pending["observed"] or logical_id in pending["unobserved"]:
+                    continue
+                if self.state["probe_budget_used"] >= self.settings.probes_per_step:
+                    self.save_state()
+                    return
+                assignment = cohort["assignments"].get(logical_id)
+                if assignment is None:
+                    used = {row["tools_kwargs"]["task"]["metadata"]["game_id"]
+                            for row in cohort["assignments"].values()}
+                    eligible = [row for row in fields if (
+                        row["tools_kwargs"]["task"]["metadata"]["game_id"] != pending["producer_task_id"]
+                        and row["tools_kwargs"]["task"]["metadata"]["game_id"] not in used
+                        and row["tools_kwargs"]["task"]["metadata"]["task_type"] == pending["task_type"]
+                    )]
+                    if not eligible:
+                        continue
+                    assignment = copy.deepcopy(sorted(eligible, key=lambda row: row["uid"])[0])
+                    assignment["tools_kwargs"]["task"]["metadata"]["source_step"] = step
+                    cohort["assignments"][logical_id] = assignment
+                jobs[identity] = {
+                    "status": "queued", "window_id": window_id,
+                    "logical_id": logical_id, "assignment": copy.deepcopy(assignment), "source_step": step,
+                }
+                self.state["probe_budget_used"] += 1
+        self.save_state()
+
+    async def _run_background_source(self, key, entry):
+        await self._writes_allowed.wait()
+        behavior = CuratorBehavior(
+            "ema:" + str(self.routes["curator"].optimizer_step),
+            self.routes["curator"].optimizer_step,
+            self.loading["tokenizer_version"], self.runtime.template_version,
+        )
+        cohort = "cohort_" + _digest([entry["update_id"], entry["episode_output_dir"]])
+        jobs = entry["curator_jobs"]
+        if not jobs:
+            for index in range(self.settings.candidates_per_source):
+                jobs.append({
+                    **{field: entry[field] for field in ("producer_uid", "episode_output_dir", "task_id", "task_type")},
+                    "skill_snapshot_id": self.store.head(), "candidate_group_id": cohort,
+                    "candidate_index": index, "candidate_group_size": self.settings.candidates_per_source,
+                    "created_at": time.time(), "status": "queued",
+                })
+            entry["behavior"] = asdict(behavior)
+            self.save_state()
+        # Mark actual source reads at the loader boundary, not merely enqueue.
+        original_loader = self._load_source
+        # No shared monkeypatch: each source is explicitly checked before the
+        # collector loads it again and starts a model request.
+        try:
+            original_loader(entry["episode_output_dir"])
+            self.source_queue.mark_read(key)
+            await self._collect_cohorts({"curate_jobs": jobs}, behavior, self.state["optimizer_step"])
+            await self._writes_allowed.wait()
+            if any(job["status"] == "registered" for job in jobs):
+                terminal = "generated"
+            elif all(job["status"] == "abstained" for job in jobs):
+                terminal = "abstained"
+            else:
+                terminal = "source_censored"
+            if terminal == "generated":
+                self.source_queue.finish(key, terminal)
+            elif terminal == "abstained":
+                self.source_queue.finish(key, terminal, reason="model_abstained")
+            else:
+                reason = next((job.get("disposition", {}).get("reason") for job in jobs
+                               if job.get("disposition", {}).get("reason")), "source_not_admitted")
+                self.source_queue.finish(key, terminal, reason=reason)
+        except asyncio.CancelledError:
+            raise
+        except CurateSourceCensored as error:
+            await self._writes_allowed.wait()
+            self.source_queue.finish(key, "source_censored", reason=error.reason, evidence=error.evidence)
+        except Exception as error:
+            await self._writes_allowed.wait()
+            self.source_queue.finish(key, "failed", reason=type(error).__name__, message=str(error)[:2000])
+
+    async def _run_background_probe(self, job):
+        try:
+            await self._observe_one(
+                job["window_id"], self.state["pending"][job["window_id"]],
+                job["logical_id"], job["assignment"], job["source_step"],
+            )
+            await self._writes_allowed.wait()
+            pending = self.state["pending"][job["window_id"]]
+            job["status"] = "complete" if job["logical_id"] in pending["observed"] else "unobserved"
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self._writes_allowed.wait()
+            job.update(status="failed", reason=type(error).__name__, message=str(error)[:2000])
+            self.state["pending"][job["window_id"]]["unobserved"][job["logical_id"]] = type(error).__name__
+        self.save_state()
+
+    async def _pump_background(self):
+        while not self._background_stopping:
+            await self._writes_allowed.wait()
+            for identity, task in list(self._background_tasks.items()):
+                if task.done():
+                    task.result()  # Bookkeeping failures remain visible, never silently discarded.
+                    del self._background_tasks[identity]
+            if self._ema_publication_task is not None and self._ema_publication_task.done():
+                self._ema_publication_task.result()
+                self._ema_publication_task = None
+            curator_active = any(key.startswith("curate:") for key in self._background_tasks)
+            if (self._ema_refresh_requested and not curator_active
+                    and not self._learner_active and not self._ema_syncing):
+                self._ema_syncing = True
+                self._ema_publication_task = asyncio.create_task(self._publish_idle_ema())
+            if not self._ema_syncing and not self._ema_refresh_requested:
+                active = sum(identity.startswith("curate:") for identity in self._background_tasks)
+                pending = sum(row["status"] == "pending" for row in self.state["pending"].values())
+                capacity = min(self.settings.curator_concurrency - active,
+                               max(0, self.settings.max_pending_windows - pending - active))
+                for key, entry in self.source_queue.claim_ready(capacity):
+                    self._background_tasks["curate:" + key] = asyncio.create_task(
+                        self._run_background_source(key, entry), name=key,
+                    )
+            active = sum(identity.startswith("probe:") for identity in self._background_tasks)
+            for identity, job in self.state["probe_jobs"].items():
+                if active >= self.settings.credit_concurrency:
+                    break
+                if job["status"] == "queued":
+                    job["status"] = "running"
+                    self._background_tasks["probe:" + identity] = asyncio.create_task(
+                        self._run_background_probe(job), name="probe:" + identity,
+                    )
+                    active += 1
+                    self.save_state()
+            await asyncio.sleep(0.1)
+
+    def background_metrics(self):
+        if not self.settings.background_enabled:
+            return {}
+        metrics = {"source_" + key.removeprefix("sources_"): value
+                   for key, value in self.source_queue.metrics().items()}
+        for status in ("queued", "running", "complete", "unobserved", "failed"):
+            metrics["probe_" + status] = sum(job["status"] == status for job in self.state["probe_jobs"].values())
+        metrics["source_sampled"] = sum(
+            any("record_id" in job or job.get("disposition", {}).get("sampled") is True
+                for job in entry["curator_jobs"])
+            for entry in self.source_queue.state["jobs"].values()
+        )
+        metrics["curator_weight_version"] = self.routes["curator"].optimizer_step
+        return metrics
+
+    async def pause_background_writes(self):
+        """Take a consistent storage cut without waiting for model generations."""
+        if self._busy:
+            raise ControllerRecoveryRequired("Checkpoint cannot cut through an optimizer transaction")
+        was_active = self._learner_active
+        await self.enter_learner()
+        self._writes_allowed.clear()
+        return was_active
+
+    async def resume_background_writes(self, learner_was_active=True):
+        self._writes_allowed.set()
+        self._learner_active = learner_was_active
+
+    async def enter_learner(self):
+        """Fence online RPCs against a short background EMA tensor transfer."""
+        self._learner_active = True
+        if self._ema_publication_task is not None:
+            await self._ema_publication_task
+
+    async def leave_learner(self):
+        self._learner_active = False
+
+    async def _publish_idle_ema(self):
+        try:
+            await self.routes["curator"].sync_ema(self.state["optimizer_step"])
+            await self._refresh_ema_gateway()
+            self._ema_refresh_requested = False
+        finally:
+            self._ema_syncing = False
+
+    async def stop_background(self):
+        self._background_stopping = True
+        self._writes_allowed.set()
+        failures = []
+        if self._background_pump is not None:
+            failures.extend(await asyncio.gather(self._background_pump, return_exceptions=True))
+        tasks = list(self._background_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            failures.extend(await asyncio.gather(*tasks, return_exceptions=True))
+        if self._ema_publication_task is not None:
+            failures.extend(await asyncio.gather(self._ema_publication_task, return_exceptions=True))
+        self.save_state()
+        for error in failures:
+            if isinstance(error, BaseException) and not isinstance(error, asyncio.CancelledError):
+                raise error
 
     async def after_update_and_sync(self, solver_data, step, *, prepared, optimizer_step):
         if self._busy:
@@ -1202,6 +1511,22 @@ class SkillJointController:
             self.state["last_global_step"] = step
             current["status"] = "optimizer_applied"
             self.save_state()
+            if self.settings.background_enabled:
+                # Publication is a short learner boundary operation and is
+                # skipped while an already pinned curator generation is live.
+                # Background workers never issue online optimizer/model RPCs.
+                self._ema_refresh_requested = True
+                if not any(key.startswith("curate:") for key in self._background_tasks):
+                    self._ema_syncing = True
+                    try:
+                        await self.routes["curator"].sync_ema(actual)
+                        await self._refresh_ema_gateway()
+                        self._ema_refresh_requested = False
+                    finally:
+                        self._ema_syncing = False
+                self._offer_sources(current["sources"], step, prepared.update_id)
+                report = self._complete_post_update(current, prepared, actual)
+                return {**report, **self.background_metrics()}
             await self.routes["curator"].sync_ema(actual)
             await self._refresh_ema_gateway()
             if not current["curate_jobs"]:

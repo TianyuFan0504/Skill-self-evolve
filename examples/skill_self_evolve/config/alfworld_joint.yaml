@@ -44,16 +44,22 @@ skill_harness:
     credit_gpus: 2
     route_tensor_parallel_size: 1
     gateway_count: 2
-    sources_per_step: 1
+    # Every completed logical episode is queued; workers apply concurrency limits.
+    background_enabled: true
+    curator_concurrency: 8
+    credit_concurrency: 8
+    max_source_backlog: 16384
+    sources_per_step: 0
     # Curate uses an external signed advantage, so one candidate needs no
     # within-group baseline and avoids censoring a valid sibling's cohort.
     candidates_per_source: 1
-    probes_per_step: 2
-    required_exposures: 1
-    min_delay_steps: 1
-    replay_batch_size: 2
+    # 32 pairs produce 64 evaluator episodes on the two dedicated credit GPUs.
+    probes_per_step: 32
+    required_exposures: 2
+    min_delay_steps: 2
+    replay_batch_size: 32
     max_replay_lag_steps: 64
-    max_pending_windows: 64
+    max_pending_windows: 8192
     window_seconds: 86400
     lease_seconds: 3600
     cost_weight: 0.0

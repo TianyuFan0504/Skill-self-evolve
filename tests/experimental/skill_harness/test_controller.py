@@ -759,6 +759,84 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(disposition["sampled"])
         self.assertEqual(originals, {str(path): path.read_bytes() for path in files})
 
+    async def test_zero_action_source_completes_post_update_without_curator_sampling_or_labels(self):
+        controller = await self.create()
+        data = self.solver()
+        for directory in (self.root / "episodes").glob("*/*"):
+            for name in ("result.json", "engine-result.json"):
+                path = directory / name
+                value = json.loads(path.read_text())
+                value.update(steps=0, won=False, done=False, reward=0.0, accuracy=0.0)
+                path.write_text(json.dumps(value))
+            (directory / "initial-state.json").write_text(
+                json.dumps(
+                    {"observation": "No action was taken.", "steps": 0, "max_steps": 50, "won": False, "done": False}
+                )
+            )
+            (directory / "environment-trace.jsonl").unlink()
+        originals = {str(path): path.read_bytes() for path in (self.root / "episodes").glob("*/*/*")}
+        prepared = await self.update(controller, data, 1)
+        self.assertEqual((self.actor.clock, len(self.actor.update_calls)), (1, 1))
+        self.assertEqual(controller.routes["curator"].syncs, [0, 1])
+        self.assertIsNone(controller.state["prepared_update"])
+        self.assertEqual(controller.state["optimizer_step"], 1)
+        self.assertEqual(self.curate_calls, [])
+        self.assertEqual(self.probe_calls, [])
+        self.assertEqual(controller.state["pending"], {})
+        self.assertEqual(controller.state["collections"], {})
+        self.assertEqual(controller.ledger.sample_ready(100), [])
+        self.assertEqual(list((controller.replay.root / "records").glob("*.json")), [])
+        self.assertEqual(list((controller.store.root / "candidates").glob("*.json")), [])
+        disposition = next(
+            row for row in controller.state["curate_job_dispositions"].values() if row["status"] == "source_censored"
+        )
+        self.assertEqual(disposition["reason"], "source_has_no_environment_actions")
+        self.assertFalse(disposition["sampled"])
+        self.assertFalse(disposition["source_evidence"]["trace_present"])
+        self.assertFalse(disposition["reward_event_created"])
+        self.assertFalse(disposition["training_label_created"])
+        report = controller.state["post_update_reports"][prepared.update_id]
+        self.assertEqual(report["curate_retained_actions"], 0)
+        self.assertEqual(report["new_curate_windows"], 0)
+        self.assertEqual(report["curate_semantic_rejections"], 0)
+        self.assertEqual(report["curate_censored_jobs"], controller.settings.candidates_per_source)
+        self.assertEqual(originals, {str(path): path.read_bytes() for path in (self.root / "episodes").glob("*/*/*")})
+        repeat = await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertTrue(repeat["already_completed"])
+        self.assertEqual((self.actor.clock, len(self.actor.update_calls)), (1, 1))
+        following = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
+        self.assertEqual(following.expected_optimizer_step, 2)
+
+    async def test_nonzero_source_missing_trace_remains_fatal_after_optimizer(self):
+        controller = await self.create()
+        data = self.solver()
+        for path in (self.root / "episodes").glob("*/*/environment-trace.jsonl"):
+            path.unlink()
+        prepared = await controller.prepare_update(data, 1)
+        self.actor.update_actor(prepared.data)
+        with self.assertRaises(FileNotFoundError):
+            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(controller.state["optimizer_step"], 1)
+        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
+        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
+        self.assertEqual(self.curate_calls, [])
+
+    async def test_private_source_identity_mismatch_remains_fatal_after_optimizer(self):
+        controller = await self.create()
+        data = self.solver()
+        for path in (self.root / "episodes").glob("*/*/engine-result.json"):
+            value = json.loads(path.read_text())
+            value["game_sha256"] = "f" * 64
+            path.write_text(json.dumps(value))
+        prepared = await controller.prepare_update(data, 1)
+        self.actor.update_actor(prepared.data)
+        with self.assertRaises(curate.CurateProtocolError):
+            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(controller.state["optimizer_step"], 1)
+        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
+        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
+        self.assertEqual(self.curate_calls, [])
+
     async def test_actual_version_failure_is_fatal_after_update_and_preserves_postprocessing_cut(self):
         controller = await self.create()
         native = controller._collect_curate

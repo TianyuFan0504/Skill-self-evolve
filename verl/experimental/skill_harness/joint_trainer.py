@@ -1,15 +1,17 @@
 # Copyright 2026 The Skill Self-Evolve Authors
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
-"""Synchronous native verl controller integration for joint skill training.
+"""Native solver updates with independently progressing skill collection.
 
 Solver GRPO is computed by the unchanged parent. This extension materializes
 that exact native batch, prepares delayed replay, issues ONE actor update, then
-awaits durable credit acknowledgement and EMA transport before the parent's
-normal source-batch metrics and TQ cleanup. No token IDs are re-encoded here.
+acknowledges consumed credit and queues skill work before the parent's normal
+source-batch metrics and TQ cleanup. Background model generations are never
+awaited on this update path. No token IDs are re-encoded here.
 
-All learner/controller/checkpoint operations share a driver RLock and one
-persistent event loop. Resume validates the COMPLETE joint snapshot before any
+Learner updates and checkpoints share a driver RLock. Controller writes are
+serialized on one continuously running loop and gated during a checkpoint cut.
+Resume validates the COMPLETE joint snapshot before any
 live load and never adopts the native trainer's early latest pointer. Failed
 updates/restores abort startup/training; no lease is cleared on a timeout.
 """
@@ -21,6 +23,7 @@ import hashlib
 import inspect
 import json
 import math
+import sys
 import threading
 import uuid
 from collections.abc import Mapping
@@ -149,6 +152,8 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
     def __init__(self, config):
         self._joint_lock = threading.RLock()
         self._joint_loop = asyncio.new_event_loop()
+        self._joint_loop_ready = threading.Event()
+        self._joint_thread = None
         self._joint_controller = None
         self._joint_identity = None
         self._joint_compatibility = None
@@ -182,9 +187,24 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             raise ValueError("Joint checkpoint files must remain available for complete verification")
 
     def _await(self, value):
-        if self._joint_loop.is_closed() or self._joint_loop.is_running():
-            raise RuntimeError("Joint driver operations require its single stopped persistent event loop")
+        if self._joint_loop.is_closed():
+            raise RuntimeError("The joint event loop is closed")
+        if hasattr(self, "_joint_loop_ready") and self._joint_thread is None:
+            self._joint_thread = threading.Thread(
+                target=self._run_joint_loop, name="skill-background-loop", daemon=True,
+            )
+            self._joint_thread.start()
+            self._joint_loop_ready.wait()
+        if self._joint_loop.is_running():
+            if threading.current_thread() is getattr(self, "_joint_thread", None):
+                raise RuntimeError("A background callback cannot synchronously wait on its own event loop")
+            return asyncio.run_coroutine_threadsafe(_resolve(value), self._joint_loop).result()
         return self._joint_loop.run_until_complete(_resolve(value))
+
+    def _run_joint_loop(self):
+        asyncio.set_event_loop(self._joint_loop)
+        self._joint_loop.call_soon(self._joint_loop_ready.set)
+        self._joint_loop.run_forever()
 
     def _init_resource_pool_mgr(self):
         super()._init_resource_pool_mgr()
@@ -201,6 +221,17 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         if controller is None:
             return solver
         return solver + controller.settings.curator_gpus + controller.settings.credit_gpus
+
+    def on_sample_end(self):
+        if self._joint_controller is not None:
+            self._await(self._joint_controller.enter_learner())
+        return super().on_sample_end()
+
+    def on_step_end(self):
+        result = super().on_step_end()
+        if self._joint_controller is not None:
+            self._await(self._joint_controller.leave_learner())
+        return result
 
     def _identity(self):
         if self._joint_identity is None:
@@ -341,13 +372,24 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
                     "curate_retained_actions", "curate_censored_cohorts",
                 ):
                     metrics["skill/" + key] = completed.get(key, 0)
+                for key, value in completed.items():
+                    if key.startswith(("source_", "probe_", "curator_weight_")):
+                        metrics["skill/" + key] = value
             return batch  # Parent metrics and cleanup retain ONLY the original solver KVBatchMeta.
 
     def _save_checkpoint(self):
         # The post-save callback alone is too late to fence a concurrent actor
         # update. Hold the same lock around the native model/data save as well.
         with self._joint_lock:
-            return super()._save_checkpoint()
+            controller = self._joint_controller
+            was_active = True
+            if controller is not None:
+                was_active = self._await(controller.pause_background_writes())
+            try:
+                return super()._save_checkpoint()
+            finally:
+                if controller is not None:
+                    self._await(controller.resume_background_writes(was_active))
 
     def _load_checkpoint(self):
         self.global_steps = 0
@@ -404,14 +446,31 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         try:
             return super().fit(agent_loop_manager)
         finally:
+            primary_error = sys.exc_info()[1]
+            cleanup_errors = []
             try:
                 if self._joint_controller is not None:
+                    try:
+                        self._await(self._joint_controller.stop_background())
+                    except BaseException as error:
+                        cleanup_errors.append(error)
                     for name in ("ema_gateway", "frozen_gateway"):
                         gateway = getattr(self._joint_controller, name, None)
                         if gateway is not None:
-                            self._await(gateway.shutdown())
+                            try:
+                                self._await(gateway.shutdown())
+                            except BaseException as error:
+                                cleanup_errors.append(error)
             finally:
+                if self._joint_loop.is_running():
+                    self._joint_loop.call_soon_threadsafe(self._joint_loop.stop)
+                    self._joint_thread.join()
                 self._joint_loop.close()
+            if cleanup_errors:
+                if primary_error is None:
+                    raise cleanup_errors[0]
+                if hasattr(primary_error, "add_note"):
+                    primary_error.add_note("Background cleanup also failed: " + repr(cleanup_errors[0]))
 
 
 class SkillJointCheckpointCallback(CheckpointCallback):

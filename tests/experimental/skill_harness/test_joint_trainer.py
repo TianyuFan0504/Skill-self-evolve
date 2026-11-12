@@ -242,6 +242,33 @@ class CuratorRouteService:
 
 
 class JointTrainerTests(unittest.TestCase):
+    def test_background_loop_progresses_between_synchronous_learner_calls(self):
+        driver = object.__new__(joint.SkillJointSyncTrainer)
+        driver._joint_loop = asyncio.new_event_loop()
+        driver._joint_loop_ready = threading.Event()
+        driver._joint_thread = None
+        completed = threading.Event()
+
+        async def start_background():
+            async def work():
+                await asyncio.sleep(0.02)
+                completed.set()
+            return SimpleNamespace(task=asyncio.create_task(work()))
+
+        try:
+            task = driver._await(start_background()).task
+            # No second driver call pumps the event loop. This models the
+            # learner spending time in a synchronous solver rollout.
+            self.assertTrue(completed.wait(2), "Background work stalled outside _await")
+            self.assertIsNone(driver._await(task))
+            self.assertTrue(task.done())
+            self.assertIsNone(task.result())
+        finally:
+            if driver._joint_loop.is_running():
+                driver._joint_loop.call_soon_threadsafe(driver._joint_loop.stop)
+                driver._joint_thread.join(2)
+            driver._joint_loop.close()
+
     def setUp(self):
         self.assertFalse(ray.is_initialized())
         temporary = tempfile.TemporaryDirectory()
@@ -300,6 +327,11 @@ class JointTrainerTests(unittest.TestCase):
         controller.loading = {"tokenizer_version": "tok:v1"}
         controller.runtime = SimpleNamespace(template_version="template:v1")
         controller.dp_size, controller.pad_token_id, controller._busy = 1, 0, False
+        controller._writes_allowed = asyncio.Event()
+        controller._writes_allowed.set()
+        controller._background_pump = None
+        controller._ema_publication_task = None
+        controller._learner_active = True
         controller.ema_gateway, controller.frozen_gateway = GatewayService(), GatewayService()
         controller.routes = {"curator": CuratorRouteService(trainer.config, self.events)}
 

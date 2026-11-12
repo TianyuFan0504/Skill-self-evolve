@@ -282,6 +282,25 @@ rejected. The system instructions enumerate every required field, and the task
 ends with the exact host-assigned identity and output structure. These prompt
 and candidate-count changes require a fresh protocol/template version.
 
+The production joint recipe queues every completed logical solver episode,
+rather than selecting one source per update. Dedicated background workers run
+curation and paired evaluation while solver training continues; the learner
+uses only matured labels and remains the sole optimizer owner. Curators may
+explicitly abstain without inventing a skill or reward. The default credit
+budget is 32 pairs per update and ready replay accepts up to 32 labels.
+See [background scheduling](BACKGROUND_SKILL_PIPELINE.md) and
+[abstention records](CURATOR_ABSTENTION.md) for version pins and checkpoint cuts.
+
+Curator inputs require a nonempty observed environment action sequence. A
+completed training episode with a consistent private zero-step result and an
+absent or empty action trace is recorded as `source_censored` before sampling.
+It creates no curate action, reward event or training label, and preserves the
+solver outcome and completed online/EMA update. Missing traces for positive-step
+episodes, malformed sources and inconsistent private artifacts remain invalid.
+Background collection records those source failures locally; it does not accept
+their content or stop an already completed solver update. The synchronous
+protocol-test path still raises these errors directly.
+
 The curator wrapper disables native goals, web search and request-user-input
 registration in addition to execution features. A CPU-only native HTTP capture
 on Codex 0.167.0 confirmed that these settings removed the remaining five tool
