@@ -71,9 +71,15 @@ class DirectCheckpointComparisonTests(unittest.TestCase):
         base = cls.pair.root / "base"
         manifest = read(base / "training-manifest.json")
         manifest["source_commit"] = commit
+        manifest["config"]["trainer"]["save_freq"] = 1
         write(base / "training-manifest.json", manifest)
+        trained_manifest = cls.pair.root / "trained/training-manifest.json"
+        manifest = read(trained_manifest)
+        manifest["config"]["trainer"]["save_freq"] = 1
+        write(trained_manifest, manifest)
         observation = read(cls.observations["base"])
         observation.update(source_commit=commit, spawn_extension=cls.spawn)
+        observation["effective_config_before_entry"]["trainer"]["save_freq"] = 1
         write(cls.observations["base"], observation)
         cls.legacy_observation = read(cls.observations["trained"])
         cls.observations["trained"].unlink()
@@ -124,8 +130,9 @@ class DirectCheckpointComparisonTests(unittest.TestCase):
         cls.current_source = checkpoint
         initialized = read(cls.initialized_path)
         initialized.update(cls.loaded_spawn)
+        initialized["original_training_manifest_sha256"] = sha(run / "training-manifest.json")
         effective = initialized["effective_config_after_trainer_init"]
-        effective["trainer"].update(resume_mode="resume_path", resume_from_path=str(checkpoint))
+        effective["trainer"].update(resume_mode="resume_path", resume_from_path=str(checkpoint), save_freq=1)
         for name, directory in (("store_root", "skill_store"), ("replay_root", "replay"), ("ledger_root", "ledger")):
             effective["skill_harness"][name] = str(mutable / directory)
         restored = {
@@ -142,6 +149,7 @@ class DirectCheckpointComparisonTests(unittest.TestCase):
             value.update(cls.loaded_spawn)
             value.update(
                 store_root=str(mutable / "skill_store"),
+                original_training_manifest_sha256=sha(run / "training-manifest.json"),
                 lifecycle_extension=cls.loaded_spawn,
                 seal_origin="restored_complete_final_checkpoint"
                 if step == 64
@@ -151,7 +159,11 @@ class DirectCheckpointComparisonTests(unittest.TestCase):
             write(path, value)
             receipt[key]["sha256"] = sha(path)
         receipt.update(cls.loaded_spawn)
-        receipt.update(store_root=str(mutable / "skill_store"), seal_origin=value["seal_origin"])
+        receipt.update(
+            store_root=str(mutable / "skill_store"),
+            seal_origin=value["seal_origin"],
+            original_training_manifest_sha256=sha(run / "training-manifest.json"),
+        )
         write(cls.receipt_path, receipt)
         # The prelaunch config precedes only the already enumerated constructor
         # normalizations and the new writable-state bindings.
@@ -219,6 +231,50 @@ class DirectCheckpointComparisonTests(unittest.TestCase):
         finally:
             for path, content in before.items():
                 path.write_bytes(content)
+
+    @contextmanager
+    def observed_cadence(self, *, prelaunch=10, spawn=10, direct=10):
+        receipt = read(self.receipt_path)
+        records = [Path(receipt[key]["path"]) for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete")]
+        paths = [self.receipt_path, self.initialized_path, self.direct_prelaunch, self.direct_initialized, *records]
+        before = {path: path.read_bytes() for path in paths}
+        try:
+            value = read(self.initialized_path)
+            value["effective_config_after_trainer_init"]["trainer"]["save_freq"] = spawn
+            write(self.initialized_path, value)
+            component_ref = {"path": str(self.initialized_path), "sha256": sha(self.initialized_path)}
+            value = read(self.direct_initialized)
+            value["effective_config_after_trainer_init"]["trainer"]["save_freq"] = direct
+            value["spawn_component_initialized_ref"] = component_ref
+            write(self.direct_initialized, value)
+            value = read(self.direct_prelaunch)
+            value["config"]["trainer"]["save_freq"] = prelaunch
+            write(self.direct_prelaunch, value)
+            for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+                path = Path(receipt[key]["path"])
+                value = read(path)
+                value["initialized_receipt_ref"] = component_ref
+                write(path, value)
+                receipt[key]["sha256"] = sha(path)
+            write(self.receipt_path, receipt)
+            yield
+        finally:
+            for path, content in before.items():
+                path.write_bytes(content)
+
+    def test_observed_save10_operational_change_preserves_original_save1(self):
+        original = sha(self.pair.root / "trained/training-manifest.json")
+        with self.observed_cadence():
+            report = self.compare_pair()
+            self.assertTrue(report["comparison_supported"], report["reasons"])
+            cadence = report["direct_checkpoint_restore_evidence"]["checkpoint_save_frequency"]
+            self.assertEqual((cadence["original"], cadence["prelaunch"], cadence["initialized"]), (1, 10, 10))
+            self.assertEqual(original, sha(self.pair.root / "trained/training-manifest.json"))
+
+    def test_save_cadence_must_be_known_and_observed_by_prelaunch_and_both_initializers(self):
+        for values in ({"prelaunch": 1}, {"spawn": 1}, {"direct": 1}, {"prelaunch": 2, "spawn": 2, "direct": 2}):
+            with self.subTest(values=values), self.observed_cadence(**values):
+                self.assert_incomplete(self.compare_pair())
 
     def test_full_direct_source5_stage_matches_zero_epoch_base_inference(self):
         old = self.observations["trained"]

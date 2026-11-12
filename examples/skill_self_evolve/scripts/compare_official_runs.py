@@ -1361,6 +1361,18 @@ class Stage:
         need(resume_from is None or resume_from == str(checkpoint), "Initialized resume path differs from source")
         if "resume_from_path" in expected["trainer"]:
             set_existing_field(expected, "trainer.resume_from_path", resume_from)
+        if direct:
+            original_save = optional_field(expected, "trainer.save_freq")
+            initialized_save = optional_field(effective, "trainer.save_freq")
+            if initialized_save != original_save:
+                need(
+                    type(original_save) is int
+                    and original_save == 1
+                    and type(initialized_save) is int
+                    and initialized_save == 10,
+                    "Unknown direct checkpoint save-frequency change",
+                )
+                set_existing_field(expected, "trainer.save_freq", initialized_save)
         expected_prelaunch = copy.deepcopy(expected)
         for name in ("store_root", "replay_root", "ledger_root"):
             expected_prelaunch["skill_harness"][name] = self.config["skill_harness"][name]
@@ -1405,6 +1417,12 @@ class Stage:
         }
         if direct:
             self.check_direct_restore(direct, initialized, seal, source_payload, expected_prelaunch)
+            self.direct_evidence["checkpoint_save_frequency"] = {
+                "original": optional_field(self.config, "trainer.save_freq"),
+                "initialized": optional_field(effective, "trainer.save_freq"),
+                "prelaunch": optional_field(expected_prelaunch, "trainer.save_freq"),
+                "scope": "Verified operational cadence; excluded from the common inference signature",
+            }
 
     def check_lifecycle_binding(self):
         """Bind a resumed final stage to its explicit, successful sealed-store receipt."""

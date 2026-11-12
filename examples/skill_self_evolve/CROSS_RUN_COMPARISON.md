@@ -199,6 +199,12 @@ effective configuration, preserved original manifest, source checkpoint and
 core versions. The recorded prelaunch config must lead to that configuration
 through only the existing constructor normalizations and explicit restore
 bindings.
+The Direct route also permits the user-selected operational save cadence to
+change from the preserved manifest's `trainer.save_freq=1` to actual `10`.
+The prelaunch config and both linked initialized records must agree on `10`;
+other cadence changes remain unsupported. Legacy initialized profiles keep
+their exact original cadence check. Save cadence was already excluded from
+the common inference signature.
 
 This route uses its explicitly recorded source checkpoint N, rather than
 assuming checkpoint4. The supported current profile has matching optimizer
