@@ -547,7 +547,7 @@ class RunAuditTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
-    def budget_episode(self):
+    def budget_episode(self, *, zero_actions=False):
         """Use the existing full shared-verifier fixture, not a mocked proof."""
         path = SCRIPT.parents[3] / "tests/experimental/skill_harness/test_budget.py"
         spec = importlib.util.spec_from_file_location("_run_audit_budget_fixture", path)
@@ -556,12 +556,29 @@ class RunAuditTest(unittest.TestCase):
         case = module.BudgetProofTest()
         self.addCleanup(case.doCleanups)
         value = case.fixture()
+        if zero_actions:
+            (value.output / "budget-events.jsonl").write_text("")
+            state = {"won": False, "done": False, "steps": 0, "max_steps": 50}
+            for snapshot in (value.ordered, value.final):
+                snapshot.update(
+                    world_state=state, world_state_sha256=sha(state), admitted_actions=0,
+                    last_admitted_ns=None, last_completed_ns=None, last_sequence=0,
+                    events_sha256=hashlib.sha256(b"").hexdigest(),
+                )
+            value.task["steps"] = value.engine["steps"] = 0
+            write(value.output / "budget-ordered-state.json", value.ordered)
+            write(value.output / "budget-environment.json", value.final)
+            stop_path = value.directory / "terminal.json"
+            stop = json.loads(stop_path.read_text())["payload"]
+            stop["reason"] = module.budget.make_budget_stop_reason(value.ordered)
+            write(stop_path, stop, wrapped=True)
         value.task.update(budget_reward_eligible=True, budget_failure_proof=case.verify(value))
         write(value.output / "attempt.json", value.task)
         write(value.output / "result.json", value.task)
         write(value.output / "engine-result.json", value.engine)
         write(value.output / "initial-state.json", {"observation": "Synthetic initial world", "steps": 0})
-        rows(value.output / "environment-trace.jsonl", [{"step": 1, "action": "look", "after": {"won": False}}])
+        if not zero_actions:
+            rows(value.output / "environment-trace.jsonl", [{"step": 1, "action": "look", "after": {"won": False}}])
         (value.output / "codex-stderr.log").write_text("Actual timeout diagnostic fixture; not a real Native run\n")
         return value
 
@@ -949,6 +966,44 @@ class RunAuditTest(unittest.TestCase):
         path = value.output / "budget-ordered-state.json"
         path.write_text(path.read_text() + " ")
         self.assertIn(str(path), reader.changed())
+
+    def test_zero_action_budget_can_have_no_trace_only_after_shared_proof(self):
+        value = self.budget_episode(zero_actions=True)
+        path = value.output / "environment-trace.jsonl"
+        self.assertFalse(path.exists())
+        before = {str(p): p.read_bytes() for p in value.root.rglob("*") if p.is_file()}
+        observed = audit.episode(audit.Reader(), value.output)
+        self.assertTrue(observed["valid"])
+        self.assertTrue(observed["expected_budget_failure_validated"])
+        self.assertEqual(observed["result"]["steps"], 0)
+        self.assertFalse(observed["result"]["native_finished"])
+        self.assertFalse(path.exists())
+        self.assertEqual(before, {str(p): p.read_bytes() for p in value.root.rglob("*") if p.is_file()})
+
+    def test_missing_trace_at_nonzero_steps_or_without_valid_budget_proof_is_incomplete(self):
+        value = self.budget_episode()
+        (value.output / "environment-trace.jsonl").unlink()
+        self.assertFalse(audit.episode(audit.Reader(), value.output)["valid"])
+        value = self.budget_episode(zero_actions=True)
+        value.task["budget_failure_proof"]["score"] = 1.0
+        write(value.output / "result.json", value.task)
+        self.assertFalse(audit.episode(audit.Reader(), value.output)["valid"])
+        value = self.budget_episode(zero_actions=True)
+        (value.output / "budget-ordered-state.json").unlink()
+        self.assertFalse(audit.episode(audit.Reader(), value.output)["valid"])
+        fixture = Fixture(self.root)
+        directory, result = fixture.episode("train_a", "train", "ordinary-zero", False)
+        for name in ("result.json", "engine-result.json"):
+            payload = json.loads((directory / name).read_text())
+            payload["steps"] = 0
+            write(directory / name, payload)
+        (directory / "environment-trace.jsonl").unlink()
+        self.assertFalse(audit.episode(audit.Reader(), directory)["valid"])
+
+    def test_zero_action_budget_does_not_hide_an_existing_malformed_trace(self):
+        value = self.budget_episode(zero_actions=True)
+        (value.output / "environment-trace.jsonl").write_text("{unfinished original trace\n")
+        self.assertFalse(audit.episode(audit.Reader(), value.output)["valid"])
 
     def test_budget_flags_forged_stored_proof_and_unknown_backend_never_pass(self):
         for changed in ("stored_proof", "backend_pending", "ordered_state_missing", "native_error"):

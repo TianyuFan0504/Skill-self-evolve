@@ -59,6 +59,14 @@ does not fabricate `turn.completed`, world `done`, EOS or missing likelihoods.
 These cases are reported separately as `validated_expected_budget_failures`.
 The verifier's private inputs participate in changed-during-audit detection.
 
+When no world action was applied, the service may never create
+`environment-trace.jsonl`. Its absence is accepted as an empty transition
+sequence only when the raw engine records exactly zero steps and the actual
+shared budget verifier reproduces the matching stored admission proof. The
+index creates no replacement trace. Missing traces for ordinary cases or
+nonzero steps, a malformed existing trace, and flags without the complete
+private proof remain incomplete evidence.
+
 Delayed paired-credit checks use the current run-scoped workspace identity from
 `probes.probe_group_id(request, run_root)`, reproduced with the same two-stage
 hash to avoid runtime imports. Matching branches from another run, or an old

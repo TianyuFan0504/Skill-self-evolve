@@ -294,7 +294,23 @@ def episode(reader, directory):
             reader.json(files[name]) for name in ("result.json", "engine-result.json", "attempt.json")
         )
         reader.json(files["initial-state.json"])
-        transitions = reader.rows(files["environment-trace.jsonl"])
+        budget_claimed = any(
+            result.get(name) is True
+            for name in ("budget_exhausted", "expected_budget_failure", "budget_reward_eligible")
+        )
+        budget_proof = None
+        trace = files["environment-trace.jsonl"]
+        if (
+            not trace.exists() and not trace.is_symlink()
+            and type(engine.get("steps")) is int and engine["steps"] == 0 and budget_claimed
+        ):
+            # The service creates this trace only when an action is applied.
+            # Absence is an empty sequence only after the actual private
+            # deadline/journal/drain proof independently establishes zero steps.
+            budget_proof = _verified_budget_end(reader, result, engine, directory)
+            transitions = []
+        else:
+            transitions = reader.rows(trace)
         events = reader.rows(files["codex-events.jsonl"])
         reader.bytes(files["codex-stderr.log"])
         won = engine.get("won")
@@ -307,11 +323,7 @@ def episode(reader, directory):
             raise EvidenceError(f"{directory}: environment transitions do not cover engine steps")
         outcome_valid = True
         expected_stop = _expected_terminal_end(result, engine, transitions)
-        budget_proof = None
-        if any(
-            result.get(name) is True
-            for name in ("budget_exhausted", "expected_budget_failure", "budget_reward_eligible")
-        ):
+        if budget_claimed and budget_proof is None:
             budget_proof = _verified_budget_end(reader, result, engine, directory)
         controlled_end = expected_stop or budget_proof is not None
         if not controlled_end and (
