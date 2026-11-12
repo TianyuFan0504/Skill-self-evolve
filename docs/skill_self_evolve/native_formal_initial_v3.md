@@ -91,6 +91,7 @@ All paths below are relative to the private run root.
 | `diagnostics/independent_initial_seen140_1794442596443000922.json` | `a85e274a015f88c44def4946068b26e3b3bca3f58b11f31d6fee0b726fd27516` |
 | `diagnostics/independent_initial_unseen134_1794443333163248587.json` | `dacec20abf7c9ba62d448ff8efacb2093790668fe6e1174a10db9a1e0442d553` |
 | `diagnostics/independent_initial_full274_1794443439774707010.json` | `fa1059b52224119fd04a3d3c1e46baad8bd5360737ee2c7faf146ab76d493fef` |
+| `diagnostics/first_optimizer_EMA_curate_independent_1794444459932139966.json` | `7b60b643c22ce83744df4c3a9e76af2b3dc1a79734a1c961483772f097da090c` |
 
 The summary indexes the two full per-case audit sidecars. Original environment
 interactions, native events, raw stderr, numeric TITO, masks and behavior
@@ -103,15 +104,90 @@ The combined independent review also observed optimizer zero, no curator
 collections, pending windows or applied updates, an empty main library and no
 persisted replay/ledger objects at the initial cut.
 
-## Training status and claim boundary
+## First actual training update
 
 After initial evaluation, the same driver began its first original training
 batch. An actual observation found 64 active attempts for 16 distinct training
 games, exactly four per game, confirming restoration of training fanout after
 greedy evaluation. The optimizer counter was still zero at that observation.
 
-This report establishes a complete initial baseline and verified native
-trajectory retention. Training improvement, nonzero delayed curate gradients,
+The first complete 32-prompt/four-response batch subsequently finished its real
+online optimizer update. The retained `metrics.jsonl` training row reports:
+
+| Quantity | Actual observation |
+| --- | ---: |
+| Training episodes | 128 |
+| Successful training episodes | 77 |
+| Training mean reward / accuracy | 0.6015625 |
+| Actor gradient norm | 1.2116317749023438 |
+| Learning rate | 0.000001 |
+| Solver / joint loss | 0.010764850303530693 |
+| Curate loss | 0 |
+| Applied optimizer count | 1 |
+| Newly retained curate actions / windows | 1 / 1 |
+| Curate semantic rejections / censored jobs | 0 / 0 |
+| Training infrastructure error rate | 0 |
+
+The controller records one applied update, clears the prepared update and
+persists the new curate collection. Its replay candidate count is zero at this
+first update, so the nonzero gradient is from the solver branch. The newly
+sampled curate action remains pending its two future exposures; a retained
+action is not a nonzero delayed curate gradient. The same driver has begun its
+second original training batch.
+
+An independent review confirmed the actual curator observed parameter version
+one and policy `EMA:1`. Its 4,119-token prompt and 136 action tokens, action
+mask entries and processed behavior log probabilities match the original
+generated capture exactly. All action probabilities are finite and nonpositive.
+The same durable record and ReplayRef remained readable after the next batch
+had created 82 real attempts. This is retention evidence, not delayed utility.
+
+## Controlled stop before the second update
+
+The second batch exposed an additional native tool/protocol problem. A solver
+created a native subagent, which attempted `view_image` and accessed a bundled
+image outside this attempt's own HOME. The target HOME has not been attributed
+to a particular other task. This is observed access outside the attempt;
+reading another task's benchmark solution is not established.
+
+The gateway recorded 30 request exceptions caused by missing `qwen_vl_utils`
+while the world was at approximately steps 22–23. These occurred before the
+terminal state, not merely during expected postterminal refusal. The main
+trajectory later continued to the 50-step failure state and its final host
+stop classification concealed the earlier recovered gateway errors. Both
+parent and child numeric trajectories had real action masks and probabilities,
+so they could have entered the next update without stronger admission checks.
+
+The verified owned supervisor was stopped while the actual optimizer counter
+was still one. No second update was applied. The raw supervisor status remains
+`failed`, exit code `-6`; it has not been rewritten as a clean training exit.
+The owned environment service was subsequently stopped, and all eight GPU
+compute processes were released. Partial second-batch attempts remain partial;
+they are not converted to ordinary zero-reward samples. No resumable joint
+checkpoint at step one is claimed.
+
+Incident evidence:
+
+- `diagnostics/qwen_vl_utils_nonterminal_incident_1794444795714526521.json`,
+  SHA256 `3e97ca361c198d57227263fd2e64201c688cf5eb735a9c9486b52c6bc1e32a8e`.
+- `diagnostics/qwen_vl_utils_incident_snapshot_1794444795714526521/snapshot-manifest.json`,
+  SHA256 `a4396d4da0a664f337451737b617de80a8da454078ef49ec581a37deb4d111a8`.
+- `diagnostics/nonterminal_tool_scope_stop_1794444850679151041.json` records
+  the observed counter and the exact supervisor signal.
+
+The next cold run needs a native tool policy matching the ALFWorld text
+interface, isolation between attempt files, and rejection of unsupported media
+before training fields can discard it. Installing the optional image decoder
+alone does not address those protocol issues. A changed tool/isolation policy
+requires a fresh initial baseline; this run's scores remain historical evidence
+under its original policy.
+
+## Claim boundary
+
+This report establishes a complete initial baseline, verified native trajectory
+retention and the first actual online update. The training score of 77/128 is
+measured on different games and sampling settings from the official baseline;
+it is not an estimate of test improvement. Nonzero delayed curate gradients,
 positive skill admission/reuse and final evaluation require their own later
-evidence. Initial benchmark success does not establish any of those results,
-nor does it identify the root cause of the earlier asynchronous sampling stall.
+evidence. These observations also do not identify the root cause of the earlier
+asynchronous sampling stall.
