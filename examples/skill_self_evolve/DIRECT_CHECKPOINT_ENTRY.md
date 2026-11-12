@@ -60,3 +60,29 @@ records precede sampling, failure evidence and queue/tracking cleanup retain
 their previous order, the frozen fit method remains inherited, and the new
 initialized record names the actual outer entry and both restore/spawn
 component proofs. It does not claim a completed GPU startup or model update.
+
+## Passive diagnostics
+
+The learner's local observer retains its 30-second Python watchdog, bounded
+asyncio code-location snapshots, owner PID, private files and artifact index.
+Periodic native stack dumps are disabled by default. The index records
+`periodic_stack_dump_enabled: false` and omits `stack_interval_seconds`; the
+reserved `threads.log` remains empty while metadata continues in
+`async-stages.jsonl`.
+
+On the installed Python 3.11.13, a CPU-only test of the current controller's
+`_plain` and `_canonical` functions survived with the timer disabled, but
+`faulthandler.dump_traceback_later(..., repeat=True, exit=False)` caused
+SIGSEGV with an incomplete stack dump. An isolated Ray actor reproduced the
+same `ActorDiedError / SYSTEM_ERROR / EOF` as the learner. Both original
+learner logs ended during their scheduled 120-second dumps; their original
+exit signals were not captured. See CPython issues
+[#116008](https://github.com/python/cpython/issues/116008) and
+[#140815](https://github.com/python/cpython/issues/140815) for the concurrent
+frame-walk failure mechanism.
+
+An explicit `periodic_stack_dump=True` argument preserves the historical timer
+for controlled investigation. Normal entries do not opt in. When enabled, its
+timer is cancelled before the stack file closes; failed cancellation retains
+the open descriptor. This diagnostic change does not alter training, restore,
+sampling, model or subprocess policies.

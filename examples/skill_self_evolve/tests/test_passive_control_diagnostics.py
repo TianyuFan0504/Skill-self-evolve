@@ -44,7 +44,8 @@ class ObserverTests(unittest.TestCase):
         self.run.mkdir()
         self.faults = Faults()
         self.observer = entry.PassiveControlDiagnostics(
-            self.run, local_parent=self.root, interval=.01, stack_interval=123, faults=self.faults
+            self.run, local_parent=self.root, interval=.01, stack_interval=123,
+            periodic_stack_dump=True, faults=self.faults
         )
         self.addCleanup(self.observer.close)
 
@@ -58,6 +59,51 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(reference["index_path"], str(observer.directory / "index.json"))
         self.assertEqual(reference["pid"], os.getpid())
         self.assertEqual(set(reference), {"schema_version", "kind", "pid", "index_path", "index_sha256"})
+        index = json.loads((observer.directory / "index.json").read_text())
+        self.assertTrue(index["periodic_stack_dump_enabled"])
+        self.assertEqual(index["stack_interval_seconds"], 123)
+
+    def test_default_never_arms_or_cancels_native_timer_and_keeps_watchdog_and_async_metadata(self):
+        faults = Faults()
+        observer = entry.PassiveControlDiagnostics(
+            self.run, local_parent=self.root, interval=.01, stack_interval=.001, faults=faults
+        )
+        self.addCleanup(observer.close)
+
+        async def exercise():
+            observer.attach(types.SimpleNamespace(_joint_loop=asyncio.get_running_loop()))
+            observer.stage("trainer_fit")
+            observer.start()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if '"kind": "async_loop_snapshot"' in observer.snapshot_path.read_text():
+                    return
+                await asyncio.sleep(.005)
+            self.fail("default observer did not retain watchdog and asyncio metadata")
+
+        asyncio.run(exercise())
+        observer.close()
+        events = [json.loads(line) for line in observer.snapshot_path.read_text().splitlines()]
+        self.assertTrue({"watchdog_tick", "async_loop_snapshot"} <= {event["kind"] for event in events})
+        self.assertEqual(faults.events, [])
+        self.assertFalse(observer._timer_started)
+        self.assertTrue(observer._fault_file.closed)
+        self.assertEqual(observer.fault_path.read_bytes(), b"")
+        self.assertTrue(all(event["stage"] == "trainer_fit" for event in events))
+        index = json.loads((observer.directory / "index.json").read_text())
+        self.assertFalse(index["periodic_stack_dump_enabled"])
+        self.assertNotIn("stack_interval_seconds", index)
+        self.assertEqual(index["pid"], os.getpid())
+        self.assertEqual(index["interval_seconds"], .01)
+
+    def test_factory_defaults_to_no_native_timer_and_forwards_explicit_opt_in(self):
+        fake = types.SimpleNamespace(start=lambda: self.observer)
+        with patch.object(entry, "PassiveControlDiagnostics", return_value=fake) as constructor:
+            entry.passive_diagnostics(self.run)
+            constructor.assert_called_once_with(self.run, periodic_stack_dump=False)
+            constructor.reset_mock()
+            entry.passive_diagnostics(self.run, periodic_stack_dump=True)
+            constructor.assert_called_once_with(self.run, periodic_stack_dump=True)
 
     def test_reference_failure_keeps_the_already_armed_local_observer(self):
         blocked = self.run / "not-a-directory"

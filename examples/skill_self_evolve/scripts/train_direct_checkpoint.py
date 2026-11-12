@@ -47,13 +47,16 @@ def _await_frames(coroutine, limit=12):
 class PassiveControlDiagnostics:
     """One learner-local observer; disk I/O never runs on its asyncio loop.
 
-    The periodic fault dump remains useful if synchronous code stops the loop.
+    Periodic native stack dumps are opt-in: their unlocked frame walk can crash
+    a busy Python 3.11 process. The Python watchdog remains enabled by default.
     Loop callbacks only inspect code locations and enqueue bounded metadata.
     Local files survive close so an operator can archive them after shutdown.
     """
 
-    def __init__(self, run, *, interval=30.0, stack_interval=120.0, local_parent="/tmp", faults=faulthandler):
+    def __init__(self, run, *, interval=30.0, stack_interval=120.0, periodic_stack_dump=False,
+                 local_parent="/tmp", faults=faulthandler):
         self.interval, self.stack_interval, self.faults = interval, stack_interval, faults
+        self.periodic_stack_dump_enabled = periodic_stack_dump
         self.directory = Path(tempfile.mkdtemp(prefix=f"skill-control-{os.getpid()}-", dir=local_parent))
         self.directory.chmod(0o700)
         self.fault_path, self.snapshot_path = self.directory / "threads.log", self.directory / "async-stages.jsonl"
@@ -69,7 +72,8 @@ class PassiveControlDiagnostics:
         index = {"schema_version": 1, "kind": "passive_local_control_diagnostics", "pid": os.getpid(),
                  "local_directory": str(self.directory), "thread_stacks": str(self.fault_path),
                  "async_stages": str(self.snapshot_path), "interval_seconds": interval,
-                 "stack_interval_seconds": stack_interval,
+                 "periodic_stack_dump_enabled": periodic_stack_dump,
+                 **({"stack_interval_seconds": stack_interval} if periodic_stack_dump else {}),
                  "scope": "code locations and control flags only; no prompts/tokens/locals/model requests"}
         path = self.directory / "index.json"
         path.write_text(json.dumps(index, indent=2) + "\n")
@@ -84,12 +88,13 @@ class PassiveControlDiagnostics:
     def start(self):
         if self._closed or self._thread is not None:
             raise RuntimeError("Passive diagnostics can only start once")
-        self.faults.dump_traceback_later(self.stack_interval, repeat=True, file=self._fault_file, exit=False)
-        self._timer_started = True
+        if self.periodic_stack_dump_enabled:
+            self.faults.dump_traceback_later(self.stack_interval, repeat=True, file=self._fault_file, exit=False)
+            self._timer_started = True
         self._thread = threading.Thread(target=self._run, name="passive-control-diagnostics", daemon=True)
         self._thread.start()
-        # Arm local diagnostics before touching NAS so even a slow one-time
-        # artifact reference cannot prevent a local fault-stack capture.
+        # Start local observation before touching NAS so a slow one-time
+        # artifact reference cannot prevent watchdog metadata capture.
         try:
             self._reference.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             with self._reference.open("x") as stream:
@@ -213,10 +218,10 @@ class _NoDiagnostics:
         pass
 
 
-def passive_diagnostics(run):
+def passive_diagnostics(run, *, periodic_stack_dump=False):
     observer = None
     try:
-        observer = PassiveControlDiagnostics(run)
+        observer = PassiveControlDiagnostics(run, periodic_stack_dump=periodic_stack_dump)
         return observer.start()
     except Exception:
         if observer is not None:
