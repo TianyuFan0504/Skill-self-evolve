@@ -124,9 +124,10 @@ The tested `accounts.py` SHA256 is
 Server CPU logs and the 22-check summary are retained under
 `/root/nas_chaohuang/skill_training/diagnostics/module64_pidfd_acceptance_1794457295/`.
 
-The separate actual `AccountPool.drain` acceptance is still waiting for the
+At that acceptance cut, the separate actual `AccountPool.drain` probe was waiting for the
 existing Ceph pool lock before acquiring a lease or spawning any child. It
-remains one original live process; the successful direct helper check is a
-different, explicitly narrower diagnostic and does not replace that pending
-end-to-end observation. Existing failed run results, incidents and quarantined
+was subsequently superseded and cancelled after a fresh disjoint local
+registry passed the [actual pool and Native acceptance](ACCOUNT_ISOLATION.md).
+The direct helper check and that later end-to-end observation retain separate
+source and evidence identities. Existing failed run results, incidents and quarantined
 UIDs are retained; this repair does not relabel or automatically release them.
