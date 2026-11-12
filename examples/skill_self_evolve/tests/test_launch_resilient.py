@@ -1,6 +1,7 @@
 """Local launcher metadata contracts; all process/service/model actions stubbed."""
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -94,6 +95,64 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(values[
             "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.max_concurrent_sessions"], "32")
         self.assertEqual(values["trainer.v1.sampler.custom_sampler.name"], "ResilientReplayBuffer")
+
+    def test_spawn_safe_mode_fixes_the_public_runner_class(self):
+        args, overrides = module.arguments(["--spawn-safe"])
+        self.assertTrue(args.spawn_safe)
+        values = dict(value.split("=", 1) for value in overrides)
+        key = "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn"
+        self.assertEqual(values[key], "skill_harness_examples.train_spawn_safe.SpawnSafeRunner")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            module.arguments(["--spawn-safe", key + "=skill_harness_examples.train_resilient_setup.safe_run_task"])
+
+    def test_spawn_helper_failure_precedes_preparation(self):
+        fake = types.ModuleType("skill_harness_examples.native_posix_spawn")
+
+        def unavailable(_):
+            raise FileNotFoundError("CPU fixture missing helper")
+
+        fake.NativeSpawnPolicy = unavailable
+        with patch.dict(sys.modules, {fake.__name__: fake}), self.assertRaises(FileNotFoundError):
+            self.execute("--spawn-safe", "--prepare-only")
+        self.assertEqual(self.events, [])
+        self.assertFalse(self.run.exists())
+
+    def test_spawn_safe_submission_uses_new_driver_and_preserves_supervision(self):
+        fake = types.ModuleType("skill_harness_examples.native_posix_spawn")
+        seen = []
+        fake.NativeSpawnPolicy = lambda path: seen.append(path)
+        with patch.dict(sys.modules, {fake.__name__: fake}), \
+                patch.object(module, "launch_receipt", return_value=self.run / "receipt.json"), \
+                patch.object(module.subprocess, "Popen", return_value=types.SimpleNamespace(pid=1234)) as spawn:
+            self.assertEqual(self.execute("--spawn-safe"), 0)
+        self.assertEqual(seen, [module.RECIPE / "scripts/native_posix_spawn_helper.so"])
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[2], "--supervise")
+        payload = json.loads(Path(command[3]).read_text())
+        self.assertTrue(payload["command"][1].endswith("train_spawn_safe.py"))
+        self.assertEqual(payload["environment_pid"], 987654)
+
+    def test_spawn_receipt_binds_driver_sources_and_built_helper(self):
+        recipe = Path(self.temporary.name) / "project/examples/skill_self_evolve"
+        root = recipe.parent.parent
+        paths = [recipe / name for name in [
+            "run_resilient.sh", "scripts/train_resilient_setup.py", "scripts/train_spawn_safe.py",
+            "scripts/train_quiescent_eval.py", "scripts/native_posix_spawn.py",
+            "scripts/native_posix_spawn.c", "scripts/native_posix_spawn_helper.so",
+        ]] + [root / "skill_harness_examples/__init__.py"]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(path.name.encode())
+        self.run.mkdir()
+        args = types.SimpleNamespace(spawn_safe=True, resume=False)
+        with patch.object(module, "RECIPE", recipe):
+            receipt = module.launch_receipt(self.launcher, self.run, ["cpu-fixture"],
+                                            fresh_manifest=False, args=args)
+        record = json.loads(receipt.read_text())
+        self.assertTrue(record["native_spawn_extension"])
+        self.assertEqual(record["assets"]["driver"]["path"], str(recipe / "scripts/train_spawn_safe.py"))
+        self.assertEqual(record["assets"]["spawn_helper"]["sha256"],
+                         hashlib.sha256(b"native_posix_spawn_helper.so").hexdigest())
 
     def test_invalid_flags_or_initial_eval_cannot_silently_change_semantics(self):
         for flags in (["--unknown"], ["skill_harness.evaluation.initial=true"],

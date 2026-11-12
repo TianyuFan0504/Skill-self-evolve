@@ -38,6 +38,7 @@ def arguments(argv):
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--joint", action="store_true", help="Accepted for clarity; this launcher is joint-only")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--spawn-safe", action="store_true", help="Use the installed Native posix_spawn extension")
     parser.add_argument("--foreground", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--prepare-only", action="store_true")
@@ -63,8 +64,10 @@ def arguments(argv):
         "trainer.val_before_train": "false", "trainer.val_only": "false",
         "skill_harness.evaluation.initial": "false",
         "actor_rollout_ref.rollout.n": "4",
-        "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn":
-            "skill_harness_examples.train_resilient_setup.safe_run_task",
+        "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.runner_fqn": (
+            "skill_harness_examples.train_spawn_safe.SpawnSafeRunner" if args.spawn_safe
+            else "skill_harness_examples.train_resilient_setup.safe_run_task"
+        ),
         "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.max_concurrent_sessions": "32",
         "trainer.v1.sampler.custom_sampler.path": str(RECIPE / "scripts/train_resilient_setup.py"),
         "trainer.v1.sampler.custom_sampler.name": "ResilientReplayBuffer",
@@ -157,11 +160,20 @@ def launch_receipt(launcher, run, command, *, fresh_manifest, args):
         "quiescent_driver": RECIPE / "scripts/train_quiescent_eval.py",
         "namespace": root / "skill_harness_examples/__init__.py",
     }
+    if getattr(args, "spawn_safe", False):
+        assets.update({
+            "driver": RECIPE / "scripts/train_spawn_safe.py",
+            "resilient_driver": RECIPE / "scripts/train_resilient_setup.py",
+            "spawn_python": RECIPE / "scripts/native_posix_spawn.py",
+            "spawn_c": RECIPE / "scripts/native_posix_spawn.c",
+            "spawn_helper": RECIPE / "scripts/native_posix_spawn_helper.so",
+        })
     folder = run / "launcher_runs"
     folder.mkdir(exist_ok=True, mode=0o700)
     path = folder / (str(time.time_ns()) + ".resilient.json")
     launcher.write_json(path, {
         "schema_version": 1, "kind": "public_resilient_joint_launch",
+        "native_spawn_extension": getattr(args, "spawn_safe", False),
         "command": command, "run_dir": str(run), "resume_requested": args.resume,
         "fresh_training_manifest_created": fresh_manifest,
         "original_training_manifest_preserved": (run / "training-manifest.json").exists() and not fresh_manifest,
@@ -183,12 +195,19 @@ def main(argv=None):
     if os.environ["ROLLOUT_CONCURRENCY"] != "32" or os.environ["ROLLOUT_N"] != "4":
         raise ValueError("This joint profile requires ROLLOUT_CONCURRENCY=32 and ROLLOUT_N=4")
     refuse_live_run(args.run_dir)
+    if args.spawn_safe:
+        # Validate the installed helper before any preparation or service start.
+        # Build instructions are in NATIVE_SPAWN.md; never replace a live helper.
+        from skill_harness_examples.native_posix_spawn import NativeSpawnPolicy
+
+        NativeSpawnPolicy(RECIPE / "scripts/native_posix_spawn_helper.so")
     launcher = existing_launcher()
     run = prepare(launcher, args, overrides)
     original = json.loads((run / "launch_manifest.json").read_bytes())["command"]
     if original[1:3] != ["-m", "verl.experimental.skill_harness.train"]:
         raise ValueError("Unexpected existing preparation command")
-    command = [original[0], str(RECIPE / "scripts/train_resilient_setup.py"), *original[3:]]
+    driver = "train_spawn_safe.py" if args.spawn_safe else "train_resilient_setup.py"
+    command = [original[0], str(RECIPE / "scripts" / driver), *original[3:]]
     if args.prepare_only:
         launcher.write_json(run / "status.json", {"state": "prepared", "command": command})
         receipt = launch_receipt(launcher, run, command, fresh_manifest=False, args=args)

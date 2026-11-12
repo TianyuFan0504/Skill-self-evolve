@@ -51,6 +51,21 @@ failed run's incidents/resources must be reconciled through the existing
 procedures; the launcher does not reset accounts, clear incidents or bypass
 the learner barrier.
 
+For threaded Ray workers, install and verify the helper described in
+[NATIVE_SPAWN.md](NATIVE_SPAWN.md), then select the fork-free Native boundary:
+
+```bash
+bash examples/skill_self_evolve/run_resilient.sh --spawn-safe \
+  --run-dir /root/nas_chaohuang/skill_training/runs/my_joint_experiment
+```
+
+Keep `--spawn-safe` when resuming that profile. The launcher verifies that the
+installed helper can load before preparing files or starting the service. It
+never compiles or replaces a helper while a worker may be using it. This mode
+selects `train_spawn_safe.py` and its public runner class while preserving the
+same sampler, N4, concurrency32 and existing supervision. Launch receipts also
+include the composed resilient driver, C/Python adapter and built helper hashes.
+
 ## Shared implementation and receipts
 
 The new Python adapter calls the existing `launch.py --prepare-only` in the
