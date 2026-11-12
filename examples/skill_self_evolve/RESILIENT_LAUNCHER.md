@@ -18,6 +18,13 @@ checkpoint/library seal. The normal data preparation creates the same
 3154/399/140/134 original split under the pinned benchmark/catalog profile.
 No additional tasks or synthetic chains are generated.
 
+The default checkpoint interval is10 optimizer updates: steps10,20,30,40,50,
+and60, plus the final step64. The final checkpoint is saved even though64 is
+not divisible by10. An explicitly provided `SAVE_FREQUENCY` or Hydra
+`trainer.save_freq` override remains supported. Existing running trainers have
+already resolved their configuration; applying a new interval requires their
+next controlled startup rather than changing a file underneath the process.
+
 `--foreground`, `--prepare-only`, `--preflight-only`, `--resume`, `--run-dir`
 and `--allow-busy-gpus` have the existing launcher's meanings. `--joint` is
 accepted but unnecessary; this new command is joint-only. Preparation and

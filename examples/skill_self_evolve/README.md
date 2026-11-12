@@ -179,7 +179,7 @@ that the previous job stopped.
 | `GPU_MEMORY_UTILIZATION` | 0.55 | Rollout engine memory fraction |
 | `DEV_MAX_SAMPLES` | 64 | Maximum train-derived dev games per scheduled evaluation |
 | `DEV_EVAL_FREQUENCY` | 4 | Dev evaluation interval |
-| `SAVE_FREQUENCY` | 8 | Full model/optimizer/extra checkpoint interval |
+| `SAVE_FREQUENCY` | 10 (public joint launcher) | Full model/optimizer/extra checkpoint interval; final step is always saved |
 | `MAX_CHECKPOINTS` | 2 | Model checkpoint retention; trajectory/metric files are retained |
 
 `MAX_MODEL_LENGTH` must equal prompt plus response capacity in this recipe.
