@@ -74,6 +74,32 @@ Source-relative custom sampler paths are validated against the recorded source
 root. Generation settings remain matched. The intended treatment is policy
 version 0 versus 64 and an empty base library versus trained library snapshots.
 
+## Restored final skill-store binding
+
+A resumed trainer uses `restored_state/step_<n>_<uuid>/skill_store`, while its
+original training manifest still correctly records the original preparation.
+The comparer never repairs that manifest or guesses a newer store directory.
+It reads the explicit `evaluation/final/lifecycle.json` receipt and its three
+file-hashed references to `checkpoint_seal`, `evaluation_entry` and
+`evaluation_complete` records in one `evaluation_lifecycle/driver_<uuid>`
+directory. Missing receipts on restored/external-driver runs are unsupported;
+untouched initial baselines do not require a lifecycle receipt. Original fresh
+final stages without restore/driver evidence retain their original binding.
+
+The receipt must bind the original manifest hash, published examples driver
+Git blob and file hash, unchanged enumerated runtime Git blobs, actual policy
+64 and one sealed main snapshot. The referenced `global_step_64` COMPLETE
+manifest, every retained checkpoint file hash, four EMA64 acknowledgements and
+saved controller clock are checked without loading any checkpoint tensor.
+This adds checkpoint-file reading cost to the offline comparison.
+
+Final skill snapshots and artifacts are then read from that exact sealed
+restored store. Its head must agree with the COMPLETE checkpoint copy, and all
+274 final Task contexts must use the same snapshot. Contradictory paths, heads,
+clocks, driver identities or receipt hashes remain unsupported. No `latest`
+pointer, directory-name heuristic or arbitrary run-path replacement selects
+the store. Original training configuration and raw artifacts remain unchanged.
+
 ## Backend evidence tiers
 
 A genuine owned vLLM Worker kernel-selection line is direct log evidence. When

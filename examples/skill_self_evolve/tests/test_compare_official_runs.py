@@ -20,6 +20,7 @@ import tempfile
 import types
 import unittest
 import zipfile
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -176,9 +177,10 @@ class OfficialFixture(legacy.Fixture):
 
 
 class MatchedPair:
-    def __init__(self, root, compare):
+    def __init__(self, root, compare, *, learned_skill=False):
         root = root.resolve()
         self.root = root
+        self.learned_skill = learned_skill
         self.benchmark = root / "benchmark"
         self.model = root / "shared-model"
         self.model.mkdir()
@@ -269,6 +271,14 @@ class MatchedPair:
         write(run / "skill_store/snapshots" / (snapshot + ".json"), genesis)
         loading = {"enabled": True, "snapshot_id": snapshot, "injected_refs": []}
         store = store_module.SkillStore(run / "skill_store")
+        if stage == "final" and self.learned_skill:
+            artifact = store_module.SkillArtifact(
+                "fixture-learned", "Observe before acting", "Check the current feedback before moving the target.",
+                "When a household placement goal is given.", ("pick_and_place_simple",),
+            )
+            candidate = store.stage_candidate(artifact)
+            store.admit(candidate.candidate_id, reason="Synthetic fixture identity only; not measured skill utility")
+            snapshot = store.publish([candidate.candidate_id], expected_parent=candidate.base_snapshot).snapshot_id
 
         parquet_files = {}
         for phase, identities in fixture.ids.items():
@@ -570,7 +580,8 @@ class MatchedPair:
                 original_messages = public_protocol.agent_messages([{"role": "user", "content": prompt}], initial)
 
                 def render(messages):
-                    text = json.dumps(messages, sort_keys=True, ensure_ascii=False)
+                    text = "".join("<" + row["role"] + ">" + row["content"] + "</turn>" for row in messages)
+                    text += "<assistant>"
                     return context.RenderedPrompt(text, tuple(text.encode()))
 
                 built = context.build_skill_context(
@@ -1069,6 +1080,181 @@ class CompareOfficialRunsTests(unittest.TestCase):
             self.assertFalse(evidence["kernel_log_observed"])
             self.assertEqual(evidence["tier"], "owned_cli_and_verified_selector")
             self.assertEqual(evidence["selector_identity"]["function_ast_sha256"], self.compare.SELECTOR_AST_SHA256)
+
+
+class ResumedStoreReceiptTests(unittest.TestCase):
+    """Real local Git and COMPLETE-checkpoint files; no runtime/model execution."""
+
+    compare_pair = CompareOfficialRunsTests.compare_pair
+    change = CompareOfficialRunsTests.change
+    assert_incomplete = CompareOfficialRunsTests.assert_incomplete
+
+    @classmethod
+    def setUpClass(cls):
+        cls.compare = module("_compare_resumed_store_cpu", DIRECTORY.parent / "scripts/compare_official_runs.py")
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temporary.cleanup)
+        pair_root = Path(cls.temporary.name) / "pair"
+        pair_root.mkdir()
+        cls.pair = MatchedPair(pair_root, cls.compare, learned_skill=True)
+        source = (Path(cls.temporary.name) / "source").resolve()
+        subprocess.check_call(["git", "clone", "-q", "--shared", "--no-checkout", str(ROOT), str(source)])
+        subprocess.check_call(["git", "-C", str(source), "read-tree", cls.pair.commit])
+        driver = source / cls.compare.LIFECYCLE_DRIVER
+        driver.parent.mkdir(parents=True)
+        driver.write_bytes((ROOT / cls.compare.LIFECYCLE_DRIVER).read_bytes())
+        subprocess.check_call(["git", "-C", str(source), "add", cls.compare.LIFECYCLE_DRIVER])
+        if subprocess.run(["git", "-C", str(source), "diff", "--cached", "--quiet"]).returncode:
+            subprocess.check_call([
+                "git", "-C", str(source), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Fixture driver",
+            ])
+        driver_commit = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        for role in ("base", "trained"):
+            path = cls.pair.root / role / "training-manifest.json"
+            manifest = read(path)
+            manifest["import_provenance"].update(verl_source=str(source), verl_origin=str(source / "verl/__init__.py"))
+            write(path, manifest)
+        run = cls.pair.root / "trained"
+        cls.restored = run / "restored_state" / ("step_2_" + "a" * 32) / "skill_store"
+        cls.restored.parent.mkdir(parents=True)
+        shutil.move(run / "skill_store", cls.restored)
+        snapshot = read(cls.restored / "refs/main.json")["snapshot_id"]
+        state = read(run / "controller/state.json")
+        state["protocol_fingerprint"] = "fixture-protocol"
+        write(run / "controller/state.json", state, wrapped=True)
+        checkpoint_module = cls.compare.pure_module("joint_checkpoint")
+        replay = cls.compare.pure_module("replay").CurateReplay(cls.restored.parent / "replay")
+        ledger = cls.compare.pure_module("credit").CreditLedger(cls.restored.parent / "ledger", replay)
+        versions = {
+            "code": "fixture-runtime-fingerprint", "verl": "0.9.1", "model": cls.pair.fingerprint,
+            "tokenizer": cls.pair.tokenizer_version, "template": "fixture-curator-template",
+        }
+        spec = checkpoint_module.JointCheckpointSpec(64, 64, 4, "fixture-layout", versions,
+                                                    cls.pair.fingerprint, "fixture-protocol")
+
+        def save_online(actor):
+            actor.mkdir()
+            for rank in range(4):
+                for kind in ("model", "optim", "extra_state"):
+                    (actor / f"{kind}_world_size_4_rank_{rank}.pt").write_bytes(b"CPU fixture; never unpickled")
+            (actor.parent / "data.pt").write_bytes(b"CPU dataloader state fixture; never loaded")
+            return checkpoint_module.CompletedOnlineCheckpoint(64, 64, 4, "fixture-layout", "fixture:sync-save")
+
+        def save_ema(directory):
+            result = []
+            for rank in range(4):
+                file = directory / f"ema_rank_{rank:05d}.pt"
+                file.write_bytes(b"CPU EMA fixture; never unpickled")
+                result.append({"path": str(file), "last_optimizer_step": 64})
+            return result
+
+        cls.checkpoint = checkpoint_module.JointCheckpointCoordinator().save(
+            run / "checkpoints/global_step_64", spec=spec, save_online=save_online, save_ema=save_ema,
+            skill_store=store_module.SkillStore(cls.restored), replay=replay, ledger=ledger, controller_state=state,
+            evaluation_state={
+                "evaluator_fingerprint": cls.pair.fingerprint, "protocol_fingerprint": "fixture-protocol"
+            },
+            fence=nullcontext,
+        )
+        common = {
+            "schema_version": 1, "driver_path": str(driver), "driver_sha256": file_sha(driver),
+            "driver_source_commit": driver_commit,
+            "original_training_manifest_sha256": file_sha(run / "training-manifest.json"),
+            "seal_origin": "final_checkpoint_saved_after_quiescence", "optimizer_step": 64,
+            "checkpoint_cursor": 64, "checkpoint_dir": cls.checkpoint.checkpoint_dir,
+            "manifest_id": cls.checkpoint.manifest_id, "snapshot_id": snapshot, "store_root": str(cls.restored),
+            "checkpoint_core_versions": versions,
+        }
+        parent = run / "evaluation_lifecycle" / ("driver_" + "b" * 32)
+        receipt = {**common, "kind": "quiescent_final_evaluation", "evaluation_cursor": 65}
+        for name, extra in (
+            ("checkpoint_seal", {}),
+            ("evaluation_entry", {"evaluation_cursor": 65, "background_stopped_before_test_service": True,
+                                  "validation_factory_uses_config_copy": True}),
+            ("evaluation_complete", {"evaluation_cursor": 65, "optimizer_updates_during_test": 0}),
+        ):
+            file = parent / (name + ".json")
+            write(file, {**common, **extra})
+            receipt[name] = {"path": str(file), "sha256": file_sha(file)}
+        cls.receipt_path = cls.pair.trained / "lifecycle.json"
+        write(cls.receipt_path, receipt)
+
+    @contextmanager
+    def mutated_receipt_bundle(self, **updates):
+        receipt = read(self.receipt_path)
+        files = [self.receipt_path, *[Path(receipt[key]["path"]) for key in
+                                     ("checkpoint_seal", "evaluation_entry", "evaluation_complete")]]
+        original = {path: path.read_bytes() for path in files}
+        try:
+            for key in ("checkpoint_seal", "evaluation_entry", "evaluation_complete"):
+                path = Path(receipt[key]["path"])
+                write(path, {**read(path), **updates})
+                receipt[key]["sha256"] = file_sha(path)
+            write(self.receipt_path, {**receipt, **updates})
+            yield
+        finally:
+            for path, content in original.items():
+                path.write_bytes(content)
+
+    def test_explicit_seal_reads_restored_skill_artifacts_without_rewriting_original_manifest(self):
+        original = file_sha(self.pair.root / "trained/training-manifest.json")
+        self.assertFalse((self.pair.root / "trained/skill_store").exists())
+        report = self.compare_pair()
+        self.assertTrue(report["comparison_supported"], report["reasons"])
+        self.assertEqual(report["lifecycle_evidence"]["trained"]["store_root"], str(self.restored))
+        self.assertEqual(report["pooled"]["games"], 274)
+        self.assertEqual(original, file_sha(self.pair.root / "trained/training-manifest.json"))
+
+    def test_resumed_final_missing_lifecycle_is_unsupported_not_original_store_fallback(self):
+        original = self.receipt_path.read_bytes()
+        self.addCleanup(self.receipt_path.write_bytes, original)
+        self.receipt_path.unlink()
+        self.assert_incomplete(self.compare_pair())
+
+    def test_consistently_misbound_store_head_clock_or_driver_is_unsupported(self):
+        for updates in (
+            {"store_root": str(self.pair.root / "trained/skill_store")},
+            {"snapshot_id": "f" * 64}, {"optimizer_step": 63}, {"driver_sha256": "f" * 64},
+            {"driver_source_commit": "f" * 40},
+            {"snapshot_id": "../../unexpected"},
+        ):
+            with self.subTest(updates=updates), self.mutated_receipt_bundle(**updates):
+                self.assert_incomplete(self.compare_pair())
+
+    def test_lifecycle_record_hash_mismatch_is_unsupported(self):
+        self.change(self.receipt_path, lambda value: value["evaluation_entry"].update(sha256="f" * 64))
+        self.assert_incomplete(self.compare_pair())
+
+    def test_changed_COMPLETE_file_bytes_are_unsupported(self):
+        file = Path(self.checkpoint.checkpoint_dir) / "joint_state/ema/ema_rank_00000.pt"
+        original = file.read_bytes()
+        self.addCleanup(file.write_bytes, original)
+        file.write_bytes(b"changed retained checkpoint bytes")
+        self.assert_incomplete(self.compare_pair())
+
+    def test_consistently_rehashed_wrong_EMA_clock_is_unsupported(self):
+        file = Path(self.checkpoint.checkpoint_dir) / "joint_manifest.json"
+        original = file.read_bytes()
+        self.addCleanup(file.write_bytes, original)
+        value = json.loads(original)
+        value["payload"]["ema_metadata"][0]["last_optimizer_step"] = 63
+        value["manifest_id"] = "sha256:" + sha(value["payload"])
+        write(file, value)
+        with self.mutated_receipt_bundle(manifest_id=value["manifest_id"]):
+            self.assert_incomplete(self.compare_pair())
+
+    def test_final_Task_context_must_use_the_one_sealed_snapshot(self):
+        summary = read(self.pair.trained / "summary.json")
+        cases = read(Path(summary["case_audits"]["test_seen"]))["cases"]
+        output = Path(cases[0]["episode_output_dir"])
+        snapshot = read(self.restored / "snapshots" / (read(self.receipt_path)["snapshot_id"] + ".json"))
+        value = read(output / "skill-context.json")
+        value["snapshot_id"] = snapshot["parent_id"]
+        value["context_id"] = sha({k: v for k, v in value.items() if k != "context_id"})
+        self.change(output / "skill-context.json", lambda original: original.update(value))
+        self.change(output / "result.json", lambda original: original.update(skill_context=value))
+        self.assert_incomplete(self.compare_pair())
 
 
 class BackendEvidenceTests(unittest.TestCase):

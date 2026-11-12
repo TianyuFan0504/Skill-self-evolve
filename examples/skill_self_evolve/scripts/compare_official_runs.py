@@ -22,7 +22,7 @@ import subprocess
 import sys
 import time
 import types
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[3]
 BASE_FINGERPRINT = "670423a20133031174a5c4769f8b5aa9cd4ce3f541b503d0cd522dde72173a22"
@@ -31,6 +31,14 @@ SELECTOR_RELATIVE_PATH = "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_a
 COUNTS = {"test_seen": 140, "test_unseen": 134}
 SPLITS = {"test_seen": "valid_seen", "test_unseen": "valid_unseen"}
 GREEDY = {"n": 1, "do_sample": False, "temperature": 0.0, "top_p": 1.0, "top_k": -1}
+LIFECYCLE_DRIVER = "examples/skill_self_evolve/scripts/train_quiescent_eval.py"
+LIFECYCLE_IDENTITY = (
+    "driver_path", "driver_sha256", "driver_source_commit", "original_training_manifest_sha256",
+)
+LIFECYCLE_SEAL = (
+    "seal_origin", "optimizer_step", "checkpoint_cursor", "checkpoint_dir", "manifest_id",
+    "snapshot_id", "store_root", "checkpoint_core_versions",
+)
 TRAINING_ONLY_SECTIONS = {
     "actor_rollout_ref.actor",
     "actor_rollout_ref.ref",
@@ -376,6 +384,180 @@ class Stage:
         self.check_protocol()
         self.check_identity()
         self.signature = self.config_signature(self.config)
+        self.check_lifecycle_binding()
+
+    def check_lifecycle_binding(self):
+        """Bind a resumed final stage to its explicit, successful sealed-store receipt."""
+        self.lifecycle = None
+        self.evaluation_store_root = Path(self.config["skill_harness"]["store_root"]).resolve()
+        self.sealed_snapshot_id = None
+        path = self.path / "lifecycle.json"
+        if self.base:
+            need(not path.exists(), "An initial base stage cannot use a final lifecycle receipt")
+            return
+        if not path.exists():
+            need(
+                not any(
+                    (self.root / name).exists() for name in ("restored_state", "driver_runs", "evaluation_lifecycle")
+                ),
+                "Resumed/external final evaluation lacks its explicit lifecycle receipt",
+            )
+            return  # Original fresh runs keep their original configured store.
+        receipt = self.reader.json(path)
+        links = ("checkpoint_seal", "evaluation_entry", "evaluation_complete")
+        exact_keys(
+            receipt, ("schema_version", "kind", *LIFECYCLE_IDENTITY, *LIFECYCLE_SEAL, "evaluation_cursor", *links),
+            "Final lifecycle receipt",
+        )
+        need(
+            receipt["schema_version"] == 1 and receipt["kind"] == "quiescent_final_evaluation"
+            and type(receipt["optimizer_step"]) is int and receipt["optimizer_step"] == self.version
+            and type(receipt["checkpoint_cursor"]) is int and receipt["checkpoint_cursor"] == 64
+            and isinstance(receipt["snapshot_id"], str) and re.fullmatch(r"[0-9a-f]{64}", receipt["snapshot_id"])
+            and receipt["evaluation_cursor"] == self.protocol["global_step"]
+            and receipt["seal_origin"] in (
+                "final_checkpoint_saved_after_quiescence", "restored_complete_final_checkpoint"
+            ),
+            "Final lifecycle stage/clock/seal differs",
+        )
+        need(
+            receipt["original_training_manifest_sha256"] == self.reader.hash_file(self.root / "training-manifest.json"),
+            "Lifecycle receipt does not bind the preserved original training manifest",
+        )
+        source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
+        driver = Path(receipt["driver_path"])
+        need(driver == source / LIFECYCLE_DRIVER, "Unexpected lifecycle driver source binding")
+        commit = receipt["driver_source_commit"]
+        need(
+            isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40,64}", commit),
+            "Missing lifecycle driver Git identity",
+        )
+        try:
+            blob = subprocess.check_output(
+                ["git", "-C", str(source), "show", commit + ":" + LIFECYCLE_DRIVER],
+                stderr=subprocess.PIPE, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise Error("Published lifecycle driver source is unavailable") from error
+        need(
+            hashlib.sha256(blob).hexdigest() == receipt["driver_sha256"] == self.reader.hash_file(driver)
+            and runtime_blobs(source, commit) == self.source_blobs,
+            "Lifecycle driver bytes or unchanged runtime source inventory differ",
+        )
+        records, directory = {}, None
+        for key in links:
+            ref = receipt[key]
+            exact_keys(ref, ("path", "sha256"), "Lifecycle record reference")
+            target = Path(ref["path"])
+            need(
+                target.is_absolute() and target == target.resolve()
+                and target.name == key + ".json"
+                and target.parent.parent == self.root / "evaluation_lifecycle"
+                and re.fullmatch(r"driver_[0-9a-f]{32}", target.parent.name),
+                "Lifecycle record escaped its explicit run/driver directory",
+            )
+            need(
+                directory is None or directory == target.parent, "Lifecycle records belong to different driver sessions"
+            )
+            directory = target.parent
+            need(self.reader.hash_file(target) == ref["sha256"], "Lifecycle record file hash differs")
+            record = self.reader.json(target)
+            need(
+                record.get("schema_version") == 1
+                and all(record.get(field) == receipt[field] for field in (*LIFECYCLE_IDENTITY, *LIFECYCLE_SEAL)),
+                "Lifecycle identity/store/head/clock copies disagree",
+            )
+            records[key] = record
+        need(
+            records["evaluation_entry"].get("evaluation_cursor") == receipt["evaluation_cursor"]
+            and records["evaluation_entry"].get("background_stopped_before_test_service") is True
+            and records["evaluation_entry"].get("validation_factory_uses_config_copy") is True
+            and records["evaluation_complete"].get("evaluation_cursor") == receipt["evaluation_cursor"]
+            and records["evaluation_complete"].get("optimizer_updates_during_test") == 0,
+            "Final evaluation lifecycle lacks its quiescent/config-copy/completion evidence",
+        )
+        store = Path(receipt["store_root"])
+        need(
+            store.is_absolute() and store == store.resolve() and store.name == "skill_store"
+            and store.parent.parent == self.root / "restored_state"
+            and re.fullmatch(r"step_[0-9]+_[0-9a-f]{32}", store.parent.name),
+            "Sealed restored skill store is outside its explicit run restore binding",
+        )
+        checkpoint = Path(receipt["checkpoint_dir"])
+        need(
+            checkpoint == Path(self.config["trainer"]["default_local_dir"]) / "global_step_64"
+            and checkpoint == checkpoint.resolve(),
+            "Final COMPLETE checkpoint path differs from the original configured run",
+        )
+        manifest_path = checkpoint / "joint_manifest.json"
+        envelope = json.loads(self.reader.bytes(manifest_path))
+        exact_keys(envelope, ("manifest_id", "payload"), "Joint checkpoint envelope")
+        payload = envelope["payload"]
+        need(
+            envelope["manifest_id"] == receipt["manifest_id"] == "sha256:" + INDEX.digest(payload)
+            and payload.get("schema_version") == 1 and payload.get("state") == "complete",
+            "Final checkpoint is not the intact sealed COMPLETE publication",
+        )
+        spec = pure_module("joint_checkpoint").JointCheckpointSpec(**payload["spec"])
+        need(
+            spec.optimizer_step == self.version and spec.global_step == receipt["checkpoint_cursor"]
+            and spec.world_size == 4 and dict(spec.versions) == receipt["checkpoint_core_versions"]
+            and spec.versions["verl"] == "0.9.1" and spec.versions["model"] == self.expected_fingerprint
+            and spec.versions["tokenizer"] == self.tokenizer
+            and spec.protocol_fingerprint == self.controller["protocol_fingerprint"],
+            "Final checkpoint sealed policy/core/protocol identity differs",
+        )
+        need(payload["training_state_paths"] == ["data.pt"], "Unsupported synchronous checkpoint data-state inventory")
+        actual = set()
+        for component in ("actor", "joint_state", "data.pt"):
+            location = checkpoint / component
+            for file in location.rglob("*") if location.is_dir() else (location,):
+                relative = file.relative_to(checkpoint)
+                need(not file.is_symlink(), "Checkpoint file inventory contains a symlink")
+                if "locks" not in relative.parts and file.name != ".writer.lock" and file.is_file():
+                    actual.add(relative.as_posix())
+        need(actual == set(payload["files"]), "Final COMPLETE checkpoint file inventory differs")
+        for relative, identity in payload["files"].items():
+            safe = PurePosixPath(relative)
+            need(not safe.is_absolute() and ".." not in safe.parts and str(safe) == relative, "Unsafe checkpoint file")
+            file = checkpoint / relative
+            need(
+                identity == {"sha256": self.reader.hash_file(file), "size": file.stat().st_size},
+                "Final COMPLETE checkpoint file digest differs: " + relative,
+            )
+        for rank in range(4):
+            need(
+                all(
+                    f"actor/{kind}_world_size_4_rank_{rank}.pt" in actual for kind in ("model", "optim", "extra_state")
+                ),
+                "Final online model/optimizer/RNG rank inventory is incomplete",
+            )
+        ema = payload["ema_metadata"]
+        need(
+            len(ema) == 4 and {row["file"] for row in ema} == {f"ema_rank_{rank:05d}.pt" for rank in range(4)}
+            and all(
+                row["last_optimizer_step"] == self.version and "joint_state/ema/" + row["file"] in actual for row in ema
+            ),
+            "Final COMPLETE checkpoint lacks all four EMA64 acknowledgements",
+        )
+        saved_controller = self.reader.json(checkpoint / "joint_state/controller.json")
+        need(
+            saved_controller["optimizer_step"] == self.version and saved_controller["prepared_update"] is None
+            and saved_controller["protocol_fingerprint"] == spec.protocol_fingerprint,
+            "Final saved controller does not match the sealed applied policy",
+        )
+        head = self.reader.json(store / "refs/main.json")
+        snapshot_id = receipt["snapshot_id"]
+        snapshot = self.reader.json(store / "snapshots" / (snapshot_id + ".json"))
+        captured_snapshot = self.reader.json(checkpoint / "joint_state/skill_store/snapshots" / (snapshot_id + ".json"))
+        need(
+            head == {"branch": "main", "snapshot_id": snapshot_id}
+            and INDEX.digest(snapshot) == snapshot_id and snapshot == captured_snapshot
+            and payload["snapshots"]["skill_heads"]["main"] == snapshot_id,
+            "Final restored store/head differs from its COMPLETE checkpoint seal",
+        )
+        self.evaluation_store_root, self.sealed_snapshot_id = store, snapshot_id
+        self.lifecycle = {"receipt_path": str(path), "receipt_sha256": self.reader.hash_file(path), **receipt}
 
     def check_protocol(self):
         p, summary = self.protocol, self.summary
@@ -904,7 +1086,11 @@ class Stage:
                     context["original_messages_sha256"] == INDEX.digest(original),
                     "Task prompt differs from original parquet/world",
                 )
-                store = Path(self.config["skill_harness"]["store_root"])
+                store = self.evaluation_store_root
+                need(
+                    self.sealed_snapshot_id is None or context["snapshot_id"] == self.sealed_snapshot_id,
+                    "Final Task context did not use the single receipt-sealed skill snapshot",
+                )
                 snapshot = reader.json(store / "snapshots" / (context["snapshot_id"] + ".json"))
                 need(INDEX.digest(snapshot) == context["snapshot_id"], "Pinned skill snapshot hash differs")
                 artifacts = []
@@ -1089,6 +1275,7 @@ def compare_stages(base_stage, trained_stage, *, expected_base_fingerprint=BASE_
             ),
         }
         report["backend_evidence"] = {"base": base.backend_evidence, "trained": trained.backend_evidence}
+        report["lifecycle_evidence"] = {"base": base.lifecycle, "trained": trained.lifecycle}
     except (Error, KeyError, TypeError, ValueError, OSError, AttributeError, ImportError) as error:
         report["reasons"].append(f"{type(error).__name__}: {error}")
     changed = reader.changed()
