@@ -42,7 +42,9 @@ def extension_identity(policy):
     }
 
 
-def initialized_receipt(trainer, config, imports, policy):
+def initialized_receipt(trainer, config, imports, policy, *, identity=None,
+                        suffix="all_native_spawn", kind="initialized_all_native_spawn_entry",
+                        curate_generation_ref=None, learner_runtime_ref=None, learner_runtime_observation=None):
     from omegaconf import OmegaConf
 
     from skill_harness_examples import all_native_spawn, train_spawn_safe
@@ -63,11 +65,11 @@ def initialized_receipt(trainer, config, imports, policy):
         restore_ref = {"path": str(restore_path), "sha256": hashlib.sha256(restore_path.read_bytes()).hexdigest()}
     root = Path(config.skill_harness.artifact_root)
     return train_spawn_safe._base()._publish(
-        root / "driver_runs" / (str(time.time_ns()) + ".all_native_spawn.initialized.json"),
+        root / "driver_runs" / (str(time.time_ns()) + "." + suffix + ".initialized.json"),
         {
             "schema_version": 1,
-            "kind": "initialized_all_native_spawn_entry",
-            **extension_identity(policy),
+            "kind": kind,
+            **(extension_identity(policy) if identity is None else identity),
             "imports": imports,
             "effective_config_after_trainer_init": _redact(OmegaConf.to_container(config, resolve=True)),
             "original_training_manifest_sha256": hashlib.sha256(
@@ -89,11 +91,14 @@ def initialized_receipt(trainer, config, imports, policy):
             "component_receipt_scope": (
                 "Frozen final-fit body identity is a component; lifecycle extension uses this receipt"
             ),
+            **({"curate_generation_ref": curate_generation_ref} if curate_generation_ref is not None else {}),
+            **({"learner_runtime_ref": learner_runtime_ref,
+                "learner_runtime_observation": learner_runtime_observation} if learner_runtime_ref is not None else {}),
         },
     )
 
 
-def runner_class():
+def runner_class(extension_module=None):
     import ray
 
     @ray.remote
@@ -108,6 +113,12 @@ def runner_class():
             from verl.utils.import_utils import load_class_from_fqn
             from verl.utils.logging_utils import configure_verl_logging
 
+            provider = None
+            if extension_module is not None:
+                import importlib
+
+                provider = importlib.import_module(extension_module)
+
             imports = configure_runtime()
             configure_verl_logging()
             if config.trainer.v1.trainer_mode != "sync" or config.skill_harness.mode != "skill_joint":
@@ -120,15 +131,27 @@ def runner_class():
             tq.init(config.transfer_queue)
             diagnostics = train_direct_checkpoint.passive_diagnostics(config.skill_harness.artifact_root)
             try:
+                learner_runtime_ref = None
+                if provider is not None and hasattr(provider, "prepare_learner"):
+                    diagnostics.stage("learner_start_method")
+                    learner_runtime_ref = provider.prepare_learner(config)
                 diagnostics.stage("trainer_construct")
-                trainer = train_direct_checkpoint.trainer_class()(config)
+                trainer = (train_direct_checkpoint if provider is None else provider).trainer_class()(config)
+                if learner_runtime_ref is not None:
+                    trainer._learner_runtime_ref = learner_runtime_ref
                 diagnostics.attach(trainer)
                 diagnostics.stage("trainer_init")
                 trainer.init()
                 diagnostics.stage("register_curator_spawn")
                 policy.register_curator(trainer._identity().runtime)
-                trainer._resilient_extension_identity = extension_identity(policy)
-                trainer._resilient_initialized_receipt = initialized_receipt(trainer, config, imports, policy)
+                if provider is not None:
+                    provider.prepare_trainer(trainer)
+                trainer._resilient_extension_identity = (
+                    extension_identity(policy) if provider is None else provider.extension_identity(policy)
+                )
+                trainer._resilient_initialized_receipt = (
+                    initialized_receipt if provider is None else provider.initialized_receipt
+                )(trainer, config, imports, policy)
                 diagnostics.stage("manager_create")
                 factory = load_class_from_fqn(
                     config.actor_rollout_ref.rollout.agent.agent_loop_manager_class, "AgentLoopManager"
@@ -164,7 +187,7 @@ def runner_class():
     return AllNativeTaskRunner
 
 
-def entry(config):
+def entry(config, *, extension_module=None):
     from omegaconf import OmegaConf, open_dict
 
     from skill_harness_examples import all_native_spawn
@@ -200,12 +223,19 @@ def entry(config):
     validate_config(config, use_reference_policy=need_reference_policy(config), use_critic=need_critic(config))
     apply_runtime_environment(config)
     policy = all_native_spawn.install_policy()
-    identity = extension_identity(policy)
+    provider = None
+    if extension_module is not None:
+        import importlib
+
+        provider = importlib.import_module(extension_module)
+    identity = extension_identity(policy) if provider is None else provider.extension_identity(policy)
+    suffix = "all_native_spawn" if provider is None else provider.SUFFIX
+    kind = "prelaunch_all_native_spawn_parallel_components" if provider is None else provider.PRELAUNCH_KIND
     spawn._base()._publish(
-        run / "driver_runs" / (str(time.time_ns()) + ".all_native_spawn.json"),
+        run / "driver_runs" / (str(time.time_ns()) + "." + suffix + ".json"),
         {
             "schema_version": 1,
-            "kind": "prelaunch_all_native_spawn_parallel_components",
+            "kind": kind,
             **identity,
             "observed_at_ns": time.time_ns(),
             "imports": imports,
@@ -221,7 +251,7 @@ def entry(config):
         },
     )
     try:
-        run_ppo(config, task_runner_class=runner_class())
+        run_ppo(config, task_runner_class=runner_class(extension_module))
     finally:
         if ray.is_initialized():
             ray.shutdown()

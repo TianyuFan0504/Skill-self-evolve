@@ -86,6 +86,70 @@ ALL_NATIVE_FILES = {
     "parallel_component": PARALLEL_DRIVER,
     "spawn_component": SPAWN_DRIVER,
 }
+CURATE_GENERATION_POLICY = "parallel-direct-all-native-spawn-curate-generation-v1"
+CURATE_GENERATION_V2_POLICY = "parallel-direct-all-native-spawn-curate-generation-v2"
+CURATE_GENERATION_NAMESPACE_POLICY = "queued-source-generation-namespace-v1"
+CURATE_GENERATION_MODULE = "skill_harness_examples.curate_generation"
+CURATE_GENERATION_CONTROLLER = CURATE_GENERATION_MODULE + ".GenerationController"
+CURATE_GENERATION_IDENTITY_FIELDS = (*ALL_NATIVE_IDENTITY_FIELDS, "curate_generation_extension")
+CURATE_GENERATION_FILES = {
+    **ALL_NATIVE_FILES,
+    "entry": "examples/skill_self_evolve/scripts/train_curate_generation.py",
+    "all_native_component": ALL_NATIVE_FILES["entry"],
+}
+CURATE_GENERATION_PROVIDER_FILES = {
+    "provider": "examples/skill_self_evolve/scripts/curate_generation.py",
+    "lifecycle_hook": SETUP_DRIVER,
+}
+CURATE_GENERATION_SCOPE = (
+    "New current-branch draws for queued sources without curator_jobs; old actions and terminal states are preserved"
+)
+CURATE_RUNTIME_GUARDS_POLICY = "spawn-default-and-credit-probe-semaphore-v1"
+CURATE_RUNTIME_GUARDS_FILES = {
+    "learner": "examples/skill_self_evolve/scripts/learner_runtime.py",
+    "probe": CURATE_GENERATION_PROVIDER_FILES["provider"],
+}
+CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS = (*CURATE_GENERATION_IDENTITY_FIELDS, "runtime_guards_extension")
+CURATE_LEARNER_DEFAULT_SCOPE = (
+    "Actual learner default before trainer construction; no per-worker or root-cause attestation"
+)
+CURATE_LOADER_TRANSPORT_SCOPE = (
+    "Loader transport observed before iteration; worker start method is source-linked inference, "
+    "not per-worker attestation"
+)
+
+
+def all_native_shape(value):
+    guards = value.get("policy") == CURATE_GENERATION_V2_POLICY
+    generation = value.get("policy") in (CURATE_GENERATION_POLICY, CURATE_GENERATION_V2_POLICY)
+    return {
+        "generation": generation,
+        "runtime_guards": guards,
+        "policy": CURATE_GENERATION_V2_POLICY
+        if guards
+        else CURATE_GENERATION_POLICY
+        if generation
+        else ALL_NATIVE_POLICY,
+        "fields": (
+            CURATE_RUNTIME_GUARDS_IDENTITY_FIELDS
+            if guards
+            else CURATE_GENERATION_IDENTITY_FIELDS
+            if generation
+            else ALL_NATIVE_IDENTITY_FIELDS
+        ),
+        "files": CURATE_GENERATION_FILES if generation else ALL_NATIVE_FILES,
+        "stem": "curate_generation" if generation else "all_native_spawn",
+        "initialized_kind": "initialized_curate_generation_entry"
+        if generation
+        else "initialized_all_native_spawn_entry",
+        "prelaunch_kind": (
+            "prelaunch_curate_generation_parallel_components"
+            if generation
+            else "prelaunch_all_native_spawn_parallel_components"
+        ),
+    }
+
+
 ALL_NATIVE_TRANSPORT_FILES = {
     "python": "examples/skill_self_evolve/scripts/all_native_spawn.py",
     "c": "examples/skill_self_evolve/scripts/curator_posix_spawn.c",
@@ -708,24 +772,57 @@ class Stage:
         return identity
 
     def verify_all_native_identity(self, value, *, initialized):
-        identity = {key: value[key] for key in ALL_NATIVE_IDENTITY_FIELDS}
+        shape = all_native_shape(value)
+        identity = {key: value[key] for key in shape["fields"]}
         source = Path(self.manifest["import_provenance"]["verl_source"]).resolve()
         commit = identity["driver_source_commit"]
         need(
             not self.base
-            and identity["policy"] == ALL_NATIVE_POLICY
+            and identity["policy"] == shape["policy"]
             and isinstance(commit, str)
             and re.fullmatch(r"[0-9a-f]{40,64}", commit)
-            and identity["actual_entry"] == str(source / ALL_NATIVE_FILES["entry"])
+            and identity["actual_entry"] == str(source / shape["files"]["entry"])
             and identity["core_fingerprint_scope"]
             == "Unchanged core; actual all-role spawn and direct-read providers recorded separately",
             "Unsupported AllNative entry/source scope",
         )
-        exact_keys(identity["files"], ALL_NATIVE_FILES, "AllNative entry component sources")
-        for name, relative in ALL_NATIVE_FILES.items():
+        exact_keys(identity["files"], shape["files"], "AllNative entry component sources")
+        for name, relative in shape["files"].items():
             ref = identity["files"][name]
             exact_keys(ref, ("path", "sha256"), "AllNative " + name + " source")
             self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+        if shape["generation"]:
+            extension = identity["curate_generation_extension"]
+            exact_keys(extension, ("policy", "files", "controller_class"), "Curate generation extension")
+            need(
+                extension["policy"] == CURATE_GENERATION_NAMESPACE_POLICY
+                and extension["controller_class"] == CURATE_GENERATION_CONTROLLER,
+                "Curate generation policy or controller class differs",
+            )
+            exact_keys(extension["files"], CURATE_GENERATION_PROVIDER_FILES, "Curate generation source providers")
+            for name, relative in CURATE_GENERATION_PROVIDER_FILES.items():
+                ref = extension["files"][name]
+                exact_keys(ref, ("path", "sha256"), "Curate generation " + name + " source")
+                self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
+        if shape["runtime_guards"]:
+            guards = identity["runtime_guards_extension"]
+            exact_keys(
+                guards,
+                ("policy", "files", "learner_start_method", "credit_probe_concurrency"),
+                "Curate runtime guards extension",
+            )
+            need(
+                guards["policy"] == CURATE_RUNTIME_GUARDS_POLICY
+                and guards["learner_start_method"] == "spawn"
+                and type(guards["credit_probe_concurrency"]) is int
+                and guards["credit_probe_concurrency"] == 2,
+                "Curate runtime guard intent differs from the bounded operational profile",
+            )
+            exact_keys(guards["files"], CURATE_RUNTIME_GUARDS_FILES, "Curate runtime guard source providers")
+            for name, relative in CURATE_RUNTIME_GUARDS_FILES.items():
+                ref = guards["files"][name]
+                exact_keys(ref, ("path", "sha256"), "Curate runtime guard " + name + " source")
+                self.verify_published_source(relative, commit, ref["path"], ref["sha256"])
         for name in ("checkpoint_core", "trainer_core"):
             relative = DIRECT_FILES[name]
             path = source / relative
@@ -808,15 +905,277 @@ class Stage:
         )
         return identity
 
+    def verify_curate_learner_runtime(self, initialized, identity, owner):
+        """Check observed process default and later loader transport separately."""
+        ref = initialized["learner_runtime_ref"]
+        exact_keys(ref, ("path", "sha256"), "Learner runtime observation reference")
+        path = Path(ref["path"])
+        need(
+            path == path.resolve()
+            and path.parent == self.root / "driver_runs"
+            and re.fullmatch(r"[0-9]+\.learner_runtime\.json", path.name)
+            and self.reader.hash_file(path) == ref["sha256"],
+            "Learner runtime observation path/hash differs",
+        )
+        observed = self.reader.json(path)
+        exact_keys(
+            observed,
+            (
+                "schema_version",
+                "kind",
+                "policy",
+                "owner",
+                "observed_before",
+                "previous_default_start_method",
+                "observed_default_start_method",
+                "configured_dataloader_workers",
+                "configured_credit_concurrency",
+                "physical_credit_probe_concurrency",
+                "provider_ref",
+                "scope",
+            ),
+            "Observed learner process default",
+        )
+        config = initialized["effective_config_after_trainer_init"]
+        need(
+            observed["schema_version"] == 1
+            and observed["kind"] == "observed_spawn_learner_default"
+            and observed["policy"] == CURATE_RUNTIME_GUARDS_POLICY
+            and observed["owner"] == owner
+            and observed["observed_before"] == "trainer_construct"
+            and observed["previous_default_start_method"] in (None, "fork", "spawn", "forkserver")
+            and observed["observed_default_start_method"] == "spawn"
+            and type(observed["configured_dataloader_workers"]) is int
+            and observed["configured_dataloader_workers"] == field(config, "data.dataloader_num_workers") == 4
+            and type(observed["configured_credit_concurrency"]) is int
+            and observed["configured_credit_concurrency"]
+            == field(config, "skill_harness.joint.credit_concurrency")
+            == 8
+            and type(observed["physical_credit_probe_concurrency"]) is int
+            and observed["physical_credit_probe_concurrency"] == 2
+            and observed["provider_ref"] == identity["runtime_guards_extension"]["files"]["learner"]
+            and observed["scope"] == CURATE_LEARNER_DEFAULT_SCOPE,
+            "Observed learner spawn default, owner, timing or unchanged configuration differs",
+        )
+        transport = initialized["learner_runtime_observation"]
+        exact_keys(transport, ("default_start_method", "train", "val", "scope"), "Initialized loader transport")
+        need(
+            transport["default_start_method"] == "spawn" and transport["scope"] == CURATE_LOADER_TRANSPORT_SCOPE,
+            "Initialized loader default or source-linked inference scope differs",
+        )
+        for role in ("train", "val"):
+            loader = transport[role]
+            exact_keys(
+                loader,
+                (
+                    "dataset_class",
+                    "num_workers",
+                    "multiprocessing_context",
+                    "iterator_started",
+                    "serialize_dataset_before",
+                    "serialize_dataset_after",
+                    "dataframe_fingerprint",
+                    "dataset_length",
+                    "filtered_dataframe_unchanged",
+                    "processor_before_class",
+                    "processor_after_class",
+                    "trainer_processor_unchanged",
+                    "text_only_transport",
+                ),
+                "Initialized " + role + " loader transport",
+            )
+            need(
+                loader["dataset_class"] == "verl.utils.dataset.rl_dataset.RLHFDataset"
+                and type(loader["num_workers"]) is int
+                and loader["num_workers"] == 4
+                and loader["multiprocessing_context"] in (None, "spawn")
+                and loader["iterator_started"] is False
+                and type(loader["serialize_dataset_before"]) is bool
+                and loader["serialize_dataset_after"] is True
+                and isinstance(loader["dataframe_fingerprint"], str)
+                and bool(loader["dataframe_fingerprint"])
+                and type(loader["dataset_length"]) is int
+                and loader["dataset_length"] > 0
+                and loader["filtered_dataframe_unchanged"] is True
+                and (
+                    loader["processor_before_class"] is None
+                    or (
+                        isinstance(loader["processor_before_class"], str)
+                        and re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", loader["processor_before_class"])
+                    )
+                )
+                and loader["processor_after_class"] is None
+                and loader["trainer_processor_unchanged"] is True
+                and loader["text_only_transport"] is True,
+                "Initialized " + role + " loader transport changed data, workers or iteration boundary",
+            )
+        return {
+            "constructor_observation_ref": ref,
+            "observed_default_start_method": "spawn",
+            "loader_transport_observation": transport,
+            "delegated_probe_limit": 2,
+            "scope": (
+                "Observed defaults and loader transport; worker context is source-linked inference, not attestation"
+            ),
+        }
+
+    def verify_curate_generation_activation(self, initialized, identity, seal):
+        """Bind preparation to the later controller activation and sealed state.
+
+        Prepared-owner fields are retained metadata, not live PID attestation.
+        The activation and published provider identify the controller that ran;
+        this verifier neither loads models nor reconstructs behavior logprobs.
+        """
+        ref = initialized["curate_generation_ref"]
+        exact_keys(ref, ("path", "sha256"), "Prepared curate generation reference")
+        path = Path(ref["path"])
+        directory = self.root / "controller/generation_epochs"
+        need(
+            path == path.resolve()
+            and path.parent == directory
+            and re.fullmatch(r"[0-9a-f]{64}\.json", path.name)
+            and self.reader.hash_file(path) == ref["sha256"],
+            "Prepared curate generation path/hash differs",
+        )
+        prepared = self.reader.json(path)
+        exact_keys(
+            prepared,
+            (
+                "schema_version",
+                "kind",
+                "policy",
+                "namespace",
+                "created_at_ns",
+                "owner",
+                "source_checkpoint",
+                "provider_ref",
+                "scope",
+            ),
+            "Prepared curate generation namespace",
+        )
+        namespace = path.stem
+        owner = prepared["owner"]
+        exact_keys(owner, ("pid", "start_ticks"), "Prepared generation owner metadata")
+        need(
+            prepared["schema_version"] == 1
+            and prepared["kind"] == "prepared_curate_generation_namespace"
+            and prepared["policy"] == CURATE_GENERATION_NAMESPACE_POLICY
+            and prepared["namespace"] == namespace
+            and type(prepared["created_at_ns"]) is int
+            and prepared["created_at_ns"] > 0
+            and all(type(owner[key]) is int and owner[key] > 0 for key in ("pid", "start_ticks"))
+            and prepared["provider_ref"] == identity["curate_generation_extension"]["files"]["provider"]
+            and prepared["scope"] == CURATE_GENERATION_SCOPE,
+            "Prepared curate generation namespace/provider/scope differs",
+        )
+        restored = initialized["restored_checkpoint"]
+        source_clock = 0 if restored is None else restored["spec"]["optimizer_step"]
+        expected_source = (
+            None
+            if restored is None
+            else {
+                "checkpoint_dir": restored["checkpoint_dir"],
+                "manifest_id": restored["manifest_id"],
+                "optimizer_step": source_clock,
+            }
+        )
+        need(prepared["source_checkpoint"] == expected_source, "Curate generation source checkpoint differs")
+        need(
+            type(source_clock) is int and 0 <= source_clock < seal["optimizer_step"] == 64,
+            "Curate generation entry requires a source optimizer step below the final target",
+        )
+        guarded = all_native_shape(identity)["runtime_guards"]
+        runtime_evidence = self.verify_curate_learner_runtime(initialized, identity, owner) if guarded else None
+        activated_path = directory / (namespace + ".activated.json")
+        need(activated_path == activated_path.resolve(), "Curate generation activation path differs")
+        activation_ref = {"path": str(activated_path), "sha256": self.reader.hash_file(activated_path)}
+        activated = self.reader.json(activated_path)
+        exact_keys(
+            activated,
+            (
+                "schema_version",
+                "kind",
+                "namespace",
+                "namespace_ref",
+                "controller_class",
+                "optimizer_step",
+                *(("runtime_guards",) if guarded else ()),
+            ),
+            "Activated curate generation controller",
+        )
+        need(
+            activated["schema_version"] == 1
+            and activated["kind"] == "activated_curate_generation_controller"
+            and activated["namespace"] == namespace
+            and activated["namespace_ref"] == ref
+            and activated["controller_class"] == CURATE_GENERATION_CONTROLLER
+            and activated["optimizer_step"] == source_clock,
+            "Curate generation activation namespace/controller/source clock differs",
+        )
+        if guarded:
+            guards = activated["runtime_guards"]
+            exact_keys(
+                guards,
+                (
+                    "learner_runtime_ref",
+                    "observed_default_start_method",
+                    "probe_semaphore_class",
+                    "probe_semaphore_initial_value",
+                    "configured_credit_concurrency",
+                ),
+                "Activated controller runtime guards",
+            )
+            need(
+                guards["learner_runtime_ref"] == initialized["learner_runtime_ref"]
+                and guards["observed_default_start_method"] == "spawn"
+                and guards["probe_semaphore_class"] == "asyncio.locks.Semaphore"
+                and type(guards["probe_semaphore_initial_value"]) is int
+                and guards["probe_semaphore_initial_value"] == 2
+                and type(guards["configured_credit_concurrency"]) is int
+                and guards["configured_credit_concurrency"] == 8,
+                "Activated controller spawn default or delegated probe semaphore differs",
+            )
+        checkpoint = Path(seal["checkpoint_dir"])
+        for state_path in (self.root / "controller/state.json", checkpoint / "joint_state/controller.json"):
+            state = self.reader.json(state_path)
+            need(
+                state.get("curate_generation_activation_ref") == activation_ref,
+                "Final controller/checkpoint does not bind the activated curate namespace",
+            )
+            queue = state.get("source_queue", {}).get("jobs", {})
+            need(isinstance(queue, dict), "Curate generation source queue is malformed")
+            for entry in queue.values():
+                jobs = entry.get("curator_jobs", [])
+                current = entry.get("curate_generation_namespace") == namespace
+                if jobs and entry["source_step"] > source_clock:
+                    need(current, "Post-restore source jobs lack the active curate generation namespace")
+                if current:
+                    cohort = "cohort_" + INDEX.digest([entry["update_id"], entry["episode_output_dir"], namespace])
+                    need(
+                        all(job.get("candidate_group_id") == cohort for job in jobs),
+                        "Curate source job cohort differs from its persisted execution namespace",
+                    )
+        evidence = {
+            "prepared_ref": ref,
+            "activation_ref": activation_ref,
+            "namespace": namespace,
+            "controller_class": CURATE_GENERATION_CONTROLLER,
+            "source_optimizer_step": source_clock,
+        }
+        if guarded:
+            evidence["runtime_guards"] = runtime_evidence
+        return evidence
+
     def all_native_initialized(self, extension, ref, seal):
-        exact_keys(extension, ALL_NATIVE_IDENTITY_FIELDS, "AllNative lifecycle extension")
+        shape = all_native_shape(extension)
+        exact_keys(extension, shape["fields"], "AllNative lifecycle extension")
         identity = self.verify_all_native_identity(extension, initialized=True)
         exact_keys(ref, ("path", "sha256"), "AllNative initialized receipt reference")
         path = Path(ref["path"])
         need(
             path == path.resolve()
             and path.parent == self.root / "driver_runs"
-            and re.fullmatch(r"[0-9]+\.all_native_spawn\.initialized\.json", path.name)
+            and re.fullmatch(r"[0-9]+\." + shape["stem"] + r"\.initialized\.json", path.name)
             and self.reader.hash_file(path) == ref["sha256"],
             "AllNative initialized receipt path/hash differs",
         )
@@ -826,7 +1185,7 @@ class Stage:
             (
                 "schema_version",
                 "kind",
-                *ALL_NATIVE_IDENTITY_FIELDS,
+                *shape["fields"],
                 "imports",
                 "effective_config_after_trainer_init",
                 "original_training_manifest_sha256",
@@ -839,13 +1198,15 @@ class Stage:
                 "restore_policy",
                 "core_version_binding",
                 "component_receipt_scope",
+                *(("curate_generation_ref",) if shape["generation"] else ()),
+                *(("learner_runtime_ref", "learner_runtime_observation") if shape["runtime_guards"] else ()),
             ),
             "Actual AllNative initialized receipt",
         )
         need(
             value["schema_version"] == 1
-            and value["kind"] == "initialized_all_native_spawn_entry"
-            and all(value[key] == extension[key] for key in ALL_NATIVE_IDENTITY_FIELDS)
+            and value["kind"] == shape["initialized_kind"]
+            and all(value[key] == extension[key] for key in shape["fields"])
             and value["counterfactual_loop_class"] == ALL_NATIVE_MODULE + ".AllNativeSelectorLoop"
             and value["event_loop_policy_class"] == ALL_NATIVE_MODULE + ".AllNativePolicy"
             and value["registered_curator_scope"]
@@ -865,15 +1226,18 @@ class Stage:
             and all(seal[key] == item for key, item in identity["solver_spawn_component_identity"].items()),
             "Actual AllNative learner loop/profile or frozen final-fit component binding differs",
         )
+        if shape["generation"]:
+            self.curate_generation_evidence = self.verify_curate_generation_activation(value, identity, seal)
         return path, value, identity
 
     def verify_all_native_observation(self, value, path):
+        shape = all_native_shape(value)
         exact_keys(
             value,
             (
                 "schema_version",
                 "kind",
-                *ALL_NATIVE_IDENTITY_FIELDS,
+                *shape["fields"],
                 "observed_at_ns",
                 "imports",
                 "parallel_component_ref",
@@ -890,8 +1254,8 @@ class Stage:
         need(
             path == path.resolve()
             and path.parent == self.root / "driver_runs"
-            and re.fullmatch(r"[0-9]+\.all_native_spawn\.json", path.name)
-            and value["kind"] == "prelaunch_all_native_spawn_parallel_components"
+            and re.fullmatch(r"[0-9]+\." + shape["stem"] + r"\.json", path.name)
+            and value["kind"] == shape["prelaunch_kind"]
             and value["original_training_manifest_preserved"] is True
             and value["parallel_component_ref"] == identity["files"]["parallel_component"],
             "AllNative prelaunch entry/component binding differs",
@@ -993,7 +1357,10 @@ class Stage:
         return checked
 
     def verify_parallel_observation(self, value, path):
-        if value.get("kind") == "prelaunch_all_native_spawn_parallel_components":
+        if value.get("kind") in (
+            "prelaunch_all_native_spawn_parallel_components",
+            "prelaunch_curate_generation_parallel_components",
+        ):
             return self.verify_all_native_observation(value, path)
         if value.get("kind") == "prelaunch_direct_checkpoint_parallel_components":
             return self.verify_direct_observation(value, path)
@@ -1187,6 +1554,7 @@ class Stage:
                     *(self.root / "driver_runs").glob("*.parallel_client.json"),
                     *(self.root / "driver_runs").glob("*.direct_checkpoint.json"),
                     *(self.root / "driver_runs").glob("*.all_native_spawn.json"),
+                    *(self.root / "driver_runs").glob("*.curate_generation.json"),
                 ]
             )
         )
@@ -1197,15 +1565,17 @@ class Stage:
                 if value.get("client_adapter", {}).get("task_profile", {}).get("sha256") == expected_hash:
                     observed.append((path, value))
         direct = [(path, value) for path, value in observed if path.name.endswith(".direct_checkpoint.json")]
-        all_native = [(path, value) for path, value in observed if path.name.endswith(".all_native_spawn.json")]
+        all_native = [
+            (path, value)
+            for path, value in observed
+            if path.name.endswith((".all_native_spawn.json", ".curate_generation.json"))
+        ]
         # A direct continuation establishes its own outer-entry/service chain.
         # Historical parallel observers are not substitutes or dependencies.
         if direct or all_native:
             need(
                 all(value.get("kind") == "prelaunch_direct_checkpoint_parallel_components" for _, value in direct)
-                and all(
-                    value.get("kind") == "prelaunch_all_native_spawn_parallel_components" for _, value in all_native
-                ),
+                and all(value.get("kind") == all_native_shape(value)["prelaunch_kind"] for _, value in all_native),
                 "Unknown direct checkpoint observation kind",
             )
             lifecycle = self.reader.json(self.path / "lifecycle.json")
@@ -1501,7 +1871,11 @@ class Stage:
             self.direct_evidence["spawn_component_initialized_ref"] = value["spawn_component_initialized_ref"]
 
     def check_initialized_setup(self, extension, ref, seal, final_spec):
-        all_native = extension.get("policy") == ALL_NATIVE_POLICY
+        all_native = extension.get("policy") in (
+            ALL_NATIVE_POLICY,
+            CURATE_GENERATION_POLICY,
+            CURATE_GENERATION_V2_POLICY,
+        )
         if all_native:
             direct = self.all_native_initialized(extension, ref, seal)
             path, initialized, identity = direct
@@ -1761,7 +2135,7 @@ class Stage:
                 self.direct_evidence["checkpoint_save_frequency"] = cadence
             if all_native:
                 self.initialized_evidence.update(
-                    operational_policy=ALL_NATIVE_POLICY,
+                    operational_policy=identity["policy"],
                     actual_learner_loop=initialized["counterfactual_loop_class"],
                 )
                 self.all_native_evidence = {
@@ -1776,6 +2150,8 @@ class Stage:
                     "final_fit_component": extension,
                     "scope": "Actual learner transport; unchanged primary-worker inference component signature",
                 }
+                if all_native_shape(identity)["generation"]:
+                    self.all_native_evidence["curate_generation"] = self.curate_generation_evidence
 
     def check_lifecycle_binding(self):
         """Bind a resumed final stage to its explicit, successful sealed-store receipt."""
@@ -2599,7 +2975,7 @@ def extension_signature(identity):
 
 
 def all_native_source_signature(value):
-    identity = {key: copy.deepcopy(value.get(key)) for key in ALL_NATIVE_IDENTITY_FIELDS}
+    identity = {key: copy.deepcopy(value.get(key)) for key in all_native_shape(value)["fields"]}
     native = identity["all_role_native_spawn"]
     if isinstance(native, dict):
         native.pop("curator_profiles", None)  # Prelaunch precedes actual learner profile registration.
