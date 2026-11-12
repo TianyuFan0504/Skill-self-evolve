@@ -477,6 +477,15 @@ class AlfworldUserSandbox(LocalSandbox):
                 expected_tmp=self.private_tmp_identity,
             )
             process_env.update(controlled_env)
+            # The launcher rebuilds the environment; bootstrap's offline flags
+            # do not survive implicitly. Force them after all caller merges.
+            process_env.update(
+                PIP_NO_INDEX="1",
+                UV_OFFLINE="1",
+                HF_HUB_OFFLINE="1",
+                HF_DATASETS_OFFLINE="1",
+                TRANSFORMERS_OFFLINE="1",
+            )
             if not callable(self.register_native_budget):
                 raise AccountIsolationError("The native launcher requires a host budget registration callback")
             self.budget_registration = await self.register_native_budget(timeout)

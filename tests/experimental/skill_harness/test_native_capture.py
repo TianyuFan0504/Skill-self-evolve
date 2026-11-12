@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import http.server
 import importlib.util
 import json
 import os
@@ -16,9 +17,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,10 +175,80 @@ class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
     def diagnostic(self):
         return json.loads((self.root / "native-capture-diagnostics.jsonl").read_text().splitlines()[-1])
 
-    async def execute(self, script, *, timeout=5):
+    async def execute(self, script, *, timeout=5, env=None):
         home = "/tmp/codex-home-" + uuid.uuid4().hex
         command = "env CODEX_HOME=" + home + " " + shlex.join([sys.executable, "-c", script])
-        return await self.sandbox._exec(["bash", "-c", command], timeout=timeout, workdir=str(self.root))
+        return await self.sandbox._exec(["bash", "-c", command], timeout=timeout, workdir=str(self.root), env=env)
+
+    async def test_spawned_native_process_forces_all_offline_flags_after_caller_overrides(self):
+        flags = {
+            key: "0"
+            for key in ("PIP_NO_INDEX", "UV_OFFLINE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE")
+        }
+        keys = [*flags, "NO_PROXY", "no_proxy", "ALFWORLD_SESSION_URL"]
+        script = "import os,json;print(json.dumps({key:os.environ.get(key) for key in " + repr(keys) + "}))"
+        with patch.dict(os.environ, flags):
+            result = await self.execute(script, env=flags)
+        self.assertEqual(result.exit_code, 0)
+        observed = json.loads(result.stdout)
+        self.assertEqual({key: observed[key] for key in flags}, dict.fromkeys(flags, "1"))
+        self.assertEqual(observed["NO_PROXY"], "127.0.0.1,localhost")
+        self.assertEqual(observed["no_proxy"], "127.0.0.1,localhost")
+        self.assertEqual(observed["ALFWORLD_SESSION_URL"], self.sandbox.session_url)
+
+    async def test_spawned_pip_respects_offline_flag_without_hitting_loopback_index(self):
+        self.assertIsNotNone(importlib.util.find_spec("pip"), "This CPU acceptance requires installed pip")
+        hits = []
+
+        class Index(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"<html></html>")
+
+            def log_message(self, *_):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Index)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        index = "http://127.0.0.1:" + str(server.server_port) + "/simple"
+        with urllib.request.urlopen(index, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+        self.assertEqual(len(hits), 1)  # The local index is reachable.
+        hits.clear()
+        argv = [
+            sys.executable,
+            "-m",
+            "pip",
+            "--disable-pip-version-check",
+            "-v",
+            "install",
+            "--dry-run",
+            "--no-cache-dir",
+            "--retries",
+            "0",
+            "--timeout",
+            "1",
+            "--index-url",
+            index,
+            "--target",
+            str(self.root / "unused-package-target"),
+            "offline-env-proof-" + uuid.uuid4().hex,
+        ]
+        script = (
+            "import subprocess,json;result=subprocess.run(" + repr(argv) + ",capture_output=True,text=True);"
+            "print(json.dumps({'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}))"
+        )
+        result = await self.execute(script, timeout=10, env={"PIP_NO_INDEX": "0", "PIP_CONFIG_FILE": os.devnull})
+        self.assertEqual(result.exit_code, 0)
+        pip = json.loads(result.stdout)
+        self.assertNotEqual(pip["returncode"], 0)
+        self.assertIn("No matching distribution found", pip["stdout"] + pip["stderr"])
+        self.assertEqual(hits, [])
 
     async def wait_file(self, path):
         async def available():
