@@ -263,6 +263,7 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
     @classmethod
     def from_config(cls, *, config, **kwargs):
         instance = super().from_config(config=config, **kwargs)
+        instance._skill_strict_train_groups = _get(config.skill_harness, "mode") == "skill_joint"
         instance._skill_loading = loading_settings(config)
         instance._skill_store_root = _get(config.skill_harness, "store_root")
         instance._skill_pin_directory = None
@@ -294,13 +295,29 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
             partition_id=partition_id,
             pin_directory=getattr(self, "_skill_pin_directory", None),
         )
-        return await super()._run_prompt_rollouts(
+        stats = await super()._run_prompt_rollouts(
             sample_fields=pinned,
             sample_index=sample_index,
             global_steps=global_steps,
             partition_id=partition_id,
             num_sessions=num_sessions,
         )
+        if (
+            getattr(self, "_skill_strict_train_groups", False)
+            and partition_id == "train"
+            and pinned.get("tools_kwargs", {}).get("task", {}).get("name") == "alfworld_skill_training"
+            and isinstance(stats, Mapping)
+            and stats.get("num_failed_sessions", 0) > 0
+        ):
+            import transfer_queue as tq
+
+            # The parent has awaited every sibling. Preserve its actual session
+            # statistics, but never call an incomplete training group finished.
+            # The custom sampler also checks the pre-exception local archive
+            # registry, closing the parent's earlier provisional-finished gap.
+            await tq.async_kv_put(key=str(pinned["uid"]), partition_id=partition_id, tag={"status": "failure"})
+            stats = {**stats, "num_failed_uids": 1}
+        return stats
 
     async def _run_agent_episode(
         self, *, sample_fields, sample_index, session_index, global_steps, runner_name, runner_config, sampling_params,

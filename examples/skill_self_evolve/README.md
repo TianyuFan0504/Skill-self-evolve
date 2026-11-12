@@ -290,6 +290,10 @@ explicitly abstain without inventing a skill or reward. The default credit
 budget is 32 pairs per update and ready replay accepts up to 32 labels.
 See [background scheduling](BACKGROUND_SKILL_PIPELINE.md) and
 [abstention records](CURATOR_ABSTENTION.md) for version pins and checkpoint cuts.
+The supported custom sampler refills complete failed prompt groups, including
+materialized siblings. A host-local archive-failure record prevents a partial
+group from slipping through the framework's provisional finished status.
+See [local archive failures](LOCAL_ARCHIVE_FAILURES.md) for the fault boundary.
 
 Curator inputs require a nonempty observed environment action sequence. A
 completed training episode with a consistent private zero-step result and an

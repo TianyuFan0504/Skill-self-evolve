@@ -69,6 +69,15 @@ skill_harness:
     frozen_model_path: ${actor_rollout_ref.model.path}
 
 trainer:
+  v1:
+    sync:
+      train_batch_size: ${data.train_batch_size}
+    sampler:
+      # Refill complete failed groups, including those with valid sibling rows.
+      sync_refill_failed_groups: true
+      custom_sampler:
+        path: verl.experimental.skill_harness.group_sampler
+        name: ArchiveAwareReplayBuffer
   n_gpus_per_node: ${oc.decode:${oc.env:TRAINING_GPUS,4}}
   checkpoint_callback_class: verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback
   # A newer partial save must never prune the previous COMPLETE joint snapshot.
