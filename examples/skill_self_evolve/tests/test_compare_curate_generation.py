@@ -34,27 +34,28 @@ class CurateGenerationComparisonTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes((ROOT / relative).read_bytes())
             subprocess.check_call(["git", "-C", str(cls.source), "add", relative])
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(cls.source),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "commit",
-                "-q",
-                "-m",
-                "Curate generation fixture",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        if subprocess.run(["git", "-C", str(cls.source), "diff", "--cached", "--quiet"]).returncode:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(cls.source),
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "Curate generation fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
         commit = subprocess.check_output(["git", "-C", str(cls.source), "rev-parse", "HEAD"], text=True).strip()
         for component in (cls.spawn, cls.loaded_spawn):
             component["driver_source_commit"] = commit
@@ -358,27 +359,28 @@ class GuardedCurateGenerationComparisonTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes((ROOT / relative).read_bytes())
             subprocess.check_call(["git", "-C", str(cls.source), "add", relative])
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(cls.source),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "commit",
-                "-q",
-                "-m",
-                "Guarded curate generation fixture",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        if subprocess.run(["git", "-C", str(cls.source), "diff", "--cached", "--quiet"]).returncode:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(cls.source),
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "Guarded curate generation fixture",
+                ],
+                check=True,
+                capture_output=True,
+            )
         commit = subprocess.check_output(["git", "-C", str(cls.source), "rev-parse", "HEAD"], text=True).strip()
         for component in (cls.spawn, cls.loaded_spawn):
             component["driver_source_commit"] = commit
