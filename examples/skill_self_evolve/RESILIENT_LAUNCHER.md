@@ -1,0 +1,76 @@
+# Public one-command joint launcher
+
+With the documented original benchmark, model, training Python, compatible
+Uni-Agent and existing private account registry installed, start a fresh joint
+run without a captured private environment:
+
+```bash
+cd /workspace/verl-0.9.1
+bash examples/skill_self_evolve/run_resilient.sh \
+  --run-dir /root/nas_chaohuang/skill_training/runs/my_joint_experiment
+```
+
+The default profile is solver4 + curator2 + frozen2, batch32/N4, Native
+concurrency32, 64 optimizer updates, original ALFWorld data, Native900s and full
+36,864 capacity. Initial official/development validation is disabled; final
+official evaluation remains enabled. Final evaluation reuses the quiescent
+checkpoint/library seal. The normal data preparation creates the same
+3154/399/140/134 original split under the pinned benchmark/catalog profile.
+No additional tasks or synthetic chains are generated.
+
+`--foreground`, `--prepare-only`, `--preflight-only`, `--resume`, `--run-dir`
+and `--allow-busy-gpus` have the existing launcher's meanings. `--joint` is
+accepted but unnecessary; this new command is joint-only. Preparation and
+preflight modes are mutually exclusive. Unknown flags are rejected. Remaining
+arguments are ordinary Hydra `key=value` overrides; pretraining evaluation,
+the safe runner/sampler, Native concurrency32 and N4 are fixed explicitly.
+Use the old `run.sh` for solver-only training or the separately planned deferred
+zero-epoch base reference with official initial evaluation.
+
+`--run-dir` controls the artifact destination. An explicit Hydra
+`skill_harness.artifact_root` is accepted only when it names that same absolute
+resolved directory; redirection and whole-harness replacements are rejected
+before preparation writes. The resolved preflight config is checked again
+before creating a fresh training manifest. Read-only model/data input paths
+remain configurable.
+
+Environment variables retain the existing recipe's model/data/training
+controls. For example, set `MODEL_PATH`, `TRAINING_PYTHON`,
+`ALFWORLD_BENCHMARK_ROOT`, `TOTAL_TRAINING_STEPS` or `TRAIN_BATCH_SIZE` before
+the command. `ROLLOUT_CONCURRENCY` and `ROLLOUT_N`, if provided, must be32 and4.
+Retain the same custom environment and Hydra overrides when resuming:
+
+```bash
+bash examples/skill_self_evolve/run_resilient.sh \
+  --run-dir /root/nas_chaohuang/skill_training/runs/my_joint_experiment --resume
+```
+
+Resume keeps the strict COMPLETE checkpoint compatibility checks. A recorded
+live training process or owned supervisor is refused before preparation. A
+failed run's incidents/resources must be reconciled through the existing
+procedures; the launcher does not reset accounts, clear incidents or bypass
+the learner barrier.
+
+## Shared implementation and receipts
+
+The new Python adapter calls the existing `launch.py --prepare-only` in the
+same process, temporarily routing CLI arguments rather than replacing its
+functions. Existing preparation archives old attempt metadata before rewriting
+it and leaves resolved runtime paths in `os.environ`. Service creation,
+preflight and supervision then use the existing helpers with the new resilient
+driver command. Detached jobs use the original `launch.py --supervise` mode.
+Preflight failure stops only a service started by this invocation.
+
+For a fresh actual training start, the adapter creates the original training
+manifest once from the resolved CPU-preflight config and existing manifest
+writer. Resume preserves that original manifest. Every invocation also writes
+a new `launcher_runs/*.resilient.json` receipt containing the exact command and
+launcher/shell/driver/quiescent-driver/namespace hashes. Post-init effective
+config and final lifecycle receipts remain the resilient driver's responsibility.
+This launcher adds no core source fingerprint change and does not rewrite the
+existing `run.sh`, `launch.py` or active training drivers.
+
+CPU tests verify archival/order, same-process path handoff, duplicate refusal,
+flag rejection, owned-service cleanup, exact supervisor payload and manifest
+preservation with all service/model/process calls stubbed. They are not a
+training or GPU acceptance run.

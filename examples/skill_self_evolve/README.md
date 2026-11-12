@@ -5,10 +5,10 @@ Uni-Agent Responses Gateway and trains the resulting token trajectories with
 the pinned verl 0.9.1 checkout. Codex remains the task-solving harness; it is not
 replaced by a separately implemented chat agent.
 
-Use `--joint` for the online solver's combined solver/curate update, parameter
-EMA curator and frozen counterfactual evaluator. The default `solver_baseline`
-mode trains only the solver. A passing solver-only run does not establish
-delayed skill-credit or joint-training behavior.
+Use `run_resilient.sh` for the online solver's combined solver/curate update,
+parameter EMA curator and frozen counterfactual evaluator. The original
+`run.sh` retains its separate solver-only and deferred-reference entrypoints.
+A passing solver-only run does not establish delayed skill-credit behavior.
 
 ## Runtime boundaries
 
@@ -105,17 +105,15 @@ tasks directly:
 
 ```bash
 cd /workspace/verl-0.9.1
-TOTAL_TRAINING_STEPS=64 TRAINING_GPUS=4 \
-TRAIN_BATCH_SIZE=32 PPO_MINI_BATCH_SIZE=32 ROLLOUT_N=4 \
-ROLLOUT_CONCURRENCY=64 LR_WARMUP_STEPS=0 ENFORCE_EAGER=true \
-EVALUATE_OFFICIAL_TESTS=true \
-bash examples/skill_self_evolve/run.sh --joint \
-  trainer.val_before_train=false \
-  skill_harness.evaluation.initial=false \
-  skill_harness.evaluation.final=true
+bash examples/skill_self_evolve/run_resilient.sh \
+  --run-dir /root/nas_chaohuang/skill_training/runs/my_joint_experiment
 ```
 
-This retains final official evaluation. The immutable base checkpoint remains
+This command prepares data, checks the existing runtime and starts resilient
+joint training with batch32/N4, Native concurrency32 and a64-update default.
+It requires no private captured-environment helper. See the
+[launcher flags, resume and receipts](RESILIENT_LAUNCHER.md).
+This retains quiescent final official evaluation. The immutable base checkpoint remains
 available for a later matched base-versus-trained comparison; a complete
 274-game initial evaluation is an optional experiment measurement, not a
 training prerequisite. Do not claim improvement by comparing a training
@@ -133,7 +131,7 @@ bash examples/skill_self_evolve/run.sh
 By default the launcher prepares the original data, starts a private local
 ALFWorld service, runs CPU import/configuration checks, and starts a detached
 supervisor. It prints the run directory, supervisor PID and status path. The
-training subprocess is exactly:
+solver-only training subprocess is:
 
 ```bash
 /opt/conda/bin/python -m verl.experimental.skill_harness.train \
