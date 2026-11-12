@@ -5,10 +5,10 @@ Uni-Agent Responses Gateway and trains the resulting token trajectories with
 the pinned verl 0.9.1 checkout. Codex remains the task-solving harness; it is not
 replaced by a separately implemented chat agent.
 
-The initial `solver_baseline` mode trains the solver. The custom entry point
-must reject unimplemented modes instead of silently omitting skill, curator or
-EMA behavior. A passing baseline is not evidence that the full skill-evolution
-system has already been implemented.
+Use `--joint` for the online solver's combined solver/curate update, parameter
+EMA curator and frozen counterfactual evaluator. The default `solver_baseline`
+mode trains only the solver. A passing solver-only run does not establish
+delayed skill-credit or joint-training behavior.
 
 ## Runtime boundaries
 
@@ -83,10 +83,12 @@ The joint checkpoint fingerprint includes the solver wrapper, launcher,
 requires a compatible new source cut; it cannot silently resume an old joint
 checkpoint.
 
-Codex runs under the `alfworld_eval` account and interacts using only
-`alfworld-step 'EXACT ACTION'`. Private server capabilities, game files, expert
-plans and other episode artifacts are not supplied to that account. The Task
-creates a unique attempt directory for every rollout and epoch.
+Codex runs under an exclusively leased `alfworld_ep2_000..127` identity and
+interacts using `alfworld-step 'EXACT ACTION'`. Provision the
+[private account registry](ACCOUNT_ISOLATION.md) before launch. Private server
+capabilities, game files, expert plans and other episode artifacts are not
+supplied to that identity. The Task creates a unique attempt directory for
+every rollout and epoch.
 
 ## Start a run
 
@@ -95,6 +97,31 @@ offline after stopping old workers. The launcher verifies the dependency and
 prints the explicit application command if it is absent.
 
 From the server checkout:
+
+To prioritize actual joint training, skip the complete official initial
+evaluation and development pre-validation. Model initialization and the
+kernel/Native preflight still run; the first model rollout then uses training
+tasks directly:
+
+```bash
+cd /workspace/verl-0.9.1
+TOTAL_TRAINING_STEPS=64 TRAINING_GPUS=4 \
+TRAIN_BATCH_SIZE=32 PPO_MINI_BATCH_SIZE=32 ROLLOUT_N=4 \
+ROLLOUT_CONCURRENCY=64 LR_WARMUP_STEPS=0 ENFORCE_EAGER=true \
+EVALUATE_OFFICIAL_TESTS=true \
+bash examples/skill_self_evolve/run.sh --joint \
+  trainer.val_before_train=false \
+  skill_harness.evaluation.initial=false \
+  skill_harness.evaluation.final=true
+```
+
+This retains final official evaluation. The immutable base checkpoint remains
+available for a later matched base-versus-trained comparison; a complete
+274-game initial evaluation is an optional experiment measurement, not a
+training prerequisite. Do not claim improvement by comparing a training
+batch against test scores or by reusing scores from a different backend.
+
+For the separate solver-only mode:
 
 ```bash
 cd /workspace/verl-0.9.1
