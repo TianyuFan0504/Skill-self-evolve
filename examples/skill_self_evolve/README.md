@@ -141,3 +141,18 @@ To export recorded metrics and plots:
 The exporter writes a CSV and plots from saved observations without smoothing
 or inventing values. A configuration check or CPU test alone is not evidence
 of an optimizer update or benchmark improvement.
+
+## Real training verification — 2026-11-13
+
+A real Qwen3.5-4B / Native Codex / Uni-Agent run using the joint entry completed
+one optimizer update on 64 official ALFWorld training episodes. The observed
+optimizer and EMA clocks both advanced to 1. The recorded batch reward/accuracy
+was 0.59375, solver/joint loss was 0.06956475135, gradient norm was 1.03973436,
+and infrastructure error rate was 0. The runtime code was commit `3a3a81ed`.
+
+The verification was deliberately stopped after this update. It did not
+complete the six-update preset or produce a checkpoint. Mature counterfactual
+credit, delayed replay gradients and held-out improvement remain unverified
+by this one-update check. The next prefetched batch was interrupted; unfinished
+leases remain in that run's private registry as interruption evidence. Native
+processes and GPU applications were confirmed stopped.
