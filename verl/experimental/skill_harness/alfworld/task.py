@@ -138,7 +138,7 @@ async def _register_native_budget(
     client, *, base, session_id, headers, binding, account, run_root, output, timeout, budget_seconds
 ):
     """Host-only authenticated registration immediately before native Popen."""
-    from .budget import BINDING_KEYS, validate_budget_registration
+    from .budget import ACCOUNT_KEYS, BINDING_KEYS, validate_budget_registration
 
     if type(budget_seconds) is not int or budget_seconds <= 0 or isinstance(timeout, bool) or timeout != budget_seconds:
         raise AccountIsolationError("The native timeout and declared server budget must agree")
@@ -146,7 +146,7 @@ async def _register_native_budget(
         "schema_version": 1,
         "budget_seconds": budget_seconds,
         "binding": {key: getattr(binding, key) for key in BINDING_KEYS},
-        "account": account,
+        "account": {key: account[key] for key in ACCOUNT_KEYS},
     }
     async with client.post(base + "/admin/budget/" + session_id + "/start", headers=headers, json=payload) as response:
         response.raise_for_status()

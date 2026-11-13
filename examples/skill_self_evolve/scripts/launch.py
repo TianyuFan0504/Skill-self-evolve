@@ -137,17 +137,24 @@ class Supervisor:
                 if process.poll() is not None:
                     continue
                 ticks = identity["start_ticks"]
-                current_ticks = process_start_ticks(process.pid)
-                if ticks is not None and current_ticks is not None and current_ticks != ticks:
-                    continue
                 try:
-                    try:
-                        os.killpg(process.pid, signal.SIGTERM)
-                        process.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        if ticks is None or process_start_ticks(process.pid) == ticks:
-                            os.killpg(process.pid, signal.SIGKILL)
-                            process.wait(timeout=5)
+                    # Let the leader clean its workers before group fallback.
+                    # Python's SIGINT handler enters the trainer's finally
+                    # block, allowing ray.shutdown() before forced cleanup.
+                    graceful = signal.SIGINT if identity["name"] == "training" else signal.SIGTERM
+                    stops = [(False, graceful, 20), (True, signal.SIGTERM, 15), (True, signal.SIGKILL, 5)]
+                    for index, (whole_group, number, timeout) in enumerate(stops):
+                        if index and process.poll() is not None:
+                            break
+                        if ticks is not None and process_start_ticks(process.pid) != ticks:
+                            break
+                        try:
+                            (os.killpg if whole_group else os.kill)(process.pid, number)
+                            process.wait(timeout=timeout)
+                            break
+                        except subprocess.TimeoutExpired:
+                            if number == signal.SIGKILL:
+                                raise
                 except ProcessLookupError:
                     pass
                 except (OSError, subprocess.TimeoutExpired) as error:

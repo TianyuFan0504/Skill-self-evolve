@@ -8,6 +8,7 @@ import io
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -197,21 +198,66 @@ class LaunchTests(unittest.TestCase):
                     supervisor, process, config, processes=4, io_workers=4, digest="fixture", timeout=1
                 )
 
-    def test_supervisor_stops_only_live_owned_process_group_and_records_returncode(self):
+    def test_supervisor_allows_owned_environment_leader_to_clean_workers(self):
         self.run_dir.mkdir()
         process = Mock(pid=111, args=["fixture"])
         process.poll.side_effect = [None, None, 0]
         with (
             patch.object(launch.subprocess, "Popen", return_value=process),
             patch.object(launch, "process_start_ticks", return_value=456),
+            patch.object(launch.os, "kill") as leader_signal,
             patch.object(launch.os, "killpg") as killpg,
         ):
             with launch.Supervisor(self.run_dir, {}) as supervisor:
                 supervisor.spawn("environment", ["fixture"])
-        killpg.assert_called_once_with(111, signal.SIGTERM)
-        process.wait.assert_called_once_with(timeout=15)
+        leader_signal.assert_called_once_with(111, signal.SIGTERM)
+        killpg.assert_not_called()
+        process.wait.assert_called_once_with(timeout=20)
         recorded = json.loads((self.run_dir / "launch-processes.json").read_text())
         self.assertEqual(recorded["children"][0]["returncode"], 0)
+
+    def test_requested_stop_interrupts_training_to_allow_python_cleanup(self):
+        self.run_dir.mkdir()
+        process = Mock(pid=111, args=["fixture"])
+        process.poll.side_effect = [None, None, -signal.SIGINT]
+        with (
+            patch.object(launch.subprocess, "Popen", return_value=process),
+            patch.object(launch, "process_start_ticks", return_value=456),
+            patch.object(launch.os, "kill") as leader_signal,
+            patch.object(launch.os, "killpg") as killpg,
+        ):
+            with self.assertRaises(InterruptedError):
+                with launch.Supervisor(self.run_dir, {}) as supervisor:
+                    supervisor.spawn("training", ["fixture"])
+                    supervisor.request_stop(signal.SIGTERM, None)
+                    supervisor.check_stop()
+        leader_signal.assert_called_once_with(111, signal.SIGINT)
+        killpg.assert_not_called()
+        process.wait.assert_called_once_with(timeout=20)
+
+    def test_training_stop_escalates_only_its_owned_group_after_graceful_timeout(self):
+        self.run_dir.mkdir()
+        process = Mock(pid=111, args=["fixture"])
+        process.poll.side_effect = [None, None, None, None, -signal.SIGKILL]
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired("fixture", 20),
+            subprocess.TimeoutExpired("fixture", 15),
+            None,
+        ]
+        with (
+            patch.object(launch.subprocess, "Popen", return_value=process),
+            patch.object(launch, "process_start_ticks", return_value=456),
+            patch.object(launch.os, "kill") as leader_signal,
+            patch.object(launch.os, "killpg") as killpg,
+        ):
+            with launch.Supervisor(self.run_dir, {}) as supervisor:
+                supervisor.spawn("training", ["fixture"])
+        leader_signal.assert_called_once_with(111, signal.SIGINT)
+        self.assertEqual(
+            [call.args for call in killpg.call_args_list],
+            [(111, signal.SIGTERM), (111, signal.SIGKILL)],
+        )
+        self.assertEqual([call.kwargs["timeout"] for call in process.wait.call_args_list], [20, 15, 5])
 
 
 if __name__ == "__main__":
