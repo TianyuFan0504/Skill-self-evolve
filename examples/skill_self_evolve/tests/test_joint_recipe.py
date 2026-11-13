@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -97,6 +98,7 @@ sys.addaudithook(guard)
         self.assertEqual(config.actor_rollout_ref.actor.policy_loss.loss_mode, "vanilla")
         self.assertEqual(config.actor_rollout_ref.actor.ppo_epochs, 1)
         self.assertEqual(config.trainer.total_training_steps, 9)
+        self.assertEqual(config.trainer.save_freq, 10)
         self.assertEqual(config.trainer.v1.trainer_mode, "sync")
         self.assertTrue(config.trainer.v1.sampler.sync_refill_failed_groups)
         self.assertEqual(
@@ -122,6 +124,29 @@ sys.addaudithook(guard)
             config.actor_rollout_ref.rollout.agent.agent_loop_manager_class,
             "verl.experimental.skill_harness.framework.SkillAwareRolloutAdapter",
         )
+
+    def test_real_hydra_resolves_deployment_smoke_recipe_and_cli_priority(self):
+        spec = importlib.util.spec_from_file_location("_joint_recipe_launch", RECIPE / "scripts/launch.py")
+        launcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launcher)
+        arguments = launcher.training_arguments(
+            {
+                "hydra_overrides": [
+                    "trainer.total_training_steps=20",
+                    "data.train_batch_size=32",
+                    "skill_harness.joint.curator_concurrency=2",
+                ]
+            },
+            smoke=True,
+            recipe_overrides=["trainer.total_training_steps=3", "data.train_batch_size=8"],
+            overrides=["trainer.total_training_steps=5", "data.train_batch_size=4"],
+        )
+        config = self.compose(arguments)
+        self.assertEqual(config.trainer.total_training_steps, 5)
+        self.assertEqual(config.data.train_batch_size, 4)
+        self.assertEqual(config.actor_rollout_ref.rollout.n, 4)
+        self.assertEqual(config.skill_harness.joint.curator_concurrency, 2)
+        self.assertEqual(config.skill_harness.joint.required_exposures, 2)
 
     def test_actual_preflight_cli_resolves_inputs_without_starting_runtime(self):
         command = [sys.executable, str(RECIPE / "scripts/preflight.py"), "trainer.total_training_steps=9"]

@@ -39,14 +39,39 @@ eight). Delayed credit retains its two-step minimum
 and two required exposures. It saves at update six and skips the final official
 test. Solver, EMA curator, paired credit and curator replay all remain enabled.
 
-Hydra overrides follow the launch options. The order is deployment overrides,
-smoke overrides, then command-line overrides, so the last value takes priority:
+The shell recipe follows the grouped configuration style of verl's GRPO
+examples: `DATA`, `MODEL`, `ACTOR`, `ROLLOUT`, `REF`, `JOINT` and `TRAINER` arrays.
+Its user-adjustable section lists batch/microbatch sizes, token limits, learning
+rate, GPU allocation, EMA, curator loss, credit/replay budgets and save/evaluation
+frequency. Empty knobs inherit the YAML, deployment and smoke defaults; fill a
+value in the script or supply it as an environment variable to override them.
+Deployment paths, Native assets and account rosters remain in deployment JSON.
+
+Configuration priority is YAML defaults, deployment overrides, smoke overrides,
+explicit recipe knobs, then command-line Hydra overrides. The last value wins:
 
 ```bash
 bash examples/skill_self_evolve/run.sh \
   --deployment /absolute/path/deployment.json --run-dir /absolute/path/new-run \
-  trainer.total_training_steps=64 trainer.save_freq=8
+  trainer.total_training_steps=64 trainer.save_freq=10
 ```
+
+For example, inspect a modified recipe without creating files or starting any
+service, model or trainer:
+
+```bash
+DEPLOYMENT=/absolute/path/deployment.json \
+RUN_DIR=/absolute/path/new-run \
+LEARNING_RATE=5e-7 EMA_DECAY=0.95 CURATE_LOSS_COEFFICIENT=0.1 \
+TOTAL_TRAINING_STEPS=64 SAVE_FREQUENCY=10 \
+bash examples/skill_self_evolve/run.sh --dry-run
+```
+
+Remove `--dry-run` to execute that plan. Quoted paths and Hydra values are
+forwarded as separate arguments without shell evaluation. A different model
+path must still match the deployment's Native model catalog and model name.
+The full recipe saves every ten updates by default; the smoke preset saves at
+its final sixth update unless explicitly overridden.
 
 The launcher stays in the foreground and owns its backend and training child
 processes. On success, failure or a stop signal, it stops the children it started.

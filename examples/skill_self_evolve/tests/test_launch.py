@@ -149,6 +149,47 @@ class LaunchTests(unittest.TestCase):
             self.mocked_launch()
         self.assertEqual(marker.read_text(), "old state\n")
 
+    def test_recipe_overrides_follow_smoke_and_precede_cli_for_both_checks_and_training(self):
+        recipe = ["trainer.total_training_steps=3", "data.train_batch_size=8"]
+        cli = ["trainer.total_training_steps=5", "data.train_batch_size=4"]
+        supervisor, _ = self.mocked_launch(smoke=True, recipe_overrides=recipe, overrides=cli)
+        commands = dict(supervisor.commands)
+        expected = [*self.profile["hydra_overrides"], *launch.SMOKE_OVERRIDES, *recipe, *cli]
+        self.assertEqual(commands["preflight"][2:], expected)
+        self.assertEqual(commands["training"][5:], expected)
+
+    def test_dry_run_prints_the_same_command_without_preparing_or_starting_anything(self):
+        before = sorted(self.root.rglob("*"))
+        output = io.StringIO()
+        with (
+            patch.object(launch, "Supervisor", side_effect=AssertionError("dry run started a process")),
+            patch.object(launch, "publish_assets", side_effect=AssertionError("dry run deployed assets")),
+            patch("sys.stdout", output),
+        ):
+            launch.launch(
+                self.profile,
+                self.run_dir,
+                smoke=True,
+                recipe_overrides=["trainer.total_training_steps=3"],
+                overrides=["trainer.total_training_steps=5"],
+                dry_run=True,
+            )
+        import shlex
+
+        command = shlex.split(output.getvalue().splitlines()[-1])
+        self.assertEqual(
+            command[:4],
+            [
+                sys.executable,
+                "-m",
+                "verl.experimental.skill_harness.train",
+                f"--config-path={launch.RECIPE / 'config'}",
+            ],
+        )
+        self.assertEqual(command[-2:], ["trainer.total_training_steps=3", "trainer.total_training_steps=5"])
+        self.assertEqual(sorted(self.root.rglob("*")), before)
+        self.assertFalse(self.run_dir.exists())
+
     def test_backend_readiness_failure_never_starts_training_and_cleans_owned_children(self):
         with (
             patch.object(launch, "Supervisor", FakeSupervisor),

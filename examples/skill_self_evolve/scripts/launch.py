@@ -279,9 +279,36 @@ def publish_assets(profile):
     command.chmod(0o755)
 
 
-def launch(profile, run_dir, *, smoke=False, overrides=()):
+def training_arguments(profile, *, smoke=False, recipe_overrides=(), overrides=()):
+    """Compose configuration once, with explicit CLI values taking priority."""
+    declared = profile.get("hydra_overrides", [])
+    if not isinstance(declared, list) or any(not isinstance(value, str) for value in declared):
+        raise ValueError("hydra_overrides must be a list of strings")
+    if any(not isinstance(value, str) or "=" not in value or not value.split("=", 1)[0] for value in recipe_overrides):
+        raise ValueError("Recipe overrides must be KEY=VALUE strings")
+    return [*declared, *(SMOKE_OVERRIDES if smoke else []), *recipe_overrides, *overrides]
+
+
+def training_command(environment, arguments):
+    return [
+        environment["TRAINING_PYTHON"],
+        "-m",
+        "verl.experimental.skill_harness.train",
+        f"--config-path={RECIPE / 'config'}",
+        "--config-name=alfworld_joint",
+        *arguments,
+    ]
+
+
+def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), dry_run=False):
     profile = substitute_paths(profile, run_dir)
     environment = deployment_environment(profile, run_dir)
+    arguments = training_arguments(profile, smoke=smoke, recipe_overrides=recipe_overrides, overrides=overrides)
+    if dry_run:
+        print(f"Run directory: {run_dir}")
+        print("Planned training command:")
+        print(shlex.join(training_command(environment, arguments)))
+        return
     runtime = dict(profile["runtime"])
     initialize = runtime.pop("initialize_if_missing", False)
     provider = runtime.get("account_pool", {})
@@ -289,8 +316,6 @@ def launch(profile, run_dir, *, smoke=False, overrides=()):
         raise ValueError("runtime.account_pool requires factory and kwargs")
     if initialize and provider["factory"] != LINUX_FACTORY:
         raise ValueError("initialize_if_missing is supported only for the explicit optional Linux provider")
-    if not isinstance(profile.get("hydra_overrides", []), list):
-        raise ValueError("hydra_overrides must be a list")
     processes, io_workers = int(profile.get("environment_processes", 4)), int(profile.get("io_workers", 4))
     if min(processes, io_workers) < 1:
         raise ValueError("Environment process and I/O counts must be positive")
@@ -380,19 +405,8 @@ def launch(profile, run_dir, *, smoke=False, overrides=()):
         )
         settings["process_start_ticks"] = process_start_ticks(backend.pid)
         write_private_json(Path(environment["ALFWORLD_SERVER_CONFIG"]), settings)
-        arguments = [*profile.get("hydra_overrides", []), *(SMOKE_OVERRIDES if smoke else []), *overrides]
         supervisor.run("preflight", [python, str(RECIPE / "scripts/preflight.py"), *arguments])
-        trainer = supervisor.spawn(
-            "training",
-            [
-                python,
-                "-m",
-                "verl.experimental.skill_harness.train",
-                f"--config-path={RECIPE / 'config'}",
-                "--config-name=alfworld_joint",
-                *arguments,
-            ],
-        )
+        trainer = supervisor.spawn("training", training_command(environment, arguments))
         supervisor.wait(trainer, backend=backend)
     print(f"Training completed. Outputs: {run_dir}", flush=True)
 
@@ -408,13 +422,30 @@ def main():
     parser.add_argument(
         "--smoke", action="store_true", help="Six real joint updates with delayed credit and replay enabled"
     )
+    parser.add_argument(
+        "--recipe-override",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Explicit run.sh settings; override deployment/smoke defaults but precede CLI Hydra overrides",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print the launch plan without creating files or starting processes"
+    )
     args, overrides = parser.parse_known_args()
     try:
         profile = json.loads(args.deployment.read_text())
         output = args.run_dir or profile.get("environment", {}).get("SKILL_RUN_DIR")
         if output is None:
             raise ValueError("Supply --run-dir or environment.SKILL_RUN_DIR in the deployment")
-        launch(profile, absolute_path(output, "run directory"), smoke=args.smoke, overrides=overrides)
+        launch(
+            profile,
+            absolute_path(output, "run directory"),
+            smoke=args.smoke,
+            recipe_overrides=args.recipe_override,
+            overrides=overrides,
+            dry_run=args.dry_run,
+        )
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, RuntimeError) as error:
         print(f"Launch failed: {error}", file=sys.stderr, flush=True)
         return 1

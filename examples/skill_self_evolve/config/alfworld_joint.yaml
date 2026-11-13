@@ -217,7 +217,7 @@ trainer:
   total_epochs: ${oc.decode:${oc.env:TOTAL_EPOCHS,4}}
   total_training_steps: ${oc.decode:${oc.env:TOTAL_TRAINING_STEPS,64}}
   test_freq: ${oc.decode:${oc.env:DEV_EVAL_FREQUENCY,4}}
-  save_freq: ${oc.decode:${oc.env:SAVE_FREQUENCY,8}}
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQUENCY,10}}
   val_before_train: false
   log_val_generations: 4
   resume_mode: ${oc.env:RESUME_MODE,auto}
