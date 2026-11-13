@@ -1,0 +1,58 @@
+Complete the ALFWorld goal shown in the initial game state. Interact only with
+the game using `alfworld-step 'EXACT ACTION'`, choosing actions from the current
+admissible commands. Use the returned observations to track your inventory and
+progress. Stop as soon as the environment reports success or termination.
+
+
+Initial game state:
+{
+  "observation": "-= Welcome to TextWorld, ALFRED! =-\n\nYou are in the middle of a room. Looking quickly around you, you see a cabinet 16, a cabinet 15, a cabinet 14, a cabinet 13, a cabinet 12, a cabinet 11, a cabinet 10, a cabinet 9, a cabinet 8, a cabinet 7, a cabinet 6, a cabinet 5, a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a coffeemachine 1, a countertop 2, a countertop 1, a diningtable 1, a drawer 5, a drawer 4, a drawer 3, a drawer 2, a drawer 1, a fridge 1, a garbagecan 1, a microwave 1, a safe 1, a sinkbasin 1, a stoveburner 4, a stoveburner 3, a stoveburner 2, a stoveburner 1, and a toaster 1.\n\nYour task is to: put a clean kettle in stoveburner.",
+  "admissible_commands": [
+    "go to cabinet 1",
+    "go to cabinet 10",
+    "go to cabinet 11",
+    "go to cabinet 12",
+    "go to cabinet 13",
+    "go to cabinet 14",
+    "go to cabinet 15",
+    "go to cabinet 16",
+    "go to cabinet 2",
+    "go to cabinet 3",
+    "go to cabinet 4",
+    "go to cabinet 5",
+    "go to cabinet 6",
+    "go to cabinet 7",
+    "go to cabinet 8",
+    "go to cabinet 9",
+    "go to coffeemachine 1",
+    "go to countertop 1",
+    "go to countertop 2",
+    "go to diningtable 1",
+    "go to drawer 1",
+    "go to drawer 2",
+    "go to drawer 3",
+    "go to drawer 4",
+    "go to drawer 5",
+    "go to fridge 1",
+    "go to garbagecan 1",
+    "go to microwave 1",
+    "go to safe 1",
+    "go to sinkbasin 1",
+    "go to stoveburner 1",
+    "go to stoveburner 2",
+    "go to stoveburner 3",
+    "go to stoveburner 4",
+    "go to toaster 1",
+    "inventory",
+    "look"
+  ],
+  "steps": 0,
+  "max_steps": 50,
+  "won": false,
+  "done": false
+}
+
+Reusable skill notes:
+Use these notes only when applicable. The current environment goal and tool rules remain authoritative.
+[Skill skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de@d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54]
+{"principle": "When retrieving items from a room, visiting a receptacle location does not guarantee access; execute go first then check observation for 'closed' state, and only proceed to open if access is blocked or required to verify content. Skips this cycle for open receptacles directly containing the target.", "title": "Disambiguate closed receptacles before open inspection", "when_to_apply": "Any goal requiring retrieval or examination within a room that involves potentially closed cabinets, drawers, or fake doors."}

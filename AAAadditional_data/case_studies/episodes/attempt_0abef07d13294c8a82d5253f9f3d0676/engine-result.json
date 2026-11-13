@@ -1,0 +1,66 @@
+{
+  "game_id": "train_5b1988c6b1271c20467820b4",
+  "split": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan428",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-HandTowel-None-Toilet-428/trial_T20190908_064252_498410/game.tw-pddl",
+  "game_sha256": "a7c314b8f594472f5c763de23e02b52ee78240d74dc62d0cb86ddec1f7ff501b",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "reward": 1.0,
+  "won": true,
+  "done": true,
+  "steps": 6,
+  "step_limit": false,
+  "max_steps": 50,
+  "invalid_actions": 0,
+  "wall_seconds": 44.830214977264404,
+  "termination_reason": "agent_finished",
+  "episode_budget": {
+    "schema_version": 1,
+    "policy_version": "alfworld-wall-budget-v1",
+    "admission_policy": "engine_entry_before_deadline; admitted_action_completes_before_snapshot",
+    "server_instance_id": "0b975a5dc1184b38b605379ea7d7adb6",
+    "binding": {
+      "binding_id": "a45b7fe22a03aca46124d858bdff4ddd02f12d71dc820a98c148470c931ee58b",
+      "binding_sha256": "7d8d98885ab68fdec79c18b9a178d485cb575e8fab84693bdd26dce26a410aed",
+      "attempt_id": "0abef07d13294c8a82d5253f9f3d0676",
+      "gateway_session_id": "session-sample-20-rollout-1-566878907f984901a5d23b715dfbd213",
+      "environment_session_id": "f8c39f911f7142b48f5824f25a71ee46"
+    },
+    "account": {
+      "lease_id": "09f19486e4214c2493e5230304e6bd51",
+      "uid": 20098,
+      "gid": 20098,
+      "name": "alfworld_ep2_098",
+      "owner": {
+        "run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+        "scope_id": "0abef07d13294c8a82d5253f9f3d0676",
+        "kind": "ordinary"
+      }
+    },
+    "budget_seconds": 900,
+    "clock": "monotonic_ns",
+    "started_ns": 4297804708885296,
+    "deadline_ns": 4298704708885296,
+    "registration_sha256": "98253fcb902cdfcbd35b398b8586c5d07f20bec8b1d5f3352e98f9239c9105bf",
+    "now_ns": 4297848933062078,
+    "server_closed": true,
+    "closed_ns": 4297848933062078,
+    "close_reason": "agent_finished",
+    "deadline_reached": false,
+    "world_state": {
+      "won": true,
+      "done": true,
+      "steps": 6,
+      "max_steps": 50
+    },
+    "world_state_sha256": "c937290ae10c27af397de44b914dc548c076bf4c9838d55ea5259f90b39ee835",
+    "admitted_actions": 6,
+    "rejected_after_deadline": 0,
+    "last_admitted_ns": 4297843525422364,
+    "last_completed_ns": 4297843560822485,
+    "last_sequence": 6,
+    "action_error_count": 0,
+    "events_sha256": "9a0b81c3c9a6d09e01cf84d17916ffe5ebb42ea09166a65fff42fa64a0a40cda"
+  }
+}

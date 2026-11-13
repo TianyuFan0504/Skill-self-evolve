@@ -1,0 +1,23 @@
+{
+  "game_id": "train_26e016cc74785986c4124748",
+  "stable_game_id": "train_26e016cc74785986c4124748",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_clean_then_place_in_recep",
+  "scene_id": "FloorPlan403",
+  "relative_game_path": "json_2.1.1/train/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-403/trial_T20190906_161837_412072/game.tw-pddl",
+  "game_sha256": "1c522aa8f68d78d0514337a86b36f71916b35d963ed861b315378f964600f9e1",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "585e4e20-19e1-4bec-8f1e-66c2de1a5a79",
+  "session_index": 0,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "ea079dcfe0fae98161c5324089aefa3550ca970804d109a2acf8e55a78876e90",
+  "skill_context_group_id": "778142bec4f8f49428dec9f1137b68a212c3cf014bd31cd223bc58a4d2e7f794",
+  "global_step": 4,
+  "credit_probe_group": "332182b27b4c166d1e07a993ad49e074d0135f30d513d0b85f5e6038f0a5718a",
+  "credit_probe_variant": "without_skill",
+  "attempt_id": "54e2556d9d5947549adf5b8391514313",
+  "started_at_epoch": 1794480774.2274604
+}

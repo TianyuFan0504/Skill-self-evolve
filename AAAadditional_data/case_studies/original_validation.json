@@ -1,0 +1,376 @@
+{
+  "checks": 10706,
+  "failed": [],
+  "numeric_segments": [
+    {
+      "name": "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f:traj0",
+      "prompt_tokens": 2481,
+      "response_tokens": 14004,
+      "policy_mask_tokens": 1895,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_0321469ad704656d50775bde/attempt_2d5f6135805a4590a1de051de4b62ddb:traj0",
+      "prompt_tokens": 2479,
+      "response_tokens": 13255,
+      "policy_mask_tokens": 1984,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_0321469ad704656d50775bde/attempt_5dbe82c382ba4b358e26ec1385b87d9a:traj0",
+      "prompt_tokens": 2479,
+      "response_tokens": 14727,
+      "policy_mask_tokens": 2355,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_0321469ad704656d50775bde/attempt_b6185bc0a5cb4356a18c0a770b1c3c47:traj0",
+      "prompt_tokens": 2471,
+      "response_tokens": 12215,
+      "policy_mask_tokens": 1662,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752:frozen_0",
+      "prompt_tokens": 2227,
+      "response_tokens": 3801,
+      "policy_mask_tokens": 510,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c:frozen_0",
+      "prompt_tokens": 2030,
+      "response_tokens": 12181,
+      "policy_mask_tokens": 1575,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1:frozen_0",
+      "prompt_tokens": 2044,
+      "response_tokens": 1697,
+      "policy_mask_tokens": 201,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1:frozen_0",
+      "prompt_tokens": 2256,
+      "response_tokens": 1788,
+      "policy_mask_tokens": 295,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d:frozen_0",
+      "prompt_tokens": 2145,
+      "response_tokens": 1814,
+      "policy_mask_tokens": 411,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa:frozen_0",
+      "prompt_tokens": 1860,
+      "response_tokens": 17945,
+      "policy_mask_tokens": 2054,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313:frozen_0",
+      "prompt_tokens": 1959,
+      "response_tokens": 4473,
+      "policy_mask_tokens": 938,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b:frozen_0",
+      "prompt_tokens": 2189,
+      "response_tokens": 6797,
+      "policy_mask_tokens": 1336,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd:frozen_0",
+      "prompt_tokens": 1950,
+      "response_tokens": 7122,
+      "policy_mask_tokens": 1104,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9:frozen_0",
+      "prompt_tokens": 2147,
+      "response_tokens": 5788,
+      "policy_mask_tokens": 970,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676:traj0",
+      "prompt_tokens": 1835,
+      "response_tokens": 2221,
+      "policy_mask_tokens": 620,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_5b1988c6b1271c20467820b4/attempt_12a5ebe3552c435b8ef8023d6949e909:traj0",
+      "prompt_tokens": 1841,
+      "response_tokens": 1761,
+      "policy_mask_tokens": 376,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_5b1988c6b1271c20467820b4/attempt_3d7014993f9345b8b417356b5b36ab59:traj0",
+      "prompt_tokens": 1831,
+      "response_tokens": 2019,
+      "policy_mask_tokens": 551,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_5b1988c6b1271c20467820b4/attempt_eddc5ab5102444a0a024b7a46b35b0d0:traj0",
+      "prompt_tokens": 1831,
+      "response_tokens": 9075,
+      "policy_mask_tokens": 1633,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_7430bdd0605245e9aa9e9553114ec874:traj0",
+      "prompt_tokens": 1927,
+      "response_tokens": 7199,
+      "policy_mask_tokens": 2501,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311:traj0",
+      "prompt_tokens": 1929,
+      "response_tokens": 3781,
+      "policy_mask_tokens": 1128,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_c01f50a0c4c442208ce749c69cdea920:traj0",
+      "prompt_tokens": 1927,
+      "response_tokens": 16524,
+      "policy_mask_tokens": 3498,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_dfe2de7bcf5a4135843934be93552193:traj0",
+      "prompt_tokens": 1921,
+      "response_tokens": 4866,
+      "policy_mask_tokens": 1005,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe:frozen_0",
+      "prompt_tokens": 2539,
+      "response_tokens": 29273,
+      "policy_mask_tokens": 2789,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3:frozen_0",
+      "prompt_tokens": 2327,
+      "response_tokens": 28683,
+      "policy_mask_tokens": 2708,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1:traj0",
+      "prompt_tokens": 1875,
+      "response_tokens": 19005,
+      "policy_mask_tokens": 4582,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_72b532270a0447ce99cfaa3a130e15fd:traj0",
+      "prompt_tokens": 1865,
+      "response_tokens": 2150,
+      "policy_mask_tokens": 324,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_a62898187cdc412a8502cd37d656910b:traj0",
+      "prompt_tokens": 1873,
+      "response_tokens": 1993,
+      "policy_mask_tokens": 520,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_b4607c01c4ae4905beb7598caaf30842:traj0",
+      "prompt_tokens": 1869,
+      "response_tokens": 2344,
+      "policy_mask_tokens": 578,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732:frozen_0",
+      "prompt_tokens": 2233,
+      "response_tokens": 10626,
+      "policy_mask_tokens": 1161,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08:frozen_0",
+      "prompt_tokens": 1948,
+      "response_tokens": 16711,
+      "policy_mask_tokens": 1837,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_5635d12f5748424fa7612037d0635f6c:traj0",
+      "prompt_tokens": 2379,
+      "response_tokens": 27559,
+      "policy_mask_tokens": 10047,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d:traj0",
+      "prompt_tokens": 2379,
+      "response_tokens": 3898,
+      "policy_mask_tokens": 881,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_62754cb27d234535a247d7f7036b63e7:traj0",
+      "prompt_tokens": 2383,
+      "response_tokens": 3954,
+      "policy_mask_tokens": 1375,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_9108e566b37a4781b8e83297891df9d5:traj0",
+      "prompt_tokens": 2375,
+      "response_tokens": 4491,
+      "policy_mask_tokens": 1438,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_019d5a330c7e4935b5fc50803edfdb07:traj0",
+      "prompt_tokens": 2260,
+      "response_tokens": 28450,
+      "policy_mask_tokens": 2570,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644:traj0",
+      "prompt_tokens": 2258,
+      "response_tokens": 25701,
+      "policy_mask_tokens": 2442,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531:traj0",
+      "prompt_tokens": 2260,
+      "response_tokens": 31100,
+      "policy_mask_tokens": 7001,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531:traj1",
+      "prompt_tokens": 32446,
+      "response_tokens": 69,
+      "policy_mask_tokens": 69,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531:traj2",
+      "prompt_tokens": 2411,
+      "response_tokens": 754,
+      "policy_mask_tokens": 205,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fb4146731a0ff7328a02f04a/attempt_a98b17594a3148a09d9ced050ae43d1d:traj0",
+      "prompt_tokens": 2262,
+      "response_tokens": 23538,
+      "policy_mask_tokens": 2572,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57:frozen_0",
+      "prompt_tokens": 2232,
+      "response_tokens": 9530,
+      "policy_mask_tokens": 1564,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721:frozen_0",
+      "prompt_tokens": 2462,
+      "response_tokens": 13815,
+      "policy_mask_tokens": 1850,
+      "logprobs_present": false,
+      "logprobs_required": false
+    },
+    {
+      "name": "curator:0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036",
+      "prompt_tokens": 5076,
+      "response_tokens": 157,
+      "policy_mask_tokens": 157,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "curator:53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560",
+      "prompt_tokens": 2210,
+      "response_tokens": 210,
+      "policy_mask_tokens": 210,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "curator:298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c",
+      "prompt_tokens": 2030,
+      "response_tokens": 130,
+      "policy_mask_tokens": 130,
+      "logprobs_present": true,
+      "logprobs_required": true
+    },
+    {
+      "name": "curator:f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0",
+      "prompt_tokens": 1986,
+      "response_tokens": 120,
+      "policy_mask_tokens": 120,
+      "logprobs_present": true,
+      "logprobs_required": true
+    }
+  ],
+  "frozen_evaluator_segments_without_logprobs": 16,
+  "claim": "Transfer, recorded outcomes, numeric alignment, input-control receipts and replay-consumption evidence verified locally; no new model evaluation or gradient measurement."
+}

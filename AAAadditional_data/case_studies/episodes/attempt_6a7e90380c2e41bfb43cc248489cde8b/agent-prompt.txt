@@ -1,0 +1,38 @@
+Complete the ALFWorld goal shown in the initial game state. Interact only with
+the game using `alfworld-step 'EXACT ACTION'`, choosing actions from the current
+admissible commands. Use the returned observations to track your inventory and
+progress. Stop as soon as the environment reports success or termination.
+
+
+Initial game state:
+{
+  "observation": "-= Welcome to TextWorld, ALFRED! =-\n\nYou are in the middle of a room. Looking quickly around you, you see a bathtubbasin 1, a cabinet 4, a cabinet 3, a cabinet 2, a cabinet 1, a countertop 1, a garbagecan 1, a handtowelholder 1, a shelf 1, a sinkbasin 2, a sinkbasin 1, a toilet 1, a toiletpaperhanger 1, a towelholder 2, and a towelholder 1.\n\nYour task is to: put a clean soapbar in cabinet.",
+  "admissible_commands": [
+    "go to bathtubbasin 1",
+    "go to cabinet 1",
+    "go to cabinet 2",
+    "go to cabinet 3",
+    "go to cabinet 4",
+    "go to countertop 1",
+    "go to garbagecan 1",
+    "go to handtowelholder 1",
+    "go to shelf 1",
+    "go to sinkbasin 1",
+    "go to sinkbasin 2",
+    "go to toilet 1",
+    "go to toiletpaperhanger 1",
+    "go to towelholder 1",
+    "go to towelholder 2",
+    "inventory",
+    "look"
+  ],
+  "steps": 0,
+  "max_steps": 50,
+  "won": false,
+  "done": false
+}
+
+Reusable skill notes:
+Use these notes only when applicable. The current environment goal and tool rules remain authoritative.
+[Skill skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de@d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54]
+{"principle": "When retrieving items from a room, visiting a receptacle location does not guarantee access; execute go first then check observation for 'closed' state, and only proceed to open if access is blocked or required to verify content. Skips this cycle for open receptacles directly containing the target.", "title": "Disambiguate closed receptacles before open inspection", "when_to_apply": "Any goal requiring retrieval or examination within a room that involves potentially closed cabinets, drawers, or fake doors."}

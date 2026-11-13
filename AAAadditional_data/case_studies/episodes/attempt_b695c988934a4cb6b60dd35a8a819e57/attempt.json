@@ -1,0 +1,23 @@
+{
+  "game_id": "train_fdbd13fca14a0b3a210456e2",
+  "stable_game_id": "train_fdbd13fca14a0b3a210456e2",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_clean_then_place_in_recep",
+  "scene_id": "FloorPlan18",
+  "relative_game_path": "json_2.1.1/train/pick_clean_then_place_in_recep-Kettle-None-StoveBurner-18/trial_T20190907_154333_157059/game.tw-pddl",
+  "game_sha256": "a226718a2335c9f8cc658b34f097972bc8c87da59ae28ccdda680e78fcc6d163",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "500e5882-539c-4fbf-9834-06d1d36d65ba",
+  "session_index": 2,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "f4b5a42d457a80bc599d4fe03d8b99fdd7a01ad9217d8994c3055fcf9113c9e3",
+  "skill_context_group_id": "e07fdec784e825e6c8deb74bf847b582365d047461c66c6db637cef4413cfe9a",
+  "global_step": 4,
+  "credit_probe_group": "4af33d551518da7dd980fc1ff2787d3af5ee00c2fa61eb812ba0158be2b63d5a",
+  "credit_probe_variant": "without_skill",
+  "attempt_id": "b695c988934a4cb6b60dd35a8a819e57",
+  "started_at_epoch": 1794480782.9416904
+}

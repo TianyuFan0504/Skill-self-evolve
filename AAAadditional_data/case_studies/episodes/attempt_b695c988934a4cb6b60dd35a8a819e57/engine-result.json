@@ -1,0 +1,66 @@
+{
+  "game_id": "train_fdbd13fca14a0b3a210456e2",
+  "split": "train",
+  "task_type": "pick_clean_then_place_in_recep",
+  "scene_id": "FloorPlan18",
+  "relative_game_path": "json_2.1.1/train/pick_clean_then_place_in_recep-Kettle-None-StoveBurner-18/trial_T20190907_154333_157059/game.tw-pddl",
+  "game_sha256": "a226718a2335c9f8cc658b34f097972bc8c87da59ae28ccdda680e78fcc6d163",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "reward": 0.0,
+  "won": false,
+  "done": false,
+  "steps": 17,
+  "step_limit": false,
+  "max_steps": 50,
+  "invalid_actions": 2,
+  "wall_seconds": 165.04333877563477,
+  "termination_reason": "agent_finished",
+  "episode_budget": {
+    "schema_version": 1,
+    "policy_version": "alfworld-wall-budget-v1",
+    "admission_policy": "engine_entry_before_deadline; admitted_action_completes_before_snapshot",
+    "server_instance_id": "0b975a5dc1184b38b605379ea7d7adb6",
+    "binding": {
+      "binding_id": "54c2399921f37a07de92dd8ff18c13228ebe7b4e5e2ce730f4d0b2231d54270e",
+      "binding_sha256": "392a03e7144cf201685dd3890a603b078427d65c4c146eaa814c6a17f3b8fa5b",
+      "attempt_id": "b695c988934a4cb6b60dd35a8a819e57",
+      "gateway_session_id": "probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a_without_skill",
+      "environment_session_id": "b77ed0cea780453da5568a02d4ab89d4"
+    },
+    "account": {
+      "lease_id": "7cf170014cd64f3aabeb4e08b8a5da55",
+      "uid": 20114,
+      "gid": 20114,
+      "name": "alfworld_ep2_114",
+      "owner": {
+        "run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+        "scope_id": "4af33d551518da7dd980fc1ff2787d3af5ee00c2fa61eb812ba0158be2b63d5a",
+        "kind": "pair"
+      }
+    },
+    "budget_seconds": 900,
+    "clock": "monotonic_ns",
+    "started_ns": 4303143993744593,
+    "deadline_ns": 4304043993744593,
+    "registration_sha256": "8945fac4ba0f561fcebc8bb189139f93efceadf9390ad3347f8ca200d7d00f12",
+    "now_ns": 4303308330731395,
+    "server_closed": true,
+    "closed_ns": 4303308330731395,
+    "close_reason": "agent_finished",
+    "deadline_reached": false,
+    "world_state": {
+      "won": false,
+      "done": false,
+      "steps": 17,
+      "max_steps": 50
+    },
+    "world_state_sha256": "4f3493ed504da39ced65e379c75fc64780a3b2edebbbde3efbdf97434164e54b",
+    "admitted_actions": 17,
+    "rejected_after_deadline": 0,
+    "last_admitted_ns": 4303289918559602,
+    "last_completed_ns": 4303289998778360,
+    "last_sequence": 17,
+    "action_error_count": 0,
+    "events_sha256": "75e429e31bd7524f1cf732c6237a53dd8954eaacc04ff3eb2befa304dffe0f20"
+  }
+}

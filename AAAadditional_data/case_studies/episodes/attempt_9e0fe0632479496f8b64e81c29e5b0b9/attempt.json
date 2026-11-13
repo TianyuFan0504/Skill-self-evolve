@@ -1,0 +1,23 @@
+{
+  "game_id": "train_4069c4335ad7b287bdfb7d6a",
+  "stable_game_id": "train_4069c4335ad7b287bdfb7d6a",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan415",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-SprayBottle-None-GarbageCan-415/trial_T20190907_070502_104667/game.tw-pddl",
+  "game_sha256": "4eae57a59c58e1858a477d98bd02ffbeb5a80b63da6b3b0fcd986c23a8413b2d",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "14eb4094-3432-4bdc-8b32-215d87db981c",
+  "session_index": 0,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "70f0047cc021328b07e1669ca420eefe269eb349bd64c2ddd959c6584dfc299d",
+  "skill_context_version": "1f7db985f4bdd9587ac0281db062d872b5153211f18abc62b3042cbfba50e7f2",
+  "skill_context_group_id": "7e066a6a0f5647e40c34ed5f009caf482cd79c78c193ff46fb6ff0ff75bd0845",
+  "global_step": 3,
+  "credit_probe_group": "fbf2da317fddb66d3f7bbe0b20cdb67781e06d06dce1c97536851bebec20d8a1",
+  "credit_probe_variant": "with_skill",
+  "attempt_id": "9e0fe0632479496f8b64e81c29e5b0b9",
+  "started_at_epoch": 1794480106.4673371
+}

@@ -1,0 +1,20 @@
+{
+  "game_id": "train_6431110aaab23bd0e0c0c12d",
+  "stable_game_id": "train_6431110aaab23bd0e0c0c12d",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "look_at_obj_in_light",
+  "scene_id": "FloorPlan324",
+  "relative_game_path": "json_2.1.1/train/look_at_obj_in_light-AlarmClock-None-DeskLamp-324/trial_T20190909_140222_907943/game.tw-pddl",
+  "game_sha256": "47734a2213dde12717cac5fc3bf9b168593abdc9e967ce7f65706c222e9e9223",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 20,
+  "rollout_uid": "afce3193-e727-479e-83b9-a5f3e6528047",
+  "session_index": 0,
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "0880d1c0005fa4a483ee6bfc33a08fe9390e994849ef2775ccb2f52c6e75bf36",
+  "skill_context_group_id": "716480da11d1a0a38a02e6f20e1d36c9c3210a0a78e9c2c27e631676afd05190",
+  "global_step": 3,
+  "attempt_id": "8176c31ec9194104b865a30bba873311",
+  "started_at_epoch": 1794477106.0623846
+}

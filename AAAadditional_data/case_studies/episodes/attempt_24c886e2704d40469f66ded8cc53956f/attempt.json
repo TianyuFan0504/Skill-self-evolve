@@ -1,0 +1,20 @@
+{
+  "game_id": "train_0321469ad704656d50775bde",
+  "stable_game_id": "train_0321469ad704656d50775bde",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_clean_then_place_in_recep",
+  "scene_id": "FloorPlan4",
+  "relative_game_path": "json_2.1.1/train/pick_clean_then_place_in_recep-Bowl-None-Fridge-4/trial_T20190909_024009_792841/game.tw-pddl",
+  "game_sha256": "f8673cf54d15833be4de51e276eb9abce52371a0ff7ab144fe08f579089a73af",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 26,
+  "rollout_uid": "82c37729-effd-4feb-9318-48e0d58c52ed",
+  "session_index": 2,
+  "skill_snapshot_id": "c33248d2253eb4bb23ad5a984a16045a7443caddddbe20332d0013d7182abbd7",
+  "skill_context_version": "27d8ff2ed5e39747d1c5a56d847b2fb676082ac311f88b25dba73802443040be",
+  "skill_context_group_id": "0644500c01b4d7f038979f680f703c992c76b5830b9198c71a55f8403a8c04a5",
+  "global_step": 6,
+  "attempt_id": "24c886e2704d40469f66ded8cc53956f",
+  "started_at_epoch": 1794496718.7635965
+}

@@ -1,0 +1,23 @@
+{
+  "game_id": "train_0cdba25bf4dc5985335be8f3",
+  "stable_game_id": "train_0cdba25bf4dc5985335be8f3",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan318",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-CellPhone-None-ArmChair-318/trial_T20190909_120136_895030/game.tw-pddl",
+  "game_sha256": "9f6df98cf93e06b7180e507641cc496a62ad2d23355ed10d0402e0a9d7932b74",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "10ce09c0-933b-4bf6-86ff-5bd0dd4f2b21",
+  "session_index": 0,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "70f0047cc021328b07e1669ca420eefe269eb349bd64c2ddd959c6584dfc299d",
+  "skill_context_version": "898ae73fcf9051a573ea9f6eaa0bbf5b9f3207dccb30af35fb3c63031dd25a1a",
+  "skill_context_group_id": "73e80a114548a9a8a0ce385c9a0bfe9e7448c71c2dc82ac88115463f6edce251",
+  "global_step": 3,
+  "credit_probe_group": "46e1e9f053c71704b1638c32a6dd287308f64b9fd39989674b54a27a94159ff4",
+  "credit_probe_variant": "with_skill",
+  "attempt_id": "0f546ea9fd51425fae9836d643da9752",
+  "started_at_epoch": 1794480110.9319544
+}

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "builder_version": "host-skill-context-v2",
+  "context_version": "e6054425883d5d09c1054f36844c7d4c2ad813965930f54e0a5c03ed4cd5ed33",
+  "group_id": "8ca1deca446879ad302e0dbc9d651c7de89f47ffe9c628e1f8092858d37f5762",
+  "snapshot_id": "d75e772cfea3b9d36ed54b5d798b27f8c3a54300f44366fbe03223585616e168",
+  "retriever_version": "family-lexical-v1",
+  "query_sha256": "3cd9646368c6876ecea8f8aca55e1744c948a8220c4a761286ac94ee16615dcf",
+  "selected_refs": [
+    {
+      "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+      "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+      "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+    }
+  ],
+  "injected_refs": [
+    {
+      "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+      "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+      "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+    }
+  ],
+  "budget_excluded": [],
+  "skill_text_sha256": "1597b4b1152dbeab7b8ecee7f40ae40dc600cb7036d8dfb363f0bc241ed57545",
+  "skill_tokens": 230,
+  "skill_token_budget": 1024,
+  "base_prompt_tokens": 433,
+  "rendered_prompt_tokens": 663,
+  "max_prompt_tokens": 4096,
+  "budget_scope": "complete_task_chat_template; native_codex_prefix_and_tools_excluded",
+  "actual_native_request_verified": false,
+  "actual_gateway_capacity_guard": "encoded_context_before_backend; prompt_length_plus_response_length",
+  "tokenizer_version": "sha256:375a890b1070557b5a519b24b0642e99e0fe79e7e9f4eee6cbb9497671e4b814",
+  "original_messages_sha256": "8ca5c7c677dca1304907de508364bb52cc4f33d05e5045e05b442d72750adc76",
+  "injected_messages_sha256": "6ac3da60fe3b1ef2ad4f4e89907a939f2340db1fee87f473d88dced0ab1a76f0",
+  "rendered_prompt_sha256": "ef513cb7686f3e8bc2d258507c690475d8527e75037552eb490c7bddb1c2e8d9",
+  "rendered_token_ids_sha256": "21487a64fd5d45e4ecbb2bc2faeb45f27a98bc99e580bb73fd82bec31e5da7a9",
+  "character_range_unit": "unicode_codepoints",
+  "ranges": [
+    {
+      "ref": {
+        "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+        "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+        "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+      },
+      "block_char_range": [
+        128,
+        776
+      ],
+      "user_char_range": [
+        1391,
+        2039
+      ],
+      "rendered_char_range": [
+        1408,
+        2056
+      ],
+      "rendered_overlap_token_range": [
+        448,
+        654
+      ],
+      "text_sha256": "7a201a9a5be69f8e43e85065b357cf748722def2e6bec830d1145eb8d9a85345"
+    }
+  ],
+  "context_id": "484d6063bc3b0139bacb3ce78de847b89acf8e4bdfde9e59949859798f46c18b"
+}

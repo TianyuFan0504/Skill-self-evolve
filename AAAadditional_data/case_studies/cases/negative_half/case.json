@@ -1,0 +1,268 @@
+{
+  "label": "negative_half",
+  "title": "Navigate to cupboard, pick item, move to toilet",
+  "skill_id": "skill-298d1d3130981c71836f5dc4519066d502663618",
+  "source": {
+    "original_run_relative_path": "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676",
+    "directory": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676",
+    "files": {
+      "attempt.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/attempt.json",
+      "initial-state.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/initial-state.json",
+      "agent-messages.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-messages.json",
+      "agent-prompt.txt": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-prompt.txt",
+      "skill-context.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/skill-context.json",
+      "environment-trace.jsonl": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/environment-trace.jsonl",
+      "codex-events.jsonl": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-events.jsonl",
+      "codex-stderr.log": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-stderr.log",
+      "engine-result.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/engine-result.json",
+      "result.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/result.json",
+      "native-capture-diagnostics.jsonl": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/native-capture-diagnostics.jsonl",
+      "terminal-stop-evidence.jsonl": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/terminal-stop-evidence.jsonl",
+      "backend-terminal-drain.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/backend-terminal-drain.json",
+      "budget-events.jsonl": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-events.jsonl",
+      "budget-registration.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-registration.json",
+      "budget-environment.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-environment.json",
+      "trajectory.json": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/trajectory.json",
+      "trajectory.npz": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/trajectory.npz",
+      "tokens.txt": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/tokens.txt"
+    },
+    "task_id": "train_5b1988c6b1271c20467820b4",
+    "scene": "FloorPlan428",
+    "step": 2,
+    "goal": "put some handtowel on toilet.",
+    "reward": 1.0,
+    "steps": 6,
+    "invalid_actions": 0,
+    "engine_wall_seconds": 44.830214977264404,
+    "native_wall_seconds": 44.10483503341675,
+    "injected_skill_refs": [],
+    "last_world_action_after_native_start_seconds": 39.012309551239014
+  },
+  "source_ema": "ema:2",
+  "skill": {
+    "content_hash": "1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14",
+    "principle": "Go to a cupboard or countertop holding an object; take the object; go to a toilet; move the object to the toilet.",
+    "provenance": {
+      "action_token_ids_sha256": "6f5bfa9cdbf1159134e1b2a7893f0a3da639bf980d37a332cf9c53eba1641edc",
+      "behavior_policy_version": "ema:2",
+      "candidate_group_id": "cohort_702a863d5923c1eb48faf835163c05bdfb4fd9f7edbb68b003c17bba329d224a",
+      "candidate_index": 0,
+      "collector_version": "native-codex-curate-v3",
+      "curate_record_id": "curate-298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c",
+      "observed_ema_weight_version": 2,
+      "producer_uid": "6e500fbb-459c-4c29-b627-5468f94b4553",
+      "prompt_token_ids_sha256": "7ad4272ef668d44740d6093457b8bc0198cc367fe91c106b681aa59f1748a106",
+      "session_id": "curate-298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c",
+      "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+      "source_redacted_sha256": "da69337c7282f2dbfb89256368c98054fa0031649564ce1dabfd2d8de6242971",
+      "source_sha256": "71f7e3763cfe3842e53c10276151a806494c16c4fc45b7348645564e7c283c59"
+    },
+    "schema_version": 1,
+    "skill_id": "skill-298d1d3130981c71836f5dc4519066d502663618",
+    "task_families": [
+      "pick_and_place_simple"
+    ],
+    "title": "Navigate to cupboard, pick item, move to toilet",
+    "version": "sha256:1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14",
+    "when_to_apply": "The goal is to place an item on a toilet; the item is found on a cupboard or countertop with no other intervening routes."
+  },
+  "curate_action_token_count": 130,
+  "utility": -0.5,
+  "paired_evaluations": [
+    {
+      "number": 1,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe",
+        "directory": "episodes/attempt_1bca30ff70804436a59b191585cddefe",
+        "files": {
+          "attempt.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/attempt.json",
+          "initial-state.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/initial-state.json",
+          "agent-messages.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_1bca30ff70804436a59b191585cddefe/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_1bca30ff70804436a59b191585cddefe/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_1bca30ff70804436a59b191585cddefe/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_1bca30ff70804436a59b191585cddefe/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/engine-result.json",
+          "result.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_1bca30ff70804436a59b191585cddefe/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_1bca30ff70804436a59b191585cddefe/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-environment.json",
+          "tokens.txt": "episodes/attempt_1bca30ff70804436a59b191585cddefe/tokens.txt"
+        },
+        "task_id": "train_7780fc7514f3f5bbed7bbc70",
+        "scene": "FloorPlan17",
+        "step": 4,
+        "goal": "put a glassbottle in cabinet.",
+        "reward": 0.0,
+        "steps": 50,
+        "invalid_actions": 3,
+        "engine_wall_seconds": 112.86653327941895,
+        "native_wall_seconds": 112.53368878364563,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-298d1d3130981c71836f5dc4519066d502663618",
+            "version": "sha256:1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14",
+            "content_hash": "1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 107.49194192886353
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3",
+        "directory": "episodes/attempt_361df434bd2746919053c809b64f4fa3",
+        "files": {
+          "attempt.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/attempt.json",
+          "initial-state.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/initial-state.json",
+          "agent-messages.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_361df434bd2746919053c809b64f4fa3/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_361df434bd2746919053c809b64f4fa3/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_361df434bd2746919053c809b64f4fa3/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_361df434bd2746919053c809b64f4fa3/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/engine-result.json",
+          "result.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_361df434bd2746919053c809b64f4fa3/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_361df434bd2746919053c809b64f4fa3/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-environment.json",
+          "tokens.txt": "episodes/attempt_361df434bd2746919053c809b64f4fa3/tokens.txt"
+        },
+        "task_id": "train_7780fc7514f3f5bbed7bbc70",
+        "scene": "FloorPlan17",
+        "step": 4,
+        "goal": "put a glassbottle in cabinet.",
+        "reward": 1.0,
+        "steps": 49,
+        "invalid_actions": 4,
+        "engine_wall_seconds": 99.01823925971985,
+        "native_wall_seconds": 98.76185822486877,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 93.7400643825531
+      },
+      "delta": -1.0,
+      "files": {
+        "paired-event.json": "cases/negative_half/pair_1/paired-event.json",
+        "paired-input-audit.json": "cases/negative_half/pair_1/paired-input-audit.json",
+        "paired-workdirs.json": "cases/negative_half/pair_1/paired-workdirs.json",
+        "intent.json": "cases/negative_half/pair_1/intent.json",
+        "with_skill/native-capture.json": "cases/negative_half/pair_1/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/negative_half/pair_1/without_skill/native-capture.json"
+      }
+    },
+    {
+      "number": 2,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1",
+        "directory": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1",
+        "files": {
+          "attempt.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/attempt.json",
+          "initial-state.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/initial-state.json",
+          "agent-messages.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/engine-result.json",
+          "result.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-environment.json",
+          "tokens.txt": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/tokens.txt"
+        },
+        "task_id": "train_16693f2b7e98cc3e72c6f5ed",
+        "scene": "FloorPlan423",
+        "step": 4,
+        "goal": "put a handtowel in garbagecan.",
+        "reward": 1.0,
+        "steps": 5,
+        "invalid_actions": 0,
+        "engine_wall_seconds": 15.798930644989014,
+        "native_wall_seconds": 15.418657302856445,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-298d1d3130981c71836f5dc4519066d502663618",
+            "version": "sha256:1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14",
+            "content_hash": "1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 10.299849271774292
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1",
+        "directory": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1",
+        "files": {
+          "attempt.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/attempt.json",
+          "initial-state.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/initial-state.json",
+          "agent-messages.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/engine-result.json",
+          "result.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-environment.json",
+          "tokens.txt": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/tokens.txt"
+        },
+        "task_id": "train_16693f2b7e98cc3e72c6f5ed",
+        "scene": "FloorPlan423",
+        "step": 4,
+        "goal": "put a handtowel in garbagecan.",
+        "reward": 1.0,
+        "steps": 5,
+        "invalid_actions": 0,
+        "engine_wall_seconds": 12.915202140808105,
+        "native_wall_seconds": 12.527686595916748,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 7.43112587928772
+      },
+      "delta": 0.0,
+      "files": {
+        "paired-event.json": "cases/negative_half/pair_2/paired-event.json",
+        "paired-input-audit.json": "cases/negative_half/pair_2/paired-input-audit.json",
+        "paired-workdirs.json": "cases/negative_half/pair_2/paired-workdirs.json",
+        "intent.json": "cases/negative_half/pair_2/intent.json",
+        "with_skill/native-capture.json": "cases/negative_half/pair_2/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/negative_half/pair_2/without_skill/native-capture.json"
+      }
+    }
+  ],
+  "applied_updates": {
+    "update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98": "optimizer:5:update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98"
+  },
+  "ordinary_reuse": null,
+  "files": {
+    "skill": "cases/negative_half/skill.json",
+    "replay": "cases/negative_half/curate_replay.json",
+    "settlement": "cases/negative_half/settlement.json",
+    "curator/agent-messages.json": "cases/negative_half/curator/agent-messages.json",
+    "curator/generated.json": "cases/negative_half/curator/generated.json",
+    "curator/complete.json": "cases/negative_half/curator/complete.json",
+    "curator/intent.json": "cases/negative_half/curator/intent.json",
+    "curator/redacted-source.json": "cases/negative_half/curator/redacted-source.json",
+    "curator/codex-events.jsonl": "cases/negative_half/curator/codex-events.jsonl",
+    "curator/codex-stderr.log": "cases/negative_half/curator/codex-stderr.log",
+    "curator_tokens": "cases/negative_half/curator/tokens.txt"
+  },
+  "grpo_siblings_in_raw_archive": [
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_12a5ebe3552c435b8ef8023d6949e909",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_3d7014993f9345b8b417356b5b36ab59",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_eddc5ab5102444a0a024b7a46b35b0d0"
+  ]
+}

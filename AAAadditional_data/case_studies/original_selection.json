@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "exported_at_utc": "2026-11-12T23:49:13.936276+08:00",
+  "remote_run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+  "active_state_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5",
+  "observed_optimizer_step": 7,
+  "scope": "Selected closed chains, raw numeric trajectories, explicit loading and signed delayed reward attribution",
+  "claim_limit": "Selected examples demonstrate execution and attribution, not a full held-out accuracy gain or an individually measured gradient contribution.",
+  "selection": "Two positive examples with subsequent ordinary loading, one negative example and one zero-utility example; selected after observing outcomes.",
+  "chains": [
+    {
+      "label": "positive_half",
+      "collection_id": "0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036",
+      "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+      "artifact_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54.json",
+      "source_step": 1,
+      "source_episode": "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+      "source_reward": 1.0,
+      "window_id": "window_0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036",
+      "settlement_id": "credit_367946c2fe04c04833d752b25763b598f7bce96f8104b5852e34b200e10de8ca",
+      "settlement_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_367946c2fe04c04833d752b25763b598f7bce96f8104b5852e34b200e10de8ca.json",
+      "replay_record_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036.json",
+      "utility": 0.5,
+      "paired_events": [
+        {
+          "event_id": "event_probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a.json",
+          "pair_directory": "credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a",
+          "with_episode": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721",
+          "without_episode": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57",
+          "with_score": 1.0,
+          "without_score": 0.0,
+          "delta": 1.0
+        },
+        {
+          "event_id": "event_probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f.json",
+          "pair_directory": "credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f",
+          "with_episode": "episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b",
+          "without_episode": "episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313",
+          "with_score": 0.0,
+          "without_score": 0.0,
+          "delta": 0.0
+        }
+      ],
+      "ordinary_reuse": {
+        "episode": "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f",
+        "step": 6,
+        "reward": 1.0,
+        "scope": "Observed host injection and task outcome; not isolated causal credit for this one skill."
+      },
+      "applied_updates": {
+        "update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98": "optimizer:5:update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98"
+      },
+      "grpo_sibling_episodes": [
+        "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f",
+        "episodes/train_0321469ad704656d50775bde/attempt_2d5f6135805a4590a1de051de4b62ddb",
+        "episodes/train_0321469ad704656d50775bde/attempt_5dbe82c382ba4b358e26ec1385b87d9a",
+        "episodes/train_0321469ad704656d50775bde/attempt_b6185bc0a5cb4356a18c0a770b1c3c47",
+        "episodes/train_fb4146731a0ff7328a02f04a/attempt_019d5a330c7e4935b5fc50803edfdb07",
+        "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+        "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531",
+        "episodes/train_fb4146731a0ff7328a02f04a/attempt_a98b17594a3148a09d9ced050ae43d1d"
+      ]
+    },
+    {
+      "label": "positive_one",
+      "collection_id": "53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560",
+      "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+      "artifact_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5.json",
+      "source_step": 3,
+      "source_episode": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311",
+      "source_reward": 1.0,
+      "window_id": "window_53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560",
+      "settlement_id": "credit_97183b100804f26f4dbeff8aafa752c854b012deeec6492fcbfb83cd0808fc94",
+      "settlement_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_97183b100804f26f4dbeff8aafa752c854b012deeec6492fcbfb83cd0808fc94.json",
+      "replay_record_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560.json",
+      "utility": 1.0,
+      "paired_events": [
+        {
+          "event_id": "event_probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09.json",
+          "pair_directory": "credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09",
+          "with_episode": "episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d",
+          "without_episode": "episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa",
+          "with_score": 1.0,
+          "without_score": 0.0,
+          "delta": 1.0
+        },
+        {
+          "event_id": "event_probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac.json",
+          "pair_directory": "credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac",
+          "with_episode": "episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732",
+          "without_episode": "episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08",
+          "with_score": 1.0,
+          "without_score": 0.0,
+          "delta": 1.0
+        }
+      ],
+      "ordinary_reuse": {
+        "episode": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+        "step": 7,
+        "reward": 1.0,
+        "scope": "Observed host injection and task outcome; not isolated causal credit for this one skill."
+      },
+      "applied_updates": {
+        "update_97cf7c29e2fff2305200ab8469c7bb80df21120fe7e2e3b4430be0c84ec98368": "optimizer:6:update_97cf7c29e2fff2305200ab8469c7bb80df21120fe7e2e3b4430be0c84ec98368"
+      },
+      "grpo_sibling_episodes": [
+        "episodes/train_6431110aaab23bd0e0c0c12d/attempt_7430bdd0605245e9aa9e9553114ec874",
+        "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311",
+        "episodes/train_6431110aaab23bd0e0c0c12d/attempt_c01f50a0c4c442208ce749c69cdea920",
+        "episodes/train_6431110aaab23bd0e0c0c12d/attempt_dfe2de7bcf5a4135843934be93552193",
+        "episodes/train_884bd1c33138fd6544a7dbe2/attempt_5635d12f5748424fa7612037d0635f6c",
+        "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+        "episodes/train_884bd1c33138fd6544a7dbe2/attempt_62754cb27d234535a247d7f7036b63e7",
+        "episodes/train_884bd1c33138fd6544a7dbe2/attempt_9108e566b37a4781b8e83297891df9d5"
+      ]
+    },
+    {
+      "label": "negative_half",
+      "collection_id": "298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c",
+      "skill_id": "skill-298d1d3130981c71836f5dc4519066d502663618",
+      "artifact_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14.json",
+      "source_step": 2,
+      "source_episode": "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676",
+      "source_reward": 1.0,
+      "window_id": "window_298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c",
+      "settlement_id": "credit_01e07b72a25dd927b03659d9996ae367e0bcac3cf81e5acac52e3c55972d9028",
+      "settlement_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_01e07b72a25dd927b03659d9996ae367e0bcac3cf81e5acac52e3c55972d9028.json",
+      "replay_record_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c.json",
+      "utility": -0.5,
+      "paired_events": [
+        {
+          "event_id": "event_probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2.json",
+          "pair_directory": "credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2",
+          "with_episode": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe",
+          "without_episode": "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3",
+          "with_score": 0.0,
+          "without_score": 1.0,
+          "delta": -1.0
+        },
+        {
+          "event_id": "event_probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080.json",
+          "pair_directory": "credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080",
+          "with_episode": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1",
+          "without_episode": "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1",
+          "with_score": 1.0,
+          "without_score": 1.0,
+          "delta": 0.0
+        }
+      ],
+      "ordinary_reuse": null,
+      "applied_updates": {
+        "update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98": "optimizer:5:update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98"
+      },
+      "grpo_sibling_episodes": [
+        "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676",
+        "episodes/train_5b1988c6b1271c20467820b4/attempt_12a5ebe3552c435b8ef8023d6949e909",
+        "episodes/train_5b1988c6b1271c20467820b4/attempt_3d7014993f9345b8b417356b5b36ab59",
+        "episodes/train_5b1988c6b1271c20467820b4/attempt_eddc5ab5102444a0a024b7a46b35b0d0"
+      ]
+    },
+    {
+      "label": "zero",
+      "collection_id": "f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0",
+      "skill_id": "skill-f4452283b831b5a7c89aee64e5976331c369908a",
+      "artifact_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/571344fe96ddbcd14494da5e69b0047797101568942e335ee63e0a6efe819b9f.json",
+      "source_step": 1,
+      "source_episode": "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1",
+      "source_reward": 1.0,
+      "window_id": "window_f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0",
+      "settlement_id": "credit_b992ea395da48c6cca3dd1dc8e6c6b63c20c80e1fd86a82ab628667f2e4176f9",
+      "settlement_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_b992ea395da48c6cca3dd1dc8e6c6b63c20c80e1fd86a82ab628667f2e4176f9.json",
+      "replay_record_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0.json",
+      "utility": 0.0,
+      "paired_events": [
+        {
+          "event_id": "event_probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5.json",
+          "pair_directory": "credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5",
+          "with_episode": "episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752",
+          "without_episode": "episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c",
+          "with_score": 1.0,
+          "without_score": 1.0,
+          "delta": 0.0
+        },
+        {
+          "event_id": "event_probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040",
+          "event_path": "restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/events/event_probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040.json",
+          "pair_directory": "credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040",
+          "with_episode": "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9",
+          "without_episode": "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd",
+          "with_score": 1.0,
+          "without_score": 1.0,
+          "delta": 0.0
+        }
+      ],
+      "ordinary_reuse": null,
+      "applied_updates": {
+        "update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98": "optimizer:5:update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98"
+      },
+      "grpo_sibling_episodes": [
+        "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1",
+        "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_72b532270a0447ce99cfaa3a130e15fd",
+        "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_a62898187cdc412a8502cd37d656910b",
+        "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_b4607c01c4ae4905beb7598caaf30842"
+      ]
+    }
+  ],
+  "episodes": [
+    "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f",
+    "episodes/train_0321469ad704656d50775bde/attempt_2d5f6135805a4590a1de051de4b62ddb",
+    "episodes/train_0321469ad704656d50775bde/attempt_5dbe82c382ba4b358e26ec1385b87d9a",
+    "episodes/train_0321469ad704656d50775bde/attempt_b6185bc0a5cb4356a18c0a770b1c3c47",
+    "episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752",
+    "episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c",
+    "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1",
+    "episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1",
+    "episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d",
+    "episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa",
+    "episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313",
+    "episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b",
+    "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd",
+    "episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_12a5ebe3552c435b8ef8023d6949e909",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_3d7014993f9345b8b417356b5b36ab59",
+    "episodes/train_5b1988c6b1271c20467820b4/attempt_eddc5ab5102444a0a024b7a46b35b0d0",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_7430bdd0605245e9aa9e9553114ec874",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_c01f50a0c4c442208ce749c69cdea920",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_dfe2de7bcf5a4135843934be93552193",
+    "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe",
+    "episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3",
+    "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1",
+    "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_72b532270a0447ce99cfaa3a130e15fd",
+    "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_a62898187cdc412a8502cd37d656910b",
+    "episodes/train_7947e70a5aeda83d3d66a2a6/attempt_b4607c01c4ae4905beb7598caaf30842",
+    "episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732",
+    "episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_5635d12f5748424fa7612037d0635f6c",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_62754cb27d234535a247d7f7036b63e7",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_9108e566b37a4781b8e83297891df9d5",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_019d5a330c7e4935b5fc50803edfdb07",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_a98b17594a3148a09d9ced050ae43d1d",
+    "episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57",
+    "episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721"
+  ],
+  "model_weights_included": false,
+  "training_resume_checkpoint_included": false
+}

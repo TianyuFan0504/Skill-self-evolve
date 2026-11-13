@@ -1,0 +1,66 @@
+{
+  "game_id": "train_7947e70a5aeda83d3d66a2a6",
+  "split": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan401",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-DishSponge-None-Cart-401/trial_T20190909_045729_956116/game.tw-pddl",
+  "game_sha256": "7ee6de6ba61289b9aa905a93296b819e542f6b9835035cb497a53db3fe703a61",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "reward": 1.0,
+  "won": true,
+  "done": true,
+  "steps": 6,
+  "step_limit": false,
+  "max_steps": 50,
+  "invalid_actions": 0,
+  "wall_seconds": 214.21389651298523,
+  "termination_reason": "agent_finished",
+  "episode_budget": {
+    "schema_version": 1,
+    "policy_version": "alfworld-wall-budget-v1",
+    "admission_policy": "engine_entry_before_deadline; admitted_action_completes_before_snapshot",
+    "server_instance_id": "0b975a5dc1184b38b605379ea7d7adb6",
+    "binding": {
+      "binding_id": "51f97573c47b7a393b7c8740a60355da12bb976794a01cd724e1a83dc76386f9",
+      "binding_sha256": "e4f06a177ed60dbbbdb5d48b8d8d70ad3a3fd1f1f44c161995b86f1ec555f5e6",
+      "attempt_id": "025d63617e03443fa51870ad204a11f1",
+      "gateway_session_id": "session-sample-14-rollout-1-73ed31691ba44fafac2c8295d93594c4",
+      "environment_session_id": "110d083c6d91428bb4e670f3167ad28a"
+    },
+    "account": {
+      "lease_id": "09dbfd6ac122470fb1ad55f89cd02b41",
+      "uid": 20025,
+      "gid": 20025,
+      "name": "alfworld_ep2_025",
+      "owner": {
+        "run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+        "scope_id": "025d63617e03443fa51870ad204a11f1",
+        "kind": "ordinary"
+      }
+    },
+    "budget_seconds": 900,
+    "clock": "monotonic_ns",
+    "started_ns": 4296287692278787,
+    "deadline_ns": 4297187692278787,
+    "registration_sha256": "bdbd87fba361bfa4f60f06d8ff0e977030fca841bac2a4298583c2bb80cd5119",
+    "now_ns": 4296500919632136,
+    "server_closed": true,
+    "closed_ns": 4296500919632136,
+    "close_reason": "agent_finished",
+    "deadline_reached": false,
+    "world_state": {
+      "won": true,
+      "done": true,
+      "steps": 6,
+      "max_steps": 50
+    },
+    "world_state_sha256": "c937290ae10c27af397de44b914dc548c076bf4c9838d55ea5259f90b39ee835",
+    "admitted_actions": 6,
+    "rejected_after_deadline": 0,
+    "last_admitted_ns": 4296494558830642,
+    "last_completed_ns": 4296494592887992,
+    "last_sequence": 6,
+    "action_error_count": 0,
+    "events_sha256": "d088d4692fb9b05be02a0b839cd5f171b03a69ae4bc814de228312a60a5509e6"
+  }
+}

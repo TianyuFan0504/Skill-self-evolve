@@ -1,0 +1,20 @@
+{
+  "game_id": "train_7947e70a5aeda83d3d66a2a6",
+  "stable_game_id": "train_7947e70a5aeda83d3d66a2a6",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan401",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-DishSponge-None-Cart-401/trial_T20190909_045729_956116/game.tw-pddl",
+  "game_sha256": "7ee6de6ba61289b9aa905a93296b819e542f6b9835035cb497a53db3fe703a61",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 14,
+  "rollout_uid": "5fbed7e4-8bdb-4282-b5a9-16fdedb87ef1",
+  "session_index": 1,
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "73792a9fd7349e4dd22de52c5ee2f843176da62ad767c7e6bb73f6a031a24dca",
+  "skill_context_group_id": "0068e749e581acf8522e4321e240d3975796710e999ca4101942ec220de4fb27",
+  "global_step": 1,
+  "attempt_id": "025d63617e03443fa51870ad204a11f1",
+  "started_at_epoch": 1794473880.1096058
+}

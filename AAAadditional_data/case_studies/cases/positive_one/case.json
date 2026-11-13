@@ -1,0 +1,318 @@
+{
+  "label": "positive_one",
+  "title": "Retrieve object under lit desk lamp",
+  "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+  "source": {
+    "original_run_relative_path": "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311",
+    "directory": "episodes/attempt_8176c31ec9194104b865a30bba873311",
+    "files": {
+      "attempt.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/attempt.json",
+      "initial-state.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/initial-state.json",
+      "agent-messages.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/agent-messages.json",
+      "agent-prompt.txt": "episodes/attempt_8176c31ec9194104b865a30bba873311/agent-prompt.txt",
+      "skill-context.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/skill-context.json",
+      "environment-trace.jsonl": "episodes/attempt_8176c31ec9194104b865a30bba873311/environment-trace.jsonl",
+      "codex-events.jsonl": "episodes/attempt_8176c31ec9194104b865a30bba873311/codex-events.jsonl",
+      "codex-stderr.log": "episodes/attempt_8176c31ec9194104b865a30bba873311/codex-stderr.log",
+      "engine-result.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/engine-result.json",
+      "result.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/result.json",
+      "native-capture-diagnostics.jsonl": "episodes/attempt_8176c31ec9194104b865a30bba873311/native-capture-diagnostics.jsonl",
+      "terminal-stop-evidence.jsonl": "episodes/attempt_8176c31ec9194104b865a30bba873311/terminal-stop-evidence.jsonl",
+      "backend-terminal-drain.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/backend-terminal-drain.json",
+      "budget-events.jsonl": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-events.jsonl",
+      "budget-registration.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-registration.json",
+      "budget-environment.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-environment.json",
+      "trajectory.json": "episodes/attempt_8176c31ec9194104b865a30bba873311/trajectory.json",
+      "trajectory.npz": "episodes/attempt_8176c31ec9194104b865a30bba873311/trajectory.npz",
+      "tokens.txt": "episodes/attempt_8176c31ec9194104b865a30bba873311/tokens.txt"
+    },
+    "task_id": "train_6431110aaab23bd0e0c0c12d",
+    "scene": "FloorPlan324",
+    "step": 3,
+    "goal": "look at alarmclock under the desklamp.",
+    "reward": 1.0,
+    "steps": 8,
+    "invalid_actions": 0,
+    "engine_wall_seconds": 71.5991051197052,
+    "native_wall_seconds": 70.14807415008545,
+    "injected_skill_refs": [],
+    "last_world_action_after_native_start_seconds": 64.05972099304199
+  },
+  "source_ema": "ema:3",
+  "skill": {
+    "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+    "principle": "Go to the object containing both target and light source, turn on the light source, pick up the target, optionally relocate if needed to view under the lamp. Role precondition: target and light source must be co-located on the same movable surface such that the target is in the lamp's shadow.",
+    "provenance": {
+      "action_token_ids_sha256": "3ba4ca9355ee5bfab1bcaf6920c469715acef2515dc339d0be70bf5bf87112b4",
+      "behavior_policy_version": "ema:3",
+      "candidate_group_id": "cohort_c0cdb64834bd5edb0e37efa420ed67e31cb34b1fa00d5e08f5218dc116254153",
+      "candidate_index": 0,
+      "collector_version": "native-codex-curate-v3",
+      "curate_record_id": "curate-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560",
+      "observed_ema_weight_version": 3,
+      "producer_uid": "afce3193-e727-479e-83b9-a5f3e6528047",
+      "prompt_token_ids_sha256": "02818f196da2931f76a48c5b8605d1444d52b1cd46743111775ec5df454817d0",
+      "session_id": "curate-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560",
+      "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+      "source_redacted_sha256": "07b7dba0e55b36a1f6f6e09800b095d7a9c03e6cd5c9e6912d90b125e1ffbf12",
+      "source_sha256": "70f32066f57ccc6db37e20388d2e0057ef0e72c063d601b467b223a57459da77"
+    },
+    "schema_version": 1,
+    "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+    "task_families": [
+      "look_at_obj_in_light"
+    ],
+    "title": "Retrieve object under lit desk lamp",
+    "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+    "when_to_apply": "When the task is 'look at X under Y' where X and Y are a light source and an object. Apply when the target is occluded initially, the nearest light source is on the same object as the target, and the target is currently in the shadow of that light source. Precondition: The light source object is a valid light object (turnable) on the same movable surface as the target object."
+  },
+  "curate_action_token_count": 210,
+  "utility": 1.0,
+  "paired_evaluations": [
+    {
+      "number": 1,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d",
+        "directory": "episodes/attempt_3c569c7012f446a79912a2c77f30926d",
+        "files": {
+          "attempt.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/attempt.json",
+          "initial-state.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/initial-state.json",
+          "agent-messages.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/engine-result.json",
+          "result.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-environment.json",
+          "tokens.txt": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/tokens.txt"
+        },
+        "task_id": "train_174877cecf21c5351d806289",
+        "scene": "FloorPlan306",
+        "step": 5,
+        "goal": "look at pencil under the desklamp.",
+        "reward": 1.0,
+        "steps": 5,
+        "invalid_actions": 0,
+        "engine_wall_seconds": 1049.826728105545,
+        "native_wall_seconds": 1042.962898015976,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+            "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+            "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 11.947268009185791
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa",
+        "directory": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa",
+        "files": {
+          "attempt.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/attempt.json",
+          "initial-state.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/initial-state.json",
+          "agent-messages.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/engine-result.json",
+          "result.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-environment.json",
+          "tokens.txt": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/tokens.txt"
+        },
+        "task_id": "train_174877cecf21c5351d806289",
+        "scene": "FloorPlan306",
+        "step": 5,
+        "goal": "look at pencil under the desklamp.",
+        "reward": 0.0,
+        "steps": 50,
+        "invalid_actions": 43,
+        "engine_wall_seconds": 270.78838300704956,
+        "native_wall_seconds": 265.2795217037201,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 166.24891638755798
+      },
+      "delta": 1.0,
+      "files": {
+        "paired-event.json": "cases/positive_one/pair_1/paired-event.json",
+        "paired-input-audit.json": "cases/positive_one/pair_1/paired-input-audit.json",
+        "paired-workdirs.json": "cases/positive_one/pair_1/paired-workdirs.json",
+        "intent.json": "cases/positive_one/pair_1/intent.json",
+        "with_skill/native-capture.json": "cases/positive_one/pair_1/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/positive_one/pair_1/without_skill/native-capture.json"
+      }
+    },
+    {
+      "number": 2,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732",
+        "directory": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732",
+        "files": {
+          "attempt.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/attempt.json",
+          "initial-state.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/initial-state.json",
+          "agent-messages.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/engine-result.json",
+          "result.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-environment.json",
+          "tokens.txt": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/tokens.txt"
+        },
+        "task_id": "train_87666f120cab9b68d00a7e46",
+        "scene": "FloorPlan327",
+        "step": 5,
+        "goal": "look at bowl under the desklamp.",
+        "reward": 1.0,
+        "steps": 29,
+        "invalid_actions": 0,
+        "engine_wall_seconds": 104.23403739929199,
+        "native_wall_seconds": 102.09970784187317,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+            "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+            "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 37.35794472694397
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08",
+        "directory": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08",
+        "files": {
+          "attempt.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/attempt.json",
+          "initial-state.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/initial-state.json",
+          "agent-messages.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/engine-result.json",
+          "result.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-environment.json",
+          "tokens.txt": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/tokens.txt"
+        },
+        "task_id": "train_87666f120cab9b68d00a7e46",
+        "scene": "FloorPlan327",
+        "step": 5,
+        "goal": "look at bowl under the desklamp.",
+        "reward": 0.0,
+        "steps": 50,
+        "invalid_actions": 44,
+        "engine_wall_seconds": 165.5216784477234,
+        "native_wall_seconds": 164.06073784828186,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 158.98476600646973
+      },
+      "delta": 1.0,
+      "files": {
+        "paired-event.json": "cases/positive_one/pair_2/paired-event.json",
+        "paired-input-audit.json": "cases/positive_one/pair_2/paired-input-audit.json",
+        "paired-workdirs.json": "cases/positive_one/pair_2/paired-workdirs.json",
+        "intent.json": "cases/positive_one/pair_2/intent.json",
+        "with_skill/native-capture.json": "cases/positive_one/pair_2/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/positive_one/pair_2/without_skill/native-capture.json"
+      }
+    }
+  ],
+  "applied_updates": {
+    "update_97cf7c29e2fff2305200ab8469c7bb80df21120fe7e2e3b4430be0c84ec98368": "optimizer:6:update_97cf7c29e2fff2305200ab8469c7bb80df21120fe7e2e3b4430be0c84ec98368"
+  },
+  "ordinary_reuse": {
+    "original_run_relative_path": "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+    "directory": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+    "files": {
+      "attempt.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/attempt.json",
+      "initial-state.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/initial-state.json",
+      "agent-messages.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-messages.json",
+      "agent-prompt.txt": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-prompt.txt",
+      "skill-context.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/skill-context.json",
+      "environment-trace.jsonl": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/environment-trace.jsonl",
+      "codex-events.jsonl": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-events.jsonl",
+      "codex-stderr.log": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-stderr.log",
+      "engine-result.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/engine-result.json",
+      "result.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/result.json",
+      "native-capture-diagnostics.jsonl": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/native-capture-diagnostics.jsonl",
+      "terminal-stop-evidence.jsonl": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/terminal-stop-evidence.jsonl",
+      "backend-terminal-drain.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/backend-terminal-drain.json",
+      "budget-events.jsonl": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-events.jsonl",
+      "budget-registration.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-registration.json",
+      "budget-environment.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-environment.json",
+      "trajectory.json": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/trajectory.json",
+      "trajectory.npz": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/trajectory.npz",
+      "tokens.txt": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/tokens.txt"
+    },
+    "task_id": "train_884bd1c33138fd6544a7dbe2",
+    "scene": "FloorPlan323",
+    "step": 7,
+    "goal": "look at pillow under the desklamp.",
+    "reward": 1.0,
+    "steps": 9,
+    "invalid_actions": 0,
+    "engine_wall_seconds": 36.20421242713928,
+    "native_wall_seconds": 36.07521080970764,
+    "injected_skill_refs": [
+      {
+        "skill_id": "skill-780b3250dd9c1e1b2c2390bd6d989a9f2074390e",
+        "version": "sha256:6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb",
+        "content_hash": "6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb"
+      },
+      {
+        "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+        "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+        "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+      }
+    ],
+    "last_world_action_after_native_start_seconds": 30.901931047439575
+  },
+  "files": {
+    "skill": "cases/positive_one/skill.json",
+    "replay": "cases/positive_one/curate_replay.json",
+    "settlement": "cases/positive_one/settlement.json",
+    "curator/agent-messages.json": "cases/positive_one/curator/agent-messages.json",
+    "curator/generated.json": "cases/positive_one/curator/generated.json",
+    "curator/complete.json": "cases/positive_one/curator/complete.json",
+    "curator/intent.json": "cases/positive_one/curator/intent.json",
+    "curator/redacted-source.json": "cases/positive_one/curator/redacted-source.json",
+    "curator/codex-events.jsonl": "cases/positive_one/curator/codex-events.jsonl",
+    "curator/codex-stderr.log": "cases/positive_one/curator/codex-stderr.log",
+    "curator_tokens": "cases/positive_one/curator/tokens.txt"
+  },
+  "grpo_siblings_in_raw_archive": [
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_7430bdd0605245e9aa9e9553114ec874",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_c01f50a0c4c442208ce749c69cdea920",
+    "episodes/train_6431110aaab23bd0e0c0c12d/attempt_dfe2de7bcf5a4135843934be93552193",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_5635d12f5748424fa7612037d0635f6c",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_62754cb27d234535a247d7f7036b63e7",
+    "episodes/train_884bd1c33138fd6544a7dbe2/attempt_9108e566b37a4781b8e83297891df9d5"
+  ]
+}

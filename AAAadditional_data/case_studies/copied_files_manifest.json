@@ -1,0 +1,2902 @@
+{
+  "files": [
+    {
+      "path": "raw_evidence.tar.gz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/02-selected-closed-chains.tar.gz",
+      "bytes": 28560687,
+      "sha256": "23e946180963fd3f0c4089d26c5adef60316c91445d6e7b1087bb79649db5320"
+    },
+    {
+      "path": "original_selection.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/selection.json",
+      "bytes": 18621,
+      "sha256": "f09daf02e01d10493073d0502c1cd793b6eabe7931cfa5d5617b9783856ca671"
+    },
+    {
+      "path": "original_files_manifest.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/FILES.sha256.json",
+      "bytes": 1931265,
+      "sha256": "42056c55754c5a72a85de80a3809c833c119ae757c4771696befb4fe7dd482a1"
+    },
+    {
+      "path": "ledger-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/snapshots/ledger-state.json",
+      "bytes": 159343,
+      "sha256": "a2b354de2fd247403259622eaf2c8059317a612ac41b63d07a9c4c3870ef89cf"
+    },
+    {
+      "path": "original_validation.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/validation.json",
+      "bytes": 12969,
+      "sha256": "202d2537a9c5f172fcf4b175b7dbaea3d1b8fd0b423293f5c9a55cdee7a2a2b1"
+    },
+    {
+      "path": "cases/positive_half/skill.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54.json",
+      "bytes": 1742,
+      "sha256": "fdecb231882e2b640c6db1007f26901825a4ef82703fc20225b6df03486b3bfa"
+    },
+    {
+      "path": "cases/positive_half/curate_replay.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036.json",
+      "bytes": 31195,
+      "sha256": "9a3376bf96551418a25a74b2db4cbcca1490c5104d248d9908ef121f96592663"
+    },
+    {
+      "path": "cases/positive_half/settlement.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_367946c2fe04c04833d752b25763b598f7bce96f8104b5852e34b200e10de8ca.json",
+      "bytes": 1202,
+      "sha256": "aa9c432e2a90c60e05f68a2f4f8edb67901b9ff307eadf7d1f6e31c709d7c073"
+    },
+    {
+      "path": "cases/positive_half/curator/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/agent-messages.json",
+      "bytes": 14602,
+      "sha256": "b19ac8d35164b5d1f481c0e0f8bea398993c1f8bd52ffd0a0ae3ec2aef523937"
+    },
+    {
+      "path": "cases/positive_half/curator/generated.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/generated.json",
+      "bytes": 34125,
+      "sha256": "441cc8c68a90de1c5bc383116c8d63c911c48da7fb6d136d37f63392896bc175"
+    },
+    {
+      "path": "cases/positive_half/curator/complete.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/complete.json",
+      "bytes": 1175,
+      "sha256": "67eb9773c27b43765c45f527df2be8cfccf6f720647b597d96935b786fb69f1a"
+    },
+    {
+      "path": "cases/positive_half/curator/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/intent.json",
+      "bytes": 2421,
+      "sha256": "92912434274359bc4273731c9b517e45a5d246bdb91ea529ec81d0cfe10eb910"
+    },
+    {
+      "path": "cases/positive_half/curator/redacted-source.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/redacted-source.json",
+      "bytes": 9243,
+      "sha256": "95c6e651531af36826131e7e7ec72fef6ffbd2c610564f698366ae94dc7ab75b"
+    },
+    {
+      "path": "cases/positive_half/curator/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/codex-events.jsonl",
+      "bytes": 1846,
+      "sha256": "ce4e5f2af11a73b26bf121d83800cf8767e949fa0328eab0ed22f5b043409443"
+    },
+    {
+      "path": "cases/positive_half/curator/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036/codex-stderr.log",
+      "bytes": 284,
+      "sha256": "347dda5d5d91fe82c5a3efc3dabcb5b9d0a95bf3f5ab379333b32918e84ed7c5"
+    },
+    {
+      "path": "cases/positive_half/curator/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/positive_half-curator-tokens.txt",
+      "bytes": 17445,
+      "sha256": "dbbeb3d6c378c10e9022e56a26504969f1b7c45d0c33ebaead42753b1dc4afa0"
+    },
+    {
+      "path": "cases/positive_half/pair_1/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/paired-event.json",
+      "bytes": 2371,
+      "sha256": "467af23df575779638b221fe412db702b414943ddd6f1a212cb3b7dc948af99a"
+    },
+    {
+      "path": "cases/positive_half/pair_1/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "06895d7de2099e42b53da9d945af6b2e7ab4ffdb65b8c47e57045e10eef198a8"
+    },
+    {
+      "path": "cases/positive_half/pair_1/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/paired-workdirs.json",
+      "bytes": 5554,
+      "sha256": "6a33ff9ce8d79bddd26c3c4b26808d7c8e4c9329504df7cd32487f5fb4d57191"
+    },
+    {
+      "path": "cases/positive_half/pair_1/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/intent.json",
+      "bytes": 1763,
+      "sha256": "c9ac6cc30043b84b7374c53c0dd252fb0956865cc242e3d89e968ec79dc790fc"
+    },
+    {
+      "path": "cases/positive_half/pair_1/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/with_skill/native-capture.json",
+      "bytes": 130112,
+      "sha256": "73cd4cec06aa955e005e18a7d0c44c17d71df271bd6bcbd2116ad9e450a37774"
+    },
+    {
+      "path": "cases/positive_half/pair_1/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_bfdc7c7a5ceb8414eb35c8e27e18deb18a4e16c9d98ba90c3b57f4b203c8308a/without_skill/native-capture.json",
+      "bytes": 90989,
+      "sha256": "7cb31137adcfe3f5f436dc4e9172423e22fd24ca752cdfcbc77e3092d072fe7d"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/attempt.json",
+      "bytes": 1210,
+      "sha256": "121a731a45f8869b47a2a32f6faf0c15e7d95004478ab93e259c08c1b29882c5"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/initial-state.json",
+      "bytes": 1650,
+      "sha256": "b245f4ca081569ac538e962bfb8ed911b4d76824733661437de7ea1fddffce4d"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/agent-messages.json",
+      "bytes": 2971,
+      "sha256": "61a8d42f3c915d0d931fc9015916c0296fb68be4c9c28855c3f8e9280f3f41c2"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/agent-prompt.txt",
+      "bytes": 2761,
+      "sha256": "02826a3d123bee61e2c699044a00b607bf3ac49ed3ae1563a03756fd0027ebad"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/skill-context.json",
+      "bytes": 2833,
+      "sha256": "11a8e88b19b90c511d02778d44b9163f29e1c60cdc46da2d1a02beaac7549635"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/environment-trace.jsonl",
+      "bytes": 51380,
+      "sha256": "c0cad7689fa0eacae5446fbdb107c27763d09320ac5f0815912cdf6ebb4ea05b"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/codex-events.jsonl",
+      "bytes": 48041,
+      "sha256": "1473b775d70dea39f34024bdf932bc46a43f1f40465a17fafd4c9da109d1036d"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/engine-result.json",
+      "bytes": 2640,
+      "sha256": "bb3a082f980c19ce32f905c1e27b6b0e9571d80a46b4811ee6e9ab98ba0b5935"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/result.json",
+      "bytes": 42314,
+      "sha256": "501a0c8fb8e52eb58e87381ff17802c0b9f7d0858a0985e2047cf3a007c92d7d"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "4389131809d43b8f673a70525a7ccc66e30b9d3383ed136cfdb0fa91714cb826"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/terminal-stop-evidence.jsonl",
+      "bytes": 716,
+      "sha256": "56b9554fdecc3af1acab427c4dda18761a22861fbb20ea2878d2c28201a3425e"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/backend-terminal-drain.json",
+      "bytes": 22913,
+      "sha256": "e51f049004b44685a6f4dd2fb11e532d09d65d673e9b7c31f39f20ae8a58ddcf"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/budget-events.jsonl",
+      "bytes": 8805,
+      "sha256": "7397ebdacc7e4250b06b8830b845d24e675b3fea0a62e6c38f884816d882e353"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "c44870755649950aacd7e425c807ddf4848dd1a1dff050491269ff884232a155"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721/budget-environment.json",
+      "bytes": 1627,
+      "sha256": "8095dde353df3b8a3562014dd3e29504e88bd723e317822e87b5bc2ab4e58b3d"
+    },
+    {
+      "path": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_df31f0407ee943d2a5c37f3461379721-tokens.txt",
+      "bytes": 47754,
+      "sha256": "eb7b0c46f484ebecc161de7ebc491566a67000c94cc42f716e3ae973afeec860"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/attempt.json",
+      "bytes": 1213,
+      "sha256": "ba3022c2e98acfe0b6eaf0210db68e267b190e5f7500dd7037a0540608ba595c"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/initial-state.json",
+      "bytes": 1650,
+      "sha256": "b245f4ca081569ac538e962bfb8ed911b4d76824733661437de7ea1fddffce4d"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-messages.json",
+      "bytes": 2178,
+      "sha256": "52662106a637d537a66d391896cad6ec420d9b7d3fcba67b4dd5f9af8ec6c21b"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-prompt.txt",
+      "bytes": 1985,
+      "sha256": "263ad239d4664d8c63260da998d8d8478bfacc17445059ecf24729f294c6247d"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/skill-context.json",
+      "bytes": 1655,
+      "sha256": "542a42587bae24514e5197cfe7097f376752487c3ff453314ec94eec87752391"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/environment-trace.jsonl",
+      "bytes": 34798,
+      "sha256": "779c839a2475aa2b06e241afef66a435f69d3c4d4f01304e3fef34e9c141bb09"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-events.jsonl",
+      "bytes": 34333,
+      "sha256": "3c6ad6ce25786b8b2d9e1be0909c17ca8847ac972f329f9acbf15926c4ab6636"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/engine-result.json",
+      "bytes": 2647,
+      "sha256": "c23749777a26816ab797ce3b474bf71dd47be041343c1588821d5cc05452eb54"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/result.json",
+      "bytes": 27603,
+      "sha256": "ac7d3ec420730c96f77b29a3ae1bf0f46f47f837584228625bd069fc9cbd6e4a"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/native-capture-diagnostics.jsonl",
+      "bytes": 641,
+      "sha256": "f1f4e8c5c0acde6f4b8325eb5f8ea89b8a50aa0d5781f7e987ca9f61b83bad0d"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/terminal-stop-evidence.jsonl",
+      "bytes": 578,
+      "sha256": "8983df344a23d19ab8ac301b680f6d6d933b6d1e622afe02e467d5f3a0158fa8"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/backend-terminal-drain.json",
+      "bytes": 12175,
+      "sha256": "8a981f78b3d7d1dfae5d5820f9c74d061077cb7d31a0b6e7383659c23382560a"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-events.jsonl",
+      "bytes": 5983,
+      "sha256": "75e429e31bd7524f1cf732c6237a53dd8954eaacc04ff3eb2befa304dffe0f20"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "71d411adf8b0293fbdccb88ce5a91fe2627ec45fa0a4f8e5f62496f91ee8cc54"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-environment.json",
+      "bytes": 1632,
+      "sha256": "68d8e4c36e8a93e00394dec83c0f099fbd191e4fd435d4451443b6f767911af3"
+    },
+    {
+      "path": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_b695c988934a4cb6b60dd35a8a819e57-tokens.txt",
+      "bytes": 35674,
+      "sha256": "2525b07ed6bb306fac0e1958b38d47eb949aea23716fe65776463545745f94f3"
+    },
+    {
+      "path": "cases/positive_half/pair_2/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/paired-event.json",
+      "bytes": 2371,
+      "sha256": "9a823d7ead41d96b98511446a132dcd87085df4558bb0b0add1696ae9da14585"
+    },
+    {
+      "path": "cases/positive_half/pair_2/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "2cdd3ea767811337109fdcb807e20b775bfca68afd4130c3379a856955fe3f70"
+    },
+    {
+      "path": "cases/positive_half/pair_2/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/paired-workdirs.json",
+      "bytes": 5551,
+      "sha256": "d6779c88a1a783d62c81a5fc485c8e5de5a7aecde5d56ddb642cd01eda35ae9d"
+    },
+    {
+      "path": "cases/positive_half/pair_2/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/intent.json",
+      "bytes": 1763,
+      "sha256": "28a6ca73b84aab11beeaff5a59e6682f708938a3874054b4024ab0439d5972e1"
+    },
+    {
+      "path": "cases/positive_half/pair_2/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/with_skill/native-capture.json",
+      "bytes": 75798,
+      "sha256": "a614faf904d76cd7af36970dc910c1e24a627ef9dfcbc36e3f24a88fdc58acb8"
+    },
+    {
+      "path": "cases/positive_half/pair_2/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_febae6a1b994876bb07fcde8b5d81976a9cbf6cb019724b9fdda63b0fb07616f/without_skill/native-capture.json",
+      "bytes": 56376,
+      "sha256": "5255ee8f0a92a2b04482c217b2e7aa4c6248f156decc3f8c72066223199b6817"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/attempt.json",
+      "bytes": 1208,
+      "sha256": "1af30d4f00b6de36610548ba0f8fcd31e81e881d1264d562135bd4ebb78c5a24"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/initial-state.json",
+      "bytes": 929,
+      "sha256": "cc8a40801ca8cdc29864981a220f80beb2cca73712d2d6c4cb0f24199cb85ec9"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-messages.json",
+      "bytes": 2190,
+      "sha256": "50a7577303316831df6a9fa204a3522e7cd8bfc066a05487a03597925225103a"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-prompt.txt",
+      "bytes": 2040,
+      "sha256": "b650e320cd57a897e85866444760328cd4e5d78b3246d6f2738b4990454c1887"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/skill-context.json",
+      "bytes": 2833,
+      "sha256": "2d6331cf1ba6568f353b80c8e5972fa5ab4f62ae6219666fb474ffc325d573ec"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/environment-trace.jsonl",
+      "bytes": 23361,
+      "sha256": "196d29a166887d25a11cebe8714b2038779d4310076750b8bd4fa66b1e25bafb"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-events.jsonl",
+      "bytes": 26035,
+      "sha256": "c85be2873d8a7ede789094ecb4171a439a5bf414b8ea4b7c0727e16fa77ae81d"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/engine-result.json",
+      "bytes": 2643,
+      "sha256": "45697cb3b03c48f53f92492829df49472c5fc072d4ee1b4ab58d1038fcc3f9d2"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/result.json",
+      "bytes": 30325,
+      "sha256": "a540e77f0b3eec7c6f554e53d78170e9f54fe2933b3982ddaf340c8f0c99ec19"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/native-capture-diagnostics.jsonl",
+      "bytes": 640,
+      "sha256": "16f3faa694c1e4da8c069e51cf224de47ef89b163ce468869bdb21474fcd7adf"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/terminal-stop-evidence.jsonl",
+      "bytes": 578,
+      "sha256": "ea8c463d9485f632987d023f619363bd77d0b5a08a4175dde689212b20671680"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/backend-terminal-drain.json",
+      "bytes": 13378,
+      "sha256": "b9fc6523d9a64e3934891a6824881308bac501645998b4d5ed3fa87f0138f3a3"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-events.jsonl",
+      "bytes": 6689,
+      "sha256": "4253fe34efa44f1d722e82aab1ffa24ed2ee6988babe9503a62693ea63120b29"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "9036140bbce9dd8449c4dabf0e342f7c386dcedd7a1380dd039022c4f24544f9"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-environment.json",
+      "bytes": 1629,
+      "sha256": "95a62f25f25a6ba11e15e123936c83421d9317c84d88518cf1a84eb6dd67d1e8"
+    },
+    {
+      "path": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_6a7e90380c2e41bfb43cc248489cde8b-tokens.txt",
+      "bytes": 28631,
+      "sha256": "1caab8634355f5756c71fd38862d29f0a12fed20f7408b7bfb9eb131f42d1426"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/attempt.json",
+      "bytes": 1212,
+      "sha256": "b538812561870f10f53be58ed2fb8383366f4617bb8ce37117e9237071cd1d0a"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/initial-state.json",
+      "bytes": 929,
+      "sha256": "cc8a40801ca8cdc29864981a220f80beb2cca73712d2d6c4cb0f24199cb85ec9"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/agent-messages.json",
+      "bytes": 1397,
+      "sha256": "1c8dbac0fa4b75fabcaf7b45b57484cdfd49f8be8dc15dc3f778cd7a9d2d2156"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/agent-prompt.txt",
+      "bytes": 1264,
+      "sha256": "68ebef2c776c3184b1c87f97dc9a12042295fe99f45efa94cc77dbb52db6d5ef"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/skill-context.json",
+      "bytes": 1655,
+      "sha256": "bab9f255cc8256e8d42536d0c44c749d424b2054987e1afe2c2e840180c9f033"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/environment-trace.jsonl",
+      "bytes": 13964,
+      "sha256": "d38720df9a8152100784bf212ca649c1a9102ef3da3df7c7d44996f24787be05"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/codex-events.jsonl",
+      "bytes": 15966,
+      "sha256": "2b2e1796768265fe40edd01469257e78689bbe20aded2a499a4ff236b3d72681"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/engine-result.json",
+      "bytes": 2646,
+      "sha256": "d5b6cfc28c57fb6b7f7a3071e650d662eaf1827b96f9ec405fa9a3b8c276bae8"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/result.json",
+      "bytes": 25274,
+      "sha256": "7eac7cc89fe2093329ef95d9336c7c58af4e755e193661b1950a68d8dcb3fb88"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/native-capture-diagnostics.jsonl",
+      "bytes": 640,
+      "sha256": "fe6b7ce73bcbc5065914bf433cbb593839662e4aeb8d7581f12397ced0b4c6d1"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/terminal-stop-evidence.jsonl",
+      "bytes": 579,
+      "sha256": "9378714bf28e983cdbe31fa4b380dbeda337ee87e0411a20d4a2dffa3dd3239c"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/backend-terminal-drain.json",
+      "bytes": 10276,
+      "sha256": "06c9c50ca046fe557e273f7aea13e965be2f759f92cd66451998fff8d0710d27"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/budget-events.jsonl",
+      "bytes": 3865,
+      "sha256": "9d2d4e72521658d53b922e1cf5f6263a8761c62bb30599c845a6406fc00fbd89"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "fa3c0073dd094e5a08d56a610ef780e0ee779e9f9074a4e64580c1c167304382"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313/budget-environment.json",
+      "bytes": 1632,
+      "sha256": "ce14c814890a9eb5cc2182979a490cd67764e460ce6c4880d265bb192d8d43d6"
+    },
+    {
+      "path": "episodes/attempt_54e2556d9d5947549adf5b8391514313/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_54e2556d9d5947549adf5b8391514313-tokens.txt",
+      "bytes": 21172,
+      "sha256": "05c7da09fe7e54fc8998eb23d7ea78a1d4f0e9b1c621053e62aba5f96df4aaab"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/attempt.json",
+      "bytes": 1046,
+      "sha256": "66022dc6118ab7c851f90cf3cc9742258a49e4bae679943b41588ef0f1698fb0"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/initial-state.json",
+      "bytes": 1861,
+      "sha256": "bfa96e284a1008914c8da7e5c804773f3831a83f03203fb87c7589b329b65b4d"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-messages.json",
+      "bytes": 2404,
+      "sha256": "d980cb8d0c761aa2fe44807a3f28214b8f38a53389405a7e8332e7a58c2f978e"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-prompt.txt",
+      "bytes": 2196,
+      "sha256": "b3befa1008921a307619cbd705adc188d871f9da606088a7e1c037103dc2cea7"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/skill-context.json",
+      "bytes": 1655,
+      "sha256": "b64c68fc294ee223f4de133e01fd249b6266cc5050d728a85d56e1cb3d887dc9"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/environment-trace.jsonl",
+      "bytes": 97974,
+      "sha256": "25c95ebfb86d9d50591b085f5a026758b74aa1928bd3c7c873db6f65f82c16d6"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-events.jsonl",
+      "bytes": 84862,
+      "sha256": "5e275fa77b7264825b722c0a9ebff1ea989c7fbb3157f713eee13db76e218b6e"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/engine-result.json",
+      "bytes": 2592,
+      "sha256": "e6f1ab80fed62eb297bb419bf3921bffadee986ed08e9e5d7a78178886b5b066"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/result.json",
+      "bytes": 48639,
+      "sha256": "153d0ac87c66fe203ec4f7c4708c7f8d3725126feeeb4cbca3a3caef14654496"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/native-capture-diagnostics.jsonl",
+      "bytes": 652,
+      "sha256": "ad1f4cd88296427b75c51bf29a2da382ed19f4f1464be348dab6067818030bce"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/terminal-stop-evidence.jsonl",
+      "bytes": 717,
+      "sha256": "2e5f7288a0c8923eebefd74f41e276c45858f4a7fe63116d30fbefc1c01f7f7c"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/backend-terminal-drain.json",
+      "bytes": 31805,
+      "sha256": "143ff8b2495a6ebacf43e2d6c74e4dcdec1c529990c083846c0e6ef807ce87a0"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-events.jsonl",
+      "bytes": 15512,
+      "sha256": "abec228db6103027e61200511b5a350befa39e4e469b5eba4dbc915901cdc35f"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "52d0b4611d6885e63f979aca3072794f911edf9e636efc60044bdde956b01981"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-environment.json",
+      "bytes": 1578,
+      "sha256": "61df58086b4b2eb9d617c73dc481c08944039032e9aac1f57c6e9e8b1222a109"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_1/session-sample-31-rollout-3-49a5ed5becff4de8a631551d57a994e0/trajectory.json",
+      "bytes": 448,
+      "sha256": "33ec05d06738173df2f6b7dbae96d54dd7e9a2d8493be43bc9776938661f27ff"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_1/session-sample-31-rollout-3-49a5ed5becff4de8a631551d57a994e0/trajectory.npz",
+      "bytes": 15560,
+      "sha256": "e4bb5f76cf15cff80a11b41624971911958799b21219c6b60019cb74f4d0152e"
+    },
+    {
+      "path": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644-tokens.txt",
+      "bytes": 78852,
+      "sha256": "87fb1277454ad5d05cb6005894810d754c6c4e848de06a08def0b423aa5e6854"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/attempt.json",
+      "bytes": 1036,
+      "sha256": "1e8a804a99c332272a2ade6adb04a2f315a50a1ca56ac1f3d6d7591d90d86fdc"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/initial-state.json",
+      "bytes": 1033,
+      "sha256": "d0d8618b6c053cb2bc4af215b67f11c779151b7ac146e86257b76f0300093e91"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/agent-messages.json",
+      "bytes": 3466,
+      "sha256": "ea976b3b68564889e945f81dfb8afb386d149e084ad84c350160842501ab8087"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/agent-prompt.txt",
+      "bytes": 3280,
+      "sha256": "155c91a743264b2be8f158ae07fb89d1c8e24cd8b3fb0aca266df3b9930ca988"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/skill-context.json",
+      "bytes": 4006,
+      "sha256": "02ad1806de510b8bef4c5ebf6899588ac99859dd00619df309d6b61c32c7a91a"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/environment-trace.jsonl",
+      "bytes": 51772,
+      "sha256": "ec3a752fa51f8a43652cb7da7a36ccf362f89b3e188f86612c7489435a028574"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/codex-events.jsonl",
+      "bytes": 49684,
+      "sha256": "d81ff9ec4c0318b77bbb811586cd77d3b5a42048b15d23ef4f5ba550c8b3f561"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/engine-result.json",
+      "bytes": 2195,
+      "sha256": "327366d30742f1c9ea2666d69f96f9df0f603209582f58fb56f6bce72a551db9"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/result.json",
+      "bytes": 43544,
+      "sha256": "1eab136e7452985375e4a1a41349cd1177ed2e9256b8a67bd197b9736c4151ad"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/native-capture-diagnostics.jsonl",
+      "bytes": 665,
+      "sha256": "f238bc09853eaefab08beca18ec9003f0a476baa8ed33dd6b53024e9a932275e"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/terminal-stop-evidence.jsonl",
+      "bytes": 703,
+      "sha256": "d43ca4b99977ce61e96e5e92ba910ac9eae34fdd5e3926c91d3e8daf3d1b6b75"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/backend-terminal-drain.json",
+      "bytes": 25671,
+      "sha256": "08a12ba6f8c9bd5d597a9bbb5ee036997f4d060ff2d193d778bf8145f4d3051b"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/budget-events.jsonl",
+      "bytes": 11276,
+      "sha256": "2810da645aff76e508414bdf1401ba55b72e78abd2559b7588a3ffaad0ee7e7c"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "633c0383fdb4557122f1df89f6fe08ae2b9a23edc6f3d9c47d6aa9e723b0b3a5"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f/budget-environment.json",
+      "bytes": 1578,
+      "sha256": "e848b46a285dd32f20f5a637ded22bd2d9e38ef8bf14ad0fc645223c1e8f1a3e"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_6/session-sample-26-rollout-2-96f0f0b6715140f19bbc3ef33d9ed63c/trajectory.json",
+      "bytes": 448,
+      "sha256": "8a9599a80f61c4802717c2e4ae3ef8b1add9a9f52b1a55c717755cc8175bed73"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_6/session-sample-26-rollout-2-96f0f0b6715140f19bbc3ef33d9ed63c/trajectory.npz",
+      "bytes": 13426,
+      "sha256": "5c5e4241a965e4731725719f1133d9f673f750c64028f05c6550e74b50ebe075"
+    },
+    {
+      "path": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_24c886e2704d40469f66ded8cc53956f-tokens.txt",
+      "bytes": 49501,
+      "sha256": "cda6c79db44873dd66b2e6cf358b42be635dc66aa5b2bb32ab19ed9dfa05f675"
+    },
+    {
+      "path": "cases/positive_one/skill.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5.json",
+      "bytes": 1961,
+      "sha256": "10ec772c5b0827cf3eb70fd7a3cb2afa6585ece075cc3224d89d1447e4524617"
+    },
+    {
+      "path": "cases/positive_one/curate_replay.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560.json",
+      "bytes": 20463,
+      "sha256": "b83a1522a188beaa363ee54b6afc45dc92b7030a5aa12045937d042c046df547"
+    },
+    {
+      "path": "cases/positive_one/settlement.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_97183b100804f26f4dbeff8aafa752c854b012deeec6492fcbfb83cd0808fc94.json",
+      "bytes": 1202,
+      "sha256": "3cee26fd96e8d6682806f273a5c3269ee58df47fc00f5a1351e0d9055614981c"
+    },
+    {
+      "path": "cases/positive_one/curator/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/agent-messages.json",
+      "bytes": 5089,
+      "sha256": "aa93f43c639472d77286d1ebd651ab393384578a75a7986264503f7eb914160b"
+    },
+    {
+      "path": "cases/positive_one/curator/generated.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/generated.json",
+      "bytes": 20925,
+      "sha256": "a8546ca90909133e68b3b7e8e1bc2e192f0273dca6f88eb79826863d6b716571"
+    },
+    {
+      "path": "cases/positive_one/curator/complete.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/complete.json",
+      "bytes": 1223,
+      "sha256": "cf08b4870724877d4a80e642ad22fae172775fbb53da66111ba15c7658b4a121"
+    },
+    {
+      "path": "cases/positive_one/curator/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/intent.json",
+      "bytes": 2419,
+      "sha256": "4ec7b9ebd40a20083c7ce0a293185cd732d354dc880ab0b0754d818d881032fe"
+    },
+    {
+      "path": "cases/positive_one/curator/redacted-source.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/redacted-source.json",
+      "bytes": 2270,
+      "sha256": "5147b9afa7914df75ca983649024e42074dd0509d086e22448f316498a967476"
+    },
+    {
+      "path": "cases/positive_one/curator/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/codex-events.jsonl",
+      "bytes": 2065,
+      "sha256": "39e9e4732c67819763fb4a8f58a2f33c7094ea15f03133ee9556d5c7761e04f1"
+    },
+    {
+      "path": "cases/positive_one/curator/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4c3662a23934b9f48ccb9f560/codex-stderr.log",
+      "bytes": 284,
+      "sha256": "78c7fbb72d4465d57fe033f06027ee38aca4ae49340af91f07d3875e47071841"
+    },
+    {
+      "path": "cases/positive_one/curator/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/positive_one-curator-tokens.txt",
+      "bytes": 9015,
+      "sha256": "8c65e4792767b5d1085cc4410d2ebb5a2c4a0e08b2d56d0ea401657610e4ce1c"
+    },
+    {
+      "path": "cases/positive_one/pair_1/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/paired-event.json",
+      "bytes": 2371,
+      "sha256": "821aa990e9688270f37d20ea97ea95acb64906397bb6f41d5bdeb38e1b4fdf9f"
+    },
+    {
+      "path": "cases/positive_one/pair_1/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "fa9e09ae4d852696fdcf3300870506b335d2d45bb6dd495bf34626979f8a0ee0"
+    },
+    {
+      "path": "cases/positive_one/pair_1/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/paired-workdirs.json",
+      "bytes": 5553,
+      "sha256": "20b8188d11208dbafcf2bd982cbd4a379fa8e4cba689f9e0b00a50c05c505fd6"
+    },
+    {
+      "path": "cases/positive_one/pair_1/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/intent.json",
+      "bytes": 1763,
+      "sha256": "f7a3b7a51e17a7cdfaca60b4c838a50d4db73ade7fab7c74642e71b35aec627d"
+    },
+    {
+      "path": "cases/positive_one/pair_1/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/with_skill/native-capture.json",
+      "bytes": 52899,
+      "sha256": "8b028b5fb64b41336677e48964d4e1bd6ea6f98612a0877218d73cbcca2caf5b"
+    },
+    {
+      "path": "cases/positive_one/pair_1/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_c9dae11def4790438ce1b632f280a32c1f69b0a87609fa375b1a9ce01f864e09/without_skill/native-capture.json",
+      "bytes": 170965,
+      "sha256": "4a2706d5e8a0c8598101310582959110464d400d54408346e70b0177fceaa8ef"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/attempt.json",
+      "bytes": 1189,
+      "sha256": "4fba6f4496aa9f4d276769c7c498a14e5d35f320c0b0f528947b141c1369fc09"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/initial-state.json",
+      "bytes": 613,
+      "sha256": "a054fc56bda88a53f0de97d3205874e2ef28aa53a5146acaff12691e60309774"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/agent-messages.json",
+      "bytes": 2184,
+      "sha256": "353a680e4b43ee665a27e1e9fbf29731c8622306316cdcf35c1529f5e754dd81"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/agent-prompt.txt",
+      "bytes": 2046,
+      "sha256": "3b7cd7fd6b44c1219c0174cc9b793b8095139ef05f182d48d4c63d504fd928c9"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/skill-context.json",
+      "bytes": 2834,
+      "sha256": "640f7f43f4be143ef0509e7d24d8cea08b706a3a1c66f09c01d214280682f756"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/environment-trace.jsonl",
+      "bytes": 6916,
+      "sha256": "8dad658c404aa898f7365047abe996e39f51510334449994486b7eec0d8889cd"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/codex-events.jsonl",
+      "bytes": 8880,
+      "sha256": "0f2ca63b71a91eb38aed4b3b58a1c5d0a62f67db6380ad4ae2852ae2dc8ba4a9"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/engine-result.json",
+      "bytes": 2227,
+      "sha256": "219aa96f38303b3af11fd8dcbabf5d0c690c646ec4b819ee1cbab5949779b243"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/result.json",
+      "bytes": 41644,
+      "sha256": "b3ec24917622093ec3bffce870e04a99c8f039564d7326dece63d6d99d7d2183"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/native-capture-diagnostics.jsonl",
+      "bytes": 640,
+      "sha256": "b309281e96eff2e245a1dd6a8122f24def9259d3a7bb07002c52ca9a21072643"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/terminal-stop-evidence.jsonl",
+      "bytes": 718,
+      "sha256": "0f79419dcf22d37830892c6305a9fd1c0153bbfe051495e953fc6f1196a1bd4f"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/backend-terminal-drain.json",
+      "bytes": 22314,
+      "sha256": "4bf841baaed8d186bd6ca9a40266b18036c2dc9174dbb9751011c236948be545"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/budget-events.jsonl",
+      "bytes": 1753,
+      "sha256": "e698c1cda399592dc43108175a1bfdff6a889fdb297d30639222070b82ff8da3"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "50d645a4e6a57c546d232e2ff5855b09bbbd46a5872570467713132adcf36754"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_3c569c7012f446a79912a2c77f30926d/budget-environment.json",
+      "bytes": 1623,
+      "sha256": "8902164e93ac68cb3c54990e32c68045ab266ce2162f044dc0a7941c7e2576e1"
+    },
+    {
+      "path": "episodes/attempt_3c569c7012f446a79912a2c77f30926d/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_3c569c7012f446a79912a2c77f30926d-tokens.txt",
+      "bytes": 13772,
+      "sha256": "06b6ef6195e14ac3044f2424a8e62070eff92c3b4ac82b4579c8529fcb296494"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/attempt.json",
+      "bytes": 1192,
+      "sha256": "2f854bf2dce6d85ff0e66fa729cc0eac981ad1213d3278c893b9c25ca4f63fd1"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/initial-state.json",
+      "bytes": 613,
+      "sha256": "a054fc56bda88a53f0de97d3205874e2ef28aa53a5146acaff12691e60309774"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-messages.json",
+      "bytes": 1162,
+      "sha256": "3cb8285a2a9909c86e319b2ba01f5b54b6311c7806027f6987bf022c16f8e408"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/agent-prompt.txt",
+      "bytes": 1041,
+      "sha256": "c8c15553c0a93508791a8a3a99c137ad55bd51c9134d2f98d1841c69e9b187a1"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/skill-context.json",
+      "bytes": 1655,
+      "sha256": "f750e8a9a090155ad6f390615b10e433994147e0d5c8cd3b6803269835e5e276"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/environment-trace.jsonl",
+      "bytes": 65795,
+      "sha256": "8366cf1a0e0ceb14c188d31c49fb81005987565728e6c245e6beb30a6888b0db"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-events.jsonl",
+      "bytes": 61128,
+      "sha256": "97a50e587ed099f325902528d063c5dfa545031c6dcd1d017d0bf9eb15e44f49"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/engine-result.json",
+      "bytes": 2238,
+      "sha256": "8e06ca09c7154ebabbd54d3b3496eb4895c3cdfc46b9d8f2b529d390be48ef76"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/result.json",
+      "bytes": 64184,
+      "sha256": "b0ff78c17aa6fa96164fe82db1f93b4a8faedd3c52ee4c6e7f035360ef2c6e1a"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "944f893d4410d6b3699a6634390eadd3080f56684d87ca7a837914733068719e"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/terminal-stop-evidence.jsonl",
+      "bytes": 715,
+      "sha256": "66d92f2157b17e6347db992b1518339aad935d5a6524cd3525349946bf53f442"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/backend-terminal-drain.json",
+      "bytes": 41762,
+      "sha256": "d1f0cc606d80186ae3ad984b55e5fafbc18463e5136053db163215c0f14bee3a"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-events.jsonl",
+      "bytes": 17631,
+      "sha256": "22c0fa52a42829eb5a7ab5b9c92a0a960cce97058d52418756f4e0cb31fcd40b"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "78045006f233f9443b138b603c5ea2e0eb0e1f1e9abcb7edbadaf3386155136d"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_174877cecf21c5351d806289/attempt_9ffdd0345585482db4519e3ecb70c2aa/budget-environment.json",
+      "bytes": 1631,
+      "sha256": "ece541258c20ddf4f64c2f986af236c15b16f79d35bb7ea64074bf87eb25b3e4"
+    },
+    {
+      "path": "episodes/attempt_9ffdd0345585482db4519e3ecb70c2aa/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_9ffdd0345585482db4519e3ecb70c2aa-tokens.txt",
+      "bytes": 58452,
+      "sha256": "aa3cdda1fe67948604d64b93753fb5a6388f65962bceccf7759f64e4c583601d"
+    },
+    {
+      "path": "cases/positive_one/pair_2/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/paired-event.json",
+      "bytes": 2370,
+      "sha256": "032412461c316248f0c8086751c73fb396fb97fe453742fd1d33a7c909ea189c"
+    },
+    {
+      "path": "cases/positive_one/pair_2/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "7475be2f2b35f4aa002bd0b40b1c75dd7e0db5b6bd2c051cb816f6917414e863"
+    },
+    {
+      "path": "cases/positive_one/pair_2/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/paired-workdirs.json",
+      "bytes": 5554,
+      "sha256": "efb1adc3e6e43f0b93c7be0c07807e17964b0156a68d17e38dbc5d272d6da992"
+    },
+    {
+      "path": "cases/positive_one/pair_2/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/intent.json",
+      "bytes": 1763,
+      "sha256": "14ed6c48c28a1abba680e0c4e769b3acee7d54887bd2c7be82490595e855978e"
+    },
+    {
+      "path": "cases/positive_one/pair_2/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/with_skill/native-capture.json",
+      "bytes": 122677,
+      "sha256": "f999775d886e43f0d391053939f4a4177c7027813fb7284157bead9e88a9d001"
+    },
+    {
+      "path": "cases/positive_one/pair_2/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_00049f462ac3ddd7bebd221000c5d0402a3df6bb1f05b9fa29a9bc406dc821ac/without_skill/native-capture.json",
+      "bytes": 159647,
+      "sha256": "bf627ee60d842e6f5b4dd6b53331b90ef7b1e53f3a1bbfa7e1e39f0508ff75b2"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/attempt.json",
+      "bytes": 1187,
+      "sha256": "d67bdd1c529898ea7b508214a88a04bc132c4f7c97e305a0ad00438400fa9b16"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/initial-state.json",
+      "bytes": 759,
+      "sha256": "c504f93883938bf1c87c68c837c4f29145a3372e00c78a4acab1521b6627067a"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-messages.json",
+      "bytes": 2378,
+      "sha256": "8dd76688c091ccd0affdab7610d360ca9f7d0dbf20d7360a1b1fe886643b8e37"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/agent-prompt.txt",
+      "bytes": 2222,
+      "sha256": "0549d8b2e07e258cb1ae63f07ef002fec37f4a3052e3d8e3abf7f49b6ef94860"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/skill-context.json",
+      "bytes": 2834,
+      "sha256": "6c7e8d4fb798db7f8a4f61e3fd886df3f97efc8a6e779a877125e64bf7f3d1d4"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/environment-trace.jsonl",
+      "bytes": 38654,
+      "sha256": "3094d98843e94df5b05dce752af11c1756552652ae37d442e83ba7c0cccc4538"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-events.jsonl",
+      "bytes": 36922,
+      "sha256": "97c7bee7d540effb77f152d51ecb3b2b1aa4c13149cb32e3ebabb00f1dcbc13f"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/engine-result.json",
+      "bytes": 2231,
+      "sha256": "b6f045c47e3df4bed8abe9999f4428dec440c54bb5facc7c289f327d0a1a1a67"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/result.json",
+      "bytes": 60015,
+      "sha256": "87f11866e9da4803f80c3c188222e179f714f27959fee10d21041354106db617"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/native-capture-diagnostics.jsonl",
+      "bytes": 640,
+      "sha256": "e842fe2a0bc12168c599834978f7a4e6b6bfd65420f9191b5cd9cdfa637c481b"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/terminal-stop-evidence.jsonl",
+      "bytes": 577,
+      "sha256": "331a23ff41f49e5b14c02da8c0f2dbf141843ac0e257d4cd8d80f3ca8a02fce7"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/backend-terminal-drain.json",
+      "bytes": 37431,
+      "sha256": "fdd557f6d25eb235ffe1f0cb8239ea62cd4fada6edcfa48e5ae90f089dbd5377"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-events.jsonl",
+      "bytes": 10217,
+      "sha256": "ffb00ca994b7c002cd918982d70af123c0b603ff5b6ef75e0df8a7b309549a29"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "be43fd3cfc01f2c5d0fbb92b02c6d8f2ead0d5d508f7455af4d38fe96b66c778"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_31cf15d1eeb14dab995cba35e5ce5732/budget-environment.json",
+      "bytes": 1627,
+      "sha256": "14cb17eec215da27c49a7283417baa604e7a0d369035b1da388d0052966056e5"
+    },
+    {
+      "path": "episodes/attempt_31cf15d1eeb14dab995cba35e5ce5732/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_31cf15d1eeb14dab995cba35e5ce5732-tokens.txt",
+      "bytes": 38169,
+      "sha256": "de3be23d3e3a6da1a4f352dcd76d4cb3b3f2ae54689b4af50ca8da4695eca3d8"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/attempt.json",
+      "bytes": 1190,
+      "sha256": "7261299842664c6d5b19582063aeaee7b075953059ff6ac46b56e03b68d53895"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/initial-state.json",
+      "bytes": 759,
+      "sha256": "c504f93883938bf1c87c68c837c4f29145a3372e00c78a4acab1521b6627067a"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-messages.json",
+      "bytes": 1356,
+      "sha256": "5d818422e90733c9f40f7e5f2a147c0f91dec51bf98251d677ee1d15cd273dab"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/agent-prompt.txt",
+      "bytes": 1217,
+      "sha256": "3f185f8467f9664a984bc51eb2ab31acbe9489c58e44c1e4dd5b637849566322"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/skill-context.json",
+      "bytes": 1655,
+      "sha256": "ebce25e9f33b9d551ee5ffa3f962fe33f87763434cd32c4e65c8a0be6e96f29a"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/environment-trace.jsonl",
+      "bytes": 57470,
+      "sha256": "bb2bd96ce1d8380ee12e691e56a356e0dfd4fa32396e962e9874bbec086acdda"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-events.jsonl",
+      "bytes": 55400,
+      "sha256": "91516d27a1849b5cc46230e0b0d21ffc6a9919186a9e08489e2ac78020113d49"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/engine-result.json",
+      "bytes": 2235,
+      "sha256": "c6f9328f5c3ea18f5a43d558d69ee416d21c9b1ef6770e9932bc7e5cf4de6975"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/result.json",
+      "bytes": 59666,
+      "sha256": "37cdbae290ac12b888bf41db56a31dcdf7f4e4e9ef4dd2dbfad3bc034d829cae"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/native-capture-diagnostics.jsonl",
+      "bytes": 665,
+      "sha256": "4d405a8c9446038880fd00836d58f7cb87e0391589ba4810ee91fa78983f6cac"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/terminal-stop-evidence.jsonl",
+      "bytes": 717,
+      "sha256": "4563d8986777e8e43c2bfc967ddea8d20abdb278d1977e17b2a6cdcebac042aa"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/backend-terminal-drain.json",
+      "bytes": 38096,
+      "sha256": "8f16801d56a09288d1d7b207b1bdb5b99bb74b43a0519de0d8280fdfc7167fd2"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-events.jsonl",
+      "bytes": 17631,
+      "sha256": "60bae6960926f42e5d29e6d7e2066b4348f40d21f110593e5aca9c381296c4dd"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "a620d88b240a479eacaed016df8486da1bc8996fe6b3e590ec615951816e881e"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_87666f120cab9b68d00a7e46/attempt_837b49ba0a9d45969caad42d6ab13b08/budget-environment.json",
+      "bytes": 1631,
+      "sha256": "e6d8f6bae2c318de38d9684aacb4d14fad49ab069771595b97b16c913a7dd68a"
+    },
+    {
+      "path": "episodes/attempt_837b49ba0a9d45969caad42d6ab13b08/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_837b49ba0a9d45969caad42d6ab13b08-tokens.txt",
+      "bytes": 54016,
+      "sha256": "fc9fd39060a68a54483ff41e2b7c1eb4afc9b821b5e793e196e50ef1199e81aa"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/attempt.json",
+      "bytes": 1028,
+      "sha256": "09cf773dc23cf76cbfaaf636a57eb6dd49f41bedc65020a1f8ad8c9ed7e637fa"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/initial-state.json",
+      "bytes": 992,
+      "sha256": "c310730581161ac874837fff4cfffc437b80c925036c262e717cee9099a71aa8"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/agent-messages.json",
+      "bytes": 1475,
+      "sha256": "43a86cd06ace309a61a734ff8c3d54ccbe9b4563daa48a541827f6ead5f6f104"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/agent-prompt.txt",
+      "bytes": 1327,
+      "sha256": "ce49c72321bfeca418e8a57cabbc7adf58fb6909ad9d6987896ce9c157ba22f0"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/skill-context.json",
+      "bytes": 1655,
+      "sha256": "b87fb36ccda75c5211dd00037ec127b3ce81df1f06cd454e3da431f26206510a"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/environment-trace.jsonl",
+      "bytes": 12096,
+      "sha256": "686276e9955d7d3eea8850cfdb4e26d3a80944acee7e6f34774d7bb80a4b2826"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/codex-events.jsonl",
+      "bytes": 15485,
+      "sha256": "0cb695b7b72a5abe149e16c58a9d0890a8d07596946eb6472e62851443a73210"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/engine-result.json",
+      "bytes": 2568,
+      "sha256": "93f5b2988f7b0a3d995d862514141bf9cd958c6a51725ce03f341e9784d0abcb"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/result.json",
+      "bytes": 20849,
+      "sha256": "25d718689a9d803ebeaffbff58aa713a677f473114294fd756d1d40721bac997"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "f614d6dd8f1870a6a0280207cc4e161eccc4cfa7e2e9eca9325bb098cd67bb5e"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/terminal-stop-evidence.jsonl",
+      "bytes": 714,
+      "sha256": "c0d43b7c2e0362ce75300bec1cfcc1874e7f349ed3a92822c36bc069671b4d54"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/backend-terminal-drain.json",
+      "bytes": 9294,
+      "sha256": "87876390ade292b1891b6365457a1a615bf506a50a0fd6a941b55c88093bb464"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/budget-events.jsonl",
+      "bytes": 2806,
+      "sha256": "e8c94274c9a2dc9a5d86bb70b304271833de0696119059dff6f91d4c879e76d6"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "b4136791c6dcd1f4ec4037cc2ed21bce6fb7c0f76b380f786d96c2fbc0721f61"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_6431110aaab23bd0e0c0c12d/attempt_8176c31ec9194104b865a30bba873311/budget-environment.json",
+      "bytes": 1575,
+      "sha256": "4f3dd69fdfdaf3d035ce425b486f21e8a2273a383f6a9d13622ef284cfc90839"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_3/session-sample-20-rollout-0-09da4d4bfe3d478d9dd641d22abfb3fd/trajectory.json",
+      "bytes": 447,
+      "sha256": "e73a29e48fffc97038d12c7759de65844555849a67ede3622c981abf8a0ef07d"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_3/session-sample-20-rollout-0-09da4d4bfe3d478d9dd641d22abfb3fd/trajectory.npz",
+      "bytes": 9685,
+      "sha256": "bebf7acfc0fd85cd4b641bad82ee1ba2305de19009030e6b428932c76e9dec49"
+    },
+    {
+      "path": "episodes/attempt_8176c31ec9194104b865a30bba873311/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_8176c31ec9194104b865a30bba873311-tokens.txt",
+      "bytes": 19153,
+      "sha256": "302dd79a5120cd012c2fcfe8cafae02ac40e1b0dad691766cfe7747c0d4afb00"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/attempt.json",
+      "bytes": 1024,
+      "sha256": "396e8d3f078d258297c29c3ae18b496e196a4acbbfdb526b6842f34b38d7d582"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/initial-state.json",
+      "bytes": 835,
+      "sha256": "49a953bdea244b9223cf4daa5e6a6fef8e080e586618f03f88a516d5c4be50c2"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-messages.json",
+      "bytes": 2989,
+      "sha256": "acfb16361bcf637e57c960225c6f8d2dce825ed1b9a49d33ca18b5b78e770b75"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/agent-prompt.txt",
+      "bytes": 2812,
+      "sha256": "e7a0cc0cc4da7f71225eeb1c66cc0ee9c9309c5f3ce3352372a6ab46ee58f465"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/skill-context.json",
+      "bytes": 4004,
+      "sha256": "fd6cf276513e7f8c26555195270296544feb74b1d7e669c45f5b88bf86698d06"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/environment-trace.jsonl",
+      "bytes": 13307,
+      "sha256": "0ba3be157ebddab2a113427fcd4a95b2af1e5d7d0444745ccab3a7e8ef9055bc"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-events.jsonl",
+      "bytes": 15281,
+      "sha256": "114f76776be610aee564d77103c6bd4175319228a40cca962e3790ef47aa8a13"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/engine-result.json",
+      "bytes": 2179,
+      "sha256": "5a5ea7200bfca395e70b4136c4f9211ef42ed8f9babde0c360ae772c3e3bd23e"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/result.json",
+      "bytes": 25548,
+      "sha256": "330575b8162f1219a45aff144a88fdb83b3efead0cb2d1c1fa7954ebb3d74a3e"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/native-capture-diagnostics.jsonl",
+      "bytes": 665,
+      "sha256": "b6460cd06ca7452f51f1f228973d779fff23fa3f3790746f0b1f0dae1fcc4e07"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/terminal-stop-evidence.jsonl",
+      "bytes": 716,
+      "sha256": "664dd3a58d0971dd5acb9c1d1d6bf56c41106cf3834159e72f04a12e031f18ff"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/backend-terminal-drain.json",
+      "bytes": 11076,
+      "sha256": "5fb4b2883345c662248d30120090e9003c210b995c53e3cd14e7f5c1f8557287"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-events.jsonl",
+      "bytes": 3157,
+      "sha256": "37a61534bd9246908c85657e91e8771d92a28884cbaeada43aab2eade6b63caa"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "2e18513d33dd38382e4a0cca77ba0957d2b334ae5d5d522b4587a211a17a0781"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_884bd1c33138fd6544a7dbe2/attempt_57192a2d70b6444cb8dd520ca2daf89d/budget-environment.json",
+      "bytes": 1575,
+      "sha256": "e2e6c2d37c479f3a600dd3b649d01b9898c3600246c8df45e54b58022f07db0b"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_7/session-sample-20-rollout-1-ea0ddcc83f8e4b39b23761e52ec34a93/trajectory.json",
+      "bytes": 446,
+      "sha256": "d02f02869db4c38dead096eb5deec0b768fb1f110b19ee9ac0a53b3ef53454fd"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_7/session-sample-20-rollout-1-ea0ddcc83f8e4b39b23761e52ec34a93/trajectory.npz",
+      "bytes": 8894,
+      "sha256": "d3730799c798c6af785f980f290be56ec35486622fcd065f87f3cf9a97ec8c5a"
+    },
+    {
+      "path": "episodes/attempt_57192a2d70b6444cb8dd520ca2daf89d/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_57192a2d70b6444cb8dd520ca2daf89d-tokens.txt",
+      "bytes": 20235,
+      "sha256": "60a4172820779f837ec4c77b5164fabf816cd0c05b82229e3fc900890e40122e"
+    },
+    {
+      "path": "cases/negative_half/skill.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/1859142d35f3558d89c8e977923d5b76e92b9e784a6402bb103e8adcb91c0a14.json",
+      "bytes": 1537,
+      "sha256": "79a948e46e27e4f48cc815bbd0af98f4669f6a82f76bb12a3d170f071f4ca954"
+    },
+    {
+      "path": "cases/negative_half/curate_replay.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c.json",
+      "bytes": 17555,
+      "sha256": "5b4c491caf4fa259082daa126233956d8537e0e6d29472d2c223fa5035cec194"
+    },
+    {
+      "path": "cases/negative_half/settlement.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_01e07b72a25dd927b03659d9996ae367e0bcac3cf81e5acac52e3c55972d9028.json",
+      "bytes": 1205,
+      "sha256": "6b9bd0780ff023000d9ee2f549c7696c041461b9997ca9670c6aac9d6a2a8b4c"
+    },
+    {
+      "path": "cases/negative_half/curator/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/agent-messages.json",
+      "bytes": 4515,
+      "sha256": "9b864b643a56e1e41bf67f0137e19acc8f4f066a9b3a692b2774cb98b65b87cf"
+    },
+    {
+      "path": "cases/negative_half/curator/generated.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/generated.json",
+      "bytes": 17172,
+      "sha256": "e96a1120b27ad02c56399a2a337a5c9a442baa3e1c0866d6be7099de262d2a26"
+    },
+    {
+      "path": "cases/negative_half/curator/complete.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/complete.json",
+      "bytes": 1175,
+      "sha256": "c4e665144595a15d854b168d704e18cbb69f145f672e84580bf4406cd5ba1cf8"
+    },
+    {
+      "path": "cases/negative_half/curator/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/intent.json",
+      "bytes": 2421,
+      "sha256": "3206e6fbdfeb257d040cd952ef80b81ab08faa8d114c1f02e34f802d82e77688"
+    },
+    {
+      "path": "cases/negative_half/curator/redacted-source.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/redacted-source.json",
+      "bytes": 1834,
+      "sha256": "cd4690545c620aaceb200df4fe02bd111d115d5daba2a55deba231b8d89f86f4"
+    },
+    {
+      "path": "cases/negative_half/curator/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/codex-events.jsonl",
+      "bytes": 1641,
+      "sha256": "cf9c759f2c1e4a55d688a512627b0f124c9dcae6f1c47f2c2e2dd200f93dc1b3"
+    },
+    {
+      "path": "cases/negative_half/curator/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/298d1d3130981c71836f5dc4519066d5026636187213bd7cd0017cf8df09cc2c/codex-stderr.log",
+      "bytes": 284,
+      "sha256": "8e0d72ac98cf318dcd12a9b769b2b3870e37ff0a4726cf6658391a13017b4df3"
+    },
+    {
+      "path": "cases/negative_half/curator/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/negative_half-curator-tokens.txt",
+      "bytes": 8065,
+      "sha256": "e64cb945d7399a8ebe7531f1937d474cdcad2e1ec8f018ac3cdd6cf27c71d33b"
+    },
+    {
+      "path": "cases/negative_half/pair_1/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/paired-event.json",
+      "bytes": 2371,
+      "sha256": "a510c50df7541bfa8c693096fdd226c3ef0cd66c730ee11ab4e561f813345078"
+    },
+    {
+      "path": "cases/negative_half/pair_1/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "68404956edf11eef1e1bae1677a45f117b4357bcf88d744ad7f8454df87bd343"
+    },
+    {
+      "path": "cases/negative_half/pair_1/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/paired-workdirs.json",
+      "bytes": 5552,
+      "sha256": "e1ad0de04f5017324b285fd4e6c30092d5a22202ee07cfbf1cdb7cb046b48db8"
+    },
+    {
+      "path": "cases/negative_half/pair_1/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/intent.json",
+      "bytes": 1763,
+      "sha256": "5f7258b4072237fb5f87fe32fa23357c54b96993dc20dd4ae730bf83f81155a7"
+    },
+    {
+      "path": "cases/negative_half/pair_1/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/with_skill/native-capture.json",
+      "bytes": 241259,
+      "sha256": "c8c2545477f76cb055123201c762c47cf3bad5c253d55822ec318d86c8f7e7b8"
+    },
+    {
+      "path": "cases/negative_half/pair_1/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b4c1321e7edbdb557263774ce7523e98f92a6723f8824313dd740bbfeb69b4b2/without_skill/native-capture.json",
+      "bytes": 233607,
+      "sha256": "1b99bb4f9d44cc855295cd37e4b38c1a80a986029ed703df496037e4296f2e1b"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/attempt.json",
+      "bytes": 1192,
+      "sha256": "4928840870c8a9a002b6520af30598753a19808f217e0efebdea80144817dfcb"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/initial-state.json",
+      "bytes": 1845,
+      "sha256": "5da6174ba1eeb59a7314ec58c3eaeacf5fa5a3d6b09508a27ceb886ee7e194e5"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/agent-messages.json",
+      "bytes": 2985,
+      "sha256": "642a15675e386bf96af9bc1dab0b52dd4d4f87c6b5ebc31116217f34bc686c81"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/agent-prompt.txt",
+      "bytes": 2760,
+      "sha256": "a0a40c62940c7d0cb5c23a5dacac095e1f150f7cbfcf8a7712dfcc9b2ed1e7b0"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/skill-context.json",
+      "bytes": 2835,
+      "sha256": "e21abb6d4507ce4ea53a662eb7ad9c5c751ef99db85be393e99fd03ab9183811"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/environment-trace.jsonl",
+      "bytes": 110531,
+      "sha256": "8a0f7de9450abc0bc0c2482f3717c3b5291683874a15206e4e65a887fbe8e15f"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/codex-events.jsonl",
+      "bytes": 97743,
+      "sha256": "b5284d7e85636a751251b9eba53c4a665361dce9a80baa42a4c4843cf4b0ad6a"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/engine-result.json",
+      "bytes": 2624,
+      "sha256": "027f39dbf5ef776a55df46ad8d253c16cdef1678992ef7f426fe7324eb0fe20b"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/result.json",
+      "bytes": 61504,
+      "sha256": "df69982cada3b2be58d213835347be0ee902704e43d5be083eaab6c56e9732f8"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "93957571e66cb61c1ca24ec0223614757ae3f0a5cba02787b29363ca1eb4d810"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/terminal-stop-evidence.jsonl",
+      "bytes": 718,
+      "sha256": "d5f2fa9937bb7438b3124c8e445d4e83e55ffeb796eb0e62e36550603fa0b185"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/backend-terminal-drain.json",
+      "bytes": 38546,
+      "sha256": "dfe5af3fcc332985db0a747cf812e4e692f0e62c96495885c38c043d66750ea4"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/budget-events.jsonl",
+      "bytes": 17631,
+      "sha256": "3f9ea71cb0263d394d5628d74bbb601f197369dd761005d62f6c904e1cbdada9"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "6412dc2670fb9bb0de86639bd07d1d1cd9ee75f8b2d3e2a31d43b0eab99632c2"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_1bca30ff70804436a59b191585cddefe/budget-environment.json",
+      "bytes": 1628,
+      "sha256": "b4a7993b816572b776d0ff749832e112c156eeb590ad5496e644399e934ec04d"
+    },
+    {
+      "path": "episodes/attempt_1bca30ff70804436a59b191585cddefe/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_1bca30ff70804436a59b191585cddefe-tokens.txt",
+      "bytes": 89031,
+      "sha256": "7f84ac62c4384fba4cb857b3c0c5231eb9035e80c41ca6d22209f704396a2829"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/attempt.json",
+      "bytes": 1196,
+      "sha256": "7c3d921dc3094a08b101b1a0d1cbc4ba66f957b77af03324e3169854d2654d6d"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/initial-state.json",
+      "bytes": 1845,
+      "sha256": "5da6174ba1eeb59a7314ec58c3eaeacf5fa5a3d6b09508a27ceb886ee7e194e5"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/agent-messages.json",
+      "bytes": 2388,
+      "sha256": "36c7762f361b3b31adaf1d3467c81426dd111c277d24f7bd1e60ff6f4c08fca1"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/agent-prompt.txt",
+      "bytes": 2180,
+      "sha256": "7cb6c9714f0e802a473336dc59b2464de314cd4c80d3bde0ce6c4370baac3615"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/skill-context.json",
+      "bytes": 1655,
+      "sha256": "05c8442daea549ba2addbbe01ab4d25cd24034714813586fb57aeea9bb2a384f"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/environment-trace.jsonl",
+      "bytes": 108796,
+      "sha256": "2b63a7024be635c02c239a9d362cb0b191c876e1e8a35482ca9f15e83edeeb54"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/codex-events.jsonl",
+      "bytes": 95357,
+      "sha256": "ce6e3cfbb5eb9515b0cb514f9374abf5cc540b3f92027ed9ba14d258104d9882"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/engine-result.json",
+      "bytes": 2625,
+      "sha256": "f7f641c2bac38d625ade38e6705b540aeff76f56a46fc41cb00b5c04de54f753"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/result.json",
+      "bytes": 57337,
+      "sha256": "5bc18501bb1f201b1982f1129b902263f1a6223d3d3834a73c3a8aa8eb8baeac"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "d0ec3e6da917817cf1f4a52003fd433bfd250fb7d79f54bdb5aa3e11ca1b1503"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/terminal-stop-evidence.jsonl",
+      "bytes": 702,
+      "sha256": "522a3e7d07ab469a33fb6a0a7b803cf5f70ce4ceecb2d466e32bb5272c23977c"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/backend-terminal-drain.json",
+      "bytes": 36218,
+      "sha256": "6807e249847da849e796399c590128da0d230dfcdc8f0668e74d7e420117c28b"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/budget-events.jsonl",
+      "bytes": 17277,
+      "sha256": "cf7545ee070ec0cd62a1ad85044650297d18cc7a93ec97fe6274349e90e8f276"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "168927a3321fe658712b7b0b77674356cb9976217efb450f989260fde0eb6aef"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7780fc7514f3f5bbed7bbc70/attempt_361df434bd2746919053c809b64f4fa3/budget-environment.json",
+      "bytes": 1630,
+      "sha256": "ca7c610e95ba0879ad2c745e18e2fd66f4d2a74da6e32db4ba61273cc574686d"
+    },
+    {
+      "path": "episodes/attempt_361df434bd2746919053c809b64f4fa3/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_361df434bd2746919053c809b64f4fa3-tokens.txt",
+      "bytes": 86869,
+      "sha256": "e0ff53d7592e185dac2fba1c1e6b2d7cede4f41da1de2f1661984a359bcda845"
+    },
+    {
+      "path": "cases/negative_half/pair_2/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/paired-event.json",
+      "bytes": 2371,
+      "sha256": "bf2aa0447574ca69fc880b743af149697196ca09a3a4ffdc25f402f657b4c54a"
+    },
+    {
+      "path": "cases/negative_half/pair_2/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "00b5fee8c4191a723b6f85276ad3a6e3d762049f938d1ef08b99ce20928dea12"
+    },
+    {
+      "path": "cases/negative_half/pair_2/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/paired-workdirs.json",
+      "bytes": 5552,
+      "sha256": "705d5627c8028a6255fff1c9fa18e19d2fbe8ab85ed7baccab9861ea5dc869c7"
+    },
+    {
+      "path": "cases/negative_half/pair_2/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/intent.json",
+      "bytes": 1763,
+      "sha256": "eab1368577bb1f64c1afa80f9ffa6771b958a85b7c3c819aa3e02f9b9fb89531"
+    },
+    {
+      "path": "cases/negative_half/pair_2/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/with_skill/native-capture.json",
+      "bytes": 41070,
+      "sha256": "2f9f1761fb133648adf3bd6348f72d86d173776fdc26404bfec2f61a018c9782"
+    },
+    {
+      "path": "cases/negative_half/pair_2/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080/without_skill/native-capture.json",
+      "bytes": 38246,
+      "sha256": "a5d991ca448f9cf90b00e0d349e7b533403167342ef8816d54f49d15a2440108"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/attempt.json",
+      "bytes": 1195,
+      "sha256": "17c6bf139dccdc51e520dc89a074c540e32abdba6ad891a469b02f68922a6256"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/initial-state.json",
+      "bytes": 1178,
+      "sha256": "9f89a94b80d32bce705aeef99dba887381d6b8077fde38665ba3063a125a3965"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-messages.json",
+      "bytes": 2261,
+      "sha256": "6a5e2e8be43aa43534ba527c0d16e4c0168841cc5a35b879310399171a182d75"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/agent-prompt.txt",
+      "bytes": 2093,
+      "sha256": "8745fc50eec8c145c7b49fb8cc41be91bb6cfae546e59d6eddd73031346e97f0"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/skill-context.json",
+      "bytes": 2833,
+      "sha256": "efe19d7969a56e6a4c1a43c54170506d5e633ca9f51ec020da0c3cb1a4812e7c"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/environment-trace.jsonl",
+      "bytes": 8048,
+      "sha256": "4acfa4afc3f2ae21411f9b0dc2dee14e2335cabfe53bed51f66b4d93eb0fcf81"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-events.jsonl",
+      "bytes": 8287,
+      "sha256": "acf30105a8568fc37e13b9057d51ceb400f545138a8601bfd25c103722855423"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/engine-result.json",
+      "bytes": 2622,
+      "sha256": "09fdf00ee4262180f378798109a70fb232c9b7c725f2cf3341d3d815e2addd12"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/result.json",
+      "bytes": 25939,
+      "sha256": "605f2486671ebe1b21795da6e9f99cf0d7855c3c9f711e3cb039890a754788c6"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "53ccca647241fef14a9d43fc3fabac58cf5c76265b04b223849721eef74f036c"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/terminal-stop-evidence.jsonl",
+      "bytes": 701,
+      "sha256": "e57b1e2838020a0cf60c1024209035d250fc2838f03303c0965352d50379746b"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/backend-terminal-drain.json",
+      "bytes": 9546,
+      "sha256": "3cae61fe4519529b3316b3379e86d9e40d0a4bb8065fd060fd6766243bbc3eed"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-events.jsonl",
+      "bytes": 1753,
+      "sha256": "f317e50e2f0137a3bfd41d07c5feaeeb1c0a2b5af1fe10e88bdb0653d6468b7f"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "3163ce748a1507b6bafad6145fbaba485ee3b1d897cce88540cdc547316348ef"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_ebc5599317eb4b44a253cdcc84d51af1/budget-environment.json",
+      "bytes": 1624,
+      "sha256": "e6a4085a1bc87fa8ae1b78875987606e47e7702c5ac38ead89ec99e1cb6f4216"
+    },
+    {
+      "path": "episodes/attempt_ebc5599317eb4b44a253cdcc84d51af1/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_ebc5599317eb4b44a253cdcc84d51af1-tokens.txt",
+      "bytes": 13596,
+      "sha256": "89d4483c6692e35b2556de9456e278384f09b915bbe975b68c5148f8e99fa206"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/attempt.json",
+      "bytes": 1199,
+      "sha256": "70ad4151c77acc51649c2ce6b47ab1ec163d2725ce0db2d13284adb7ae62a358"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/initial-state.json",
+      "bytes": 1178,
+      "sha256": "9f89a94b80d32bce705aeef99dba887381d6b8077fde38665ba3063a125a3965"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-messages.json",
+      "bytes": 1664,
+      "sha256": "1acaab1643ada348520416d052f07fde90185061da89972f03f9139949404a7d"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/agent-prompt.txt",
+      "bytes": 1513,
+      "sha256": "a6349910a459e2135d6f1f8df564853c7882e90ccc7c88139db0935604cc9a97"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/skill-context.json",
+      "bytes": 1655,
+      "sha256": "6bab998946ff87ab944d44aadd8329b86d07d066cfb0bf1e450134bc249898a1"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/environment-trace.jsonl",
+      "bytes": 8046,
+      "sha256": "b031fa37140618fffae99594de702483ee8a0a53ec311910c23bc0125f731836"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-events.jsonl",
+      "bytes": 7638,
+      "sha256": "34d916c2bc6bbb556ce6fccc69b1001916e662ec3eb2a3d3e3bdd61223dd9e03"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/engine-result.json",
+      "bytes": 2625,
+      "sha256": "d66e137675b22ac1263427ccb2a0f931150a6f5ad9b2a2468a16d804d75f04d4"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/result.json",
+      "bytes": 23992,
+      "sha256": "9553669e1e695b4618ec84f360329277758bcd9b02b3b36d23d4978497f7cc23"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "1cae106dd9b531f308264df1c351b9faf4601d07f2931d171412cf7775bbeadb"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/terminal-stop-evidence.jsonl",
+      "bytes": 701,
+      "sha256": "0514d65840f1855263e1165a6440fe4dd8a774431c36f721dd844c7cf5d07ce8"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/backend-terminal-drain.json",
+      "bytes": 8980,
+      "sha256": "3fa009b5c14bcf411d9118d07c60d7fd066d9b2164c0319f6530dec0f8eb3a6d"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-events.jsonl",
+      "bytes": 1753,
+      "sha256": "415fc6557b815923c79d39716354ce32b9f673e9e75d4705b8f1bfc5b7394f3b"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "4d500ddf80e547eb2b41f4a98318d2dd6a5c0d33c3c9f57bce4111dcdbb238fc"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_16693f2b7e98cc3e72c6f5ed/attempt_8d7e6716ee7f45758f18d5a0c04583f1/budget-environment.json",
+      "bytes": 1627,
+      "sha256": "ec6085b2e1d1727b62fd84693e991d960d65ede03209f4d47cba5ab3408277f7"
+    },
+    {
+      "path": "episodes/attempt_8d7e6716ee7f45758f18d5a0c04583f1/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_8d7e6716ee7f45758f18d5a0c04583f1-tokens.txt",
+      "bytes": 12690,
+      "sha256": "02e319fafee9e0aa765d198644a15f4650e7fab2361e2704e9fd91f6d28aa1c2"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/attempt.json",
+      "bytes": 1027,
+      "sha256": "7a61c61d1b479d4aed3a813c4bb3b6b5544d0b77e363ce7514ad16b64b12580d"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/initial-state.json",
+      "bytes": 805,
+      "sha256": "70d71b347563d13dd01a4b1edf1f2076fee348f3517e88d0a6252e79ac03df57"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-messages.json",
+      "bytes": 1264,
+      "sha256": "ba6895fe83ac402263094be1c2876056ad0f5fe2c36254e77886f593c98dee64"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/agent-prompt.txt",
+      "bytes": 1140,
+      "sha256": "bf2c432965efcf6d0d08ac8171005af65c6a0de794e00d04f0f406f02122d567"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/skill-context.json",
+      "bytes": 1655,
+      "sha256": "89600a6cd1870a2c2b8d1e4eac34a73ef8e9249f5ac03ec0a69ce11bdf4ecfaf"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/environment-trace.jsonl",
+      "bytes": 7423,
+      "sha256": "3214b992832c8d99d502310ae08bd351b7ddacac89d60148b0aea9bb66a35ad5"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-events.jsonl",
+      "bytes": 10269,
+      "sha256": "ac1e4e434d71f1816f487de91d5e8a9d61a6bea2ffab53d38ad2b7299360501e"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/engine-result.json",
+      "bytes": 2569,
+      "sha256": "3b2af836eb0c162f35133052a219a6106fb4f9204192677c7929d30e1bead37c"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/result.json",
+      "bytes": 22310,
+      "sha256": "9de73a1d1f06263ad6d175df00c3094be36f66961f04bda70193df1dde8b835f"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "43037a2971a6ae09d17d4cbf28c5788180561aa35e79ef6015b0a2071ecf0008"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/terminal-stop-evidence.jsonl",
+      "bytes": 715,
+      "sha256": "d688df2da7e99cead77d2f6c2d7edee1172189c727f68d251e7390c38ae3f3d4"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/backend-terminal-drain.json",
+      "bytes": 10468,
+      "sha256": "cd91816aa035b80f49d2cf0e494cadf88b5ed72f4aa9c538b723c9ef8de22585"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-events.jsonl",
+      "bytes": 2104,
+      "sha256": "9a0b81c3c9a6d09e01cf84d17916ffe5ebb42ea09166a65fff42fa64a0a40cda"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "bc3ded7fa6b4ecdbf77c73bfd627eaf7c93de841a2f2ae01b8d44f5810c187a1"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_5b1988c6b1271c20467820b4/attempt_0abef07d13294c8a82d5253f9f3d0676/budget-environment.json",
+      "bytes": 1575,
+      "sha256": "21865023ea9fa2219d7d15716ad0aed994b75e32249f520b926995df94425ef7"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_2/session-sample-20-rollout-1-566878907f984901a5d23b715dfbd213/trajectory.json",
+      "bytes": 446,
+      "sha256": "e51e258c29b0ebde3946c9ef6892fc65188d06bfaaca3407c701008f655f000f"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_2/session-sample-20-rollout-1-566878907f984901a5d23b715dfbd213/trajectory.npz",
+      "bytes": 7085,
+      "sha256": "28fd66a64b45e1ac3d080201eb0d69decce894bd27ee4919b40f3a57550b46f6"
+    },
+    {
+      "path": "episodes/attempt_0abef07d13294c8a82d5253f9f3d0676/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_0abef07d13294c8a82d5253f9f3d0676-tokens.txt",
+      "bytes": 14325,
+      "sha256": "441d943fbdfc0661544215f83526815c661098de343839e9bc0e7cff5df3739f"
+    },
+    {
+      "path": "cases/zero/skill.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/skill_store/artifacts/571344fe96ddbcd14494da5e69b0047797101568942e335ee63e0a6efe819b9f.json",
+      "bytes": 1550,
+      "sha256": "226b7be6f007903b9389565201b9021bc556db91d31182fa55f3ee47bf818820"
+    },
+    {
+      "path": "cases/zero/curate_replay.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/replay/records/curate-f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0.json",
+      "bytes": 17075,
+      "sha256": "f106eb7b40926fb869c0b947b560bcf1fce90f05a190bc61ca0989d5ac31de7f"
+    },
+    {
+      "path": "cases/zero/settlement.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/restored_state/step_5_fc45a841f9c041b3a2f16771ae4218e5/ledger/settlements/credit_b992ea395da48c6cca3dd1dc8e6c6b63c20c80e1fd86a82ab628667f2e4176f9.json",
+      "bytes": 1202,
+      "sha256": "1db1c6df580a47ec73c745f9fcafd603c08231481624f04e1b2e1651c65f446f"
+    },
+    {
+      "path": "cases/zero/curator/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/agent-messages.json",
+      "bytes": 4439,
+      "sha256": "4583609c1d45fc45c7f21ec3f61edb31a7fd7becd977b08d9008948d575fdc1d"
+    },
+    {
+      "path": "cases/zero/curator/generated.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/generated.json",
+      "bytes": 16632,
+      "sha256": "45bfc41dd3343f60457a678cca1c13b2cfcae3374b31bce6c96441d949e97c01"
+    },
+    {
+      "path": "cases/zero/curator/complete.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/complete.json",
+      "bytes": 1175,
+      "sha256": "c5a2503b83552e1f10b9db68e4e603b03da12e2b171af9a4ce9819d92464fa0c"
+    },
+    {
+      "path": "cases/zero/curator/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/intent.json",
+      "bytes": 2421,
+      "sha256": "9b799139370e5199780e7b76645c9162b4bb77d753d02b2279aec81728dcb568"
+    },
+    {
+      "path": "cases/zero/curator/redacted-source.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/redacted-source.json",
+      "bytes": 1758,
+      "sha256": "c6e76b43b41d9289894c79ca07d9cdefaf05a0d7eb9bbe035c5342296016ffce"
+    },
+    {
+      "path": "cases/zero/curator/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/codex-events.jsonl",
+      "bytes": 1654,
+      "sha256": "6f8a1bdabf8586df98ae3f5c6d029a737f42b453fa3479631242ea7fd14565d2"
+    },
+    {
+      "path": "cases/zero/curator/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/curate/f4452283b831b5a7c89aee64e5976331c369908a32f88f710fbdd7f9731eceb0/codex-stderr.log",
+      "bytes": 284,
+      "sha256": "5ed13a5bc18abfe453fb7746dc929c313b893a74a2b6da0ac96541546c281994"
+    },
+    {
+      "path": "cases/zero/curator/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/zero-curator-tokens.txt",
+      "bytes": 8002,
+      "sha256": "951ceee2df3012a136d80ef03b1007c0216f72d454e57de861844a848c3bcdc8"
+    },
+    {
+      "path": "cases/zero/pair_1/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/paired-event.json",
+      "bytes": 2371,
+      "sha256": "f41440d4a501ddb8cbb6c7435c83f7ccfec5b3308c6229c1e1ca5c839869b360"
+    },
+    {
+      "path": "cases/zero/pair_1/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "42ea44bb4ebf93d862b6bd1b4a5cd113cec99b852cbb13ea5824d62497925a59"
+    },
+    {
+      "path": "cases/zero/pair_1/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/paired-workdirs.json",
+      "bytes": 5554,
+      "sha256": "218aa25f4658d2987895cc20aec1f810f48a962a6d815343c3884dd5d8d73090"
+    },
+    {
+      "path": "cases/zero/pair_1/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/intent.json",
+      "bytes": 1763,
+      "sha256": "8b06869aa96aef5489ca8ba3239b0c2fe89ca8d111eb921391205c015d7e63af"
+    },
+    {
+      "path": "cases/zero/pair_1/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/with_skill/native-capture.json",
+      "bytes": 57031,
+      "sha256": "20e004bf51fa4ae4955a4f98bb45ada60d82a4d664200625d354c42e28375362"
+    },
+    {
+      "path": "cases/zero/pair_1/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5/without_skill/native-capture.json",
+      "bytes": 119810,
+      "sha256": "17d8ac6497e9b5d98b95045c37f8dfa523c7b96d367b447082ce378a889932a5"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/attempt.json",
+      "bytes": 1194,
+      "sha256": "995cfbf9af1a0ad893334186110992abbe53185cb83fbb603787b553704bf75c"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/initial-state.json",
+      "bytes": 1064,
+      "sha256": "ea43285434a678e4e1084792427cb6b7f2baac0b7e649ea8973b1ff654547783"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/agent-messages.json",
+      "bytes": 2163,
+      "sha256": "93a96a132292e2f9dcffb5728814a3d25e2387bbe79390417ee2e59840f941be"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/agent-prompt.txt",
+      "bytes": 1992,
+      "sha256": "288b17aab954cf5a25666aab10a12ddbd2b63551707638f1b29dff567951d9c9"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/skill-context.json",
+      "bytes": 2833,
+      "sha256": "7ba858f84fda062a9201230bc2d077f08d85587be23677ddf5a432985e341479"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/environment-trace.jsonl",
+      "bytes": 14222,
+      "sha256": "c929c533114dffadc6fba490f1dddbe4b6296a6a453e59789ecbb6ee27ec5077"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/codex-events.jsonl",
+      "bytes": 14846,
+      "sha256": "38f2d4cf5e84f53bbca6c43815a6c3f39bc05e8b5f8864e27cc94d4bc37af9a9"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/engine-result.json",
+      "bytes": 2624,
+      "sha256": "92112c322871905e3a42c887a4f14f00cca75df1daedbb4e12855ad9e83bed2b"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/result.json",
+      "bytes": 30570,
+      "sha256": "e59a3b97a09ee470c4ebbb3fd7b0dae5393a027c6febc48771e2f46c5bd3e0de"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "a18b463b757dd7f5062a66ca7d87fe6954c2147519d8956c530fcf49c68674a5"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/terminal-stop-evidence.jsonl",
+      "bytes": 700,
+      "sha256": "39f0150470035f48e1df17456f518583b0ffa9cd4b5b4f689d5cabd8f0cb57de"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/backend-terminal-drain.json",
+      "bytes": 13323,
+      "sha256": "49c4df118c63d33a7d82c5b7db1be6a533e88d2e76625c0c1bc03e0f3cab21c9"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/budget-events.jsonl",
+      "bytes": 3510,
+      "sha256": "7e57f38f292f3d679ade9693038b8d69c0315cdfcdfac733ab5ea6d7ce45b832"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "4052a63f7a2c422cae006ad1b5404bf3aa162ddbee588f0bc5dcf544320c1105"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_0f546ea9fd51425fae9836d643da9752/budget-environment.json",
+      "bytes": 1627,
+      "sha256": "a6035691586bfda2de65af68e0882608ed1615995dfded2919dcb8e07e87f767"
+    },
+    {
+      "path": "episodes/attempt_0f546ea9fd51425fae9836d643da9752/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_0f546ea9fd51425fae9836d643da9752-tokens.txt",
+      "bytes": 19127,
+      "sha256": "ecc94779bc1256c9a5b382ed13cb20c1218f36fb6aafea1862eb12ed51b2fb3e"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/attempt.json",
+      "bytes": 1197,
+      "sha256": "c7a3452136049762cae752bc2d13d263a3cb211ca554fefcc9d446b97f9768a5"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/initial-state.json",
+      "bytes": 1064,
+      "sha256": "ea43285434a678e4e1084792427cb6b7f2baac0b7e649ea8973b1ff654547783"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/agent-messages.json",
+      "bytes": 1553,
+      "sha256": "f9e2f3eb575d1afc29f4415d6cb572a1c1b345043e7b22a856ec0c76c6231b59"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/agent-prompt.txt",
+      "bytes": 1399,
+      "sha256": "70d19e72f3d70582040cf54a4428eecea2bb183bce6bf779ac1734229ebf8434"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/skill-context.json",
+      "bytes": 1655,
+      "sha256": "88450d0fc4b0d79514e9f11e00ac4ae29b04721fd776268d10b4840b53f598f0"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/environment-trace.jsonl",
+      "bytes": 42723,
+      "sha256": "6244beb5f8dc9559ee9645fe7217e5486af63836cf9b8f8283db09eafdf5d933"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/codex-events.jsonl",
+      "bytes": 43207,
+      "sha256": "8fe6ca1b25a9195123aa45f2c009d7aad1eb3de51aee272b77a81403a0343cec"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/engine-result.json",
+      "bytes": 2626,
+      "sha256": "be5b5f7f9222f30567b55b35f60a42b03635e5a317115f8e83fef6c256d7b49a"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/result.json",
+      "bytes": 44923,
+      "sha256": "f1e52323a6ef99049f0ca9c2ff074b3f82c6190bdc9f9cb77d7decf11c2a10fb"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "1e25719c114e692a7623f144bd8116cfd17f497f0f8b8599d9f9652b5274dedd"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/terminal-stop-evidence.jsonl",
+      "bytes": 716,
+      "sha256": "b15bd826f30872962ba63cbb93153eb755a701896552d4396aa1987865dcb1a8"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/backend-terminal-drain.json",
+      "bytes": 26046,
+      "sha256": "717f77212f20a38f15083df1555927eaf291e9a5cb88f828f5e9406cfa461586"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-events.jsonl",
+      "bytes": 10923,
+      "sha256": "3e20cdde4715ec9fcfba4ef89bffd1ac80612d705457a5f80fb5824de0aa4bb6"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "58cc92156c39238afee68c445d2cdaf17971322806ede66975da320d26874ed1"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_0cdba25bf4dc5985335be8f3/attempt_28e114219f21488c89e8a55f39ec1d2c/budget-environment.json",
+      "bytes": 1630,
+      "sha256": "04509e65f1ab68e6e0a81f6d36b1d0edf8f9da86afa755feb4c79168c4bc459a"
+    },
+    {
+      "path": "episodes/attempt_28e114219f21488c89e8a55f39ec1d2c/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_28e114219f21488c89e8a55f39ec1d2c-tokens.txt",
+      "bytes": 41550,
+      "sha256": "d7b3ad3b02a02c5c052e20c29037fe3df34b435b714954b664f153da895ccc02"
+    },
+    {
+      "path": "cases/zero/pair_2/paired-event.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/paired-event.json",
+      "bytes": 2371,
+      "sha256": "2226bd56b180be5796c7267113eda1e5016d8336c8fbf1e76bd297b5977642aa"
+    },
+    {
+      "path": "cases/zero/pair_2/paired-input-audit.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/paired-input-audit.json",
+      "bytes": 2508,
+      "sha256": "43dbf5228b6ee1a3748c40a3e5720bd3a381bbe5f34719c933f5e15bca143831"
+    },
+    {
+      "path": "cases/zero/pair_2/paired-workdirs.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/paired-workdirs.json",
+      "bytes": 5554,
+      "sha256": "4cc898872a988c5d2de84d59f91c15e198e99a732008ed50d2d6977b0be4f27e"
+    },
+    {
+      "path": "cases/zero/pair_2/intent.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/intent.json",
+      "bytes": 1763,
+      "sha256": "233e5d237a4ef5b0c37d033458adf47cb5a32ba2155e02f83bcdfbbea1e4d733"
+    },
+    {
+      "path": "cases/zero/pair_2/with_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/with_skill/native-capture.json",
+      "bytes": 72454,
+      "sha256": "64600791c2bc1dcd8029279689d3a8ae0a2ad93ac9eccaaefb2970025f1a053b"
+    },
+    {
+      "path": "cases/zero/pair_2/without_skill/native-capture.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/credit_probes/probe_f2dc983a14e08df88c246bc212207add276f2ba5bf6255eeb1565e81e7c6f040/without_skill/native-capture.json",
+      "bytes": 81058,
+      "sha256": "5633cd4bc9e76c39de854c83354994ef911385f7b2bbccc233942fad74bfcd95"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/attempt.json",
+      "bytes": 1198,
+      "sha256": "cef50c10fa57cd6ee6e2c71ec9076d149ced87f8780bf6a4e0e785d8e7ab4934"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/initial-state.json",
+      "bytes": 958,
+      "sha256": "09a2e602a7c6670fd70ac6c830a569c47d4cb2e329bcc3fcb47e00d72f484d1c"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/agent-messages.json",
+      "bytes": 2039,
+      "sha256": "a14235b9e6c50fc82816fdf5d51cc4e14de653aef448815b6bfd13d9de8ed1c7"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/agent-prompt.txt",
+      "bytes": 1886,
+      "sha256": "3a2e8fa49c696fd1e95c1ec830275036308dcb5a188edec7479271fe263ea3fa"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/skill-context.json",
+      "bytes": 2833,
+      "sha256": "2ae620aab759f88dc26aebab6b8c643d057ea50381ee04a95b87d584ed4e0c3c"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/environment-trace.jsonl",
+      "bytes": 20793,
+      "sha256": "9da5762e2da5c0d0a56912bf64676650d5cace11d372180fee64f3a8145255bb"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/codex-events.jsonl",
+      "bytes": 22396,
+      "sha256": "48434a59dbb30226183060e03b394e0f78cde46f2d7eefe794d75b6f5d6416ce"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/engine-result.json",
+      "bytes": 2626,
+      "sha256": "73a2d21a8d3a85c854ec336bc5bdb62386a3fd71b176a7f94f69abd7a297ad7d"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/result.json",
+      "bytes": 34459,
+      "sha256": "190600a253cb7abc196106f722573b05cf1b4d738177a72ca542f133f7f05263"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/native-capture-diagnostics.jsonl",
+      "bytes": 653,
+      "sha256": "a93d9308945e000984a8b98c875ef1e4816a5ffb2586d1d9984703de5e5c4fdd"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/terminal-stop-evidence.jsonl",
+      "bytes": 702,
+      "sha256": "ed387ea31bf417ca9096480215fffb95f857f312e5d0c32b1ea893b15f744bc5"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/backend-terminal-drain.json",
+      "bytes": 16495,
+      "sha256": "496c8606b32614869a4caf9c97966cf67d4475e6c754f87506cec4dfb651cf09"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-events.jsonl",
+      "bytes": 5628,
+      "sha256": "508d15fca7a5bd163a76cfef3e9678791b42133086a92828282553334bcadb08"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-registration.json",
+      "bytes": 1093,
+      "sha256": "19388fe83080bf310d7a8e9709ed2cb100e4586df397fc135c7e5c1902cf4ffa"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_9e0fe0632479496f8b64e81c29e5b0b9/budget-environment.json",
+      "bytes": 1627,
+      "sha256": "86df312d11c0e4eb3491c0763efa6bea8ea6d2d401e1825cd9d843ab729c21c4"
+    },
+    {
+      "path": "episodes/attempt_9e0fe0632479496f8b64e81c29e5b0b9/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_9e0fe0632479496f8b64e81c29e5b0b9-tokens.txt",
+      "bytes": 25119,
+      "sha256": "ffd95c1e2837d59d5fab2bcf6fa432815ecf941e2506d699563800aeb8a6c61d"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/attempt.json",
+      "bytes": 1201,
+      "sha256": "880d8cbf59cc8db2be94327adcc8b9a4cfd7692d878c12c7242a6d638dd4fd60"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/initial-state.json",
+      "bytes": 958,
+      "sha256": "09a2e602a7c6670fd70ac6c830a569c47d4cb2e329bcc3fcb47e00d72f484d1c"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/agent-messages.json",
+      "bytes": 1429,
+      "sha256": "70bb65c664349138d6ba9f390dff074cf0c27514b312fbe5a2ebef17d5848837"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/agent-prompt.txt",
+      "bytes": 1293,
+      "sha256": "4a2ca28f8f13a2a755d932de358099239020b0730223f70f0426f4d198b1f1e4"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/skill-context.json",
+      "bytes": 1655,
+      "sha256": "00e415a183bcebd1931cd2c1bc9ac3d04e473105e13d138e1eee974210832bbb"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/environment-trace.jsonl",
+      "bytes": 25953,
+      "sha256": "080e31652e2db6893dee01738d6df50085efc7c1358e64a80e62b3ac22ebf52f"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/codex-events.jsonl",
+      "bytes": 26790,
+      "sha256": "69a13976d9666426b7908f6db1adeba0d0fb7855c299a6874dc41bb95a4b21bf"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/engine-result.json",
+      "bytes": 2631,
+      "sha256": "89e7ec9cdc4b796def4d9692b5323531ac9c04315a14f6128b89d27ce334f693"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/result.json",
+      "bytes": 35645,
+      "sha256": "47c913b308cefecf402d62694173044472e5d6b51702364c97d52d99505efb57"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "b6294ebf617501be9fbdcceec8043801e295c749c8c6dffc270c0346567f5333"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/terminal-stop-evidence.jsonl",
+      "bytes": 714,
+      "sha256": "9f04d32126b9c2aa6c977753387bef16d5c6ab68ce1c60cb54226b54ad2b6433"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/backend-terminal-drain.json",
+      "bytes": 18472,
+      "sha256": "66f4b370b08ab5ac0bd7d1c9f675ab9ec75f12a4071cb331d7cebf4f08503438"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/budget-events.jsonl",
+      "bytes": 7040,
+      "sha256": "549405b5aa307922855232bb4d7c47e83b18d92aac2155d1d25803038c9928c4"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/budget-registration.json",
+      "bytes": 1096,
+      "sha256": "d0dff3e20401dc1352dc5a8b3eebbc04d2a43251ecb67ac0b0c5a47bc1b752d1"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_4069c4335ad7b287bdfb7d6a/attempt_003ef2f2be3242b2b027b25189a2decd/budget-environment.json",
+      "bytes": 1630,
+      "sha256": "dc4f2c46d4bdf1aa616ed523cdf01675c783cd379d997916bb80a1a660b602df"
+    },
+    {
+      "path": "episodes/attempt_003ef2f2be3242b2b027b25189a2decd/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_003ef2f2be3242b2b027b25189a2decd-tokens.txt",
+      "bytes": 28130,
+      "sha256": "f0559a3c5d4e872121f1238a68fe2b29f30da6c5955fa339dd88d20f8d8d9dfb"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/attempt.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/attempt.json",
+      "bytes": 1026,
+      "sha256": "6d80a06e837114f06b194cc2d58fdde3c3ab8b44ad0a8a5f4c251d9d55d4449a"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/initial-state.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/initial-state.json",
+      "bytes": 878,
+      "sha256": "8d0d221e4276780ad027e524eafe4cfd83d44fdb6362a367cf1acd0c04b42e40"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/agent-messages.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/agent-messages.json",
+      "bytes": 1343,
+      "sha256": "50aec5761cc273dc609474a4f899842316ddb39ab8b62f247df29f306ebdc387"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/agent-prompt.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/agent-prompt.txt",
+      "bytes": 1213,
+      "sha256": "c4be6949211417aa191d538308c340b2aa11e3b1c179292e70b6babbb5e4da49"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/skill-context.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/skill-context.json",
+      "bytes": 1655,
+      "sha256": "c2441abf1f02e4d439b2a3b8698133818a7500ca508c3f1bb442ca435d945c0b"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/environment-trace.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/environment-trace.jsonl",
+      "bytes": 7472,
+      "sha256": "f6903ee251e4a9cbb1a53f90d2023b7931ea1482f4a41696ac9fbb89c8a70128"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/codex-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/codex-events.jsonl",
+      "bytes": 61072,
+      "sha256": "8bf1aa7eb3ada28f989d97a608b174910b89edeeee3fb31984e9003737b0e213"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/codex-stderr.log",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/codex-stderr.log",
+      "bytes": 29,
+      "sha256": "3e75d28a6681c31400a3f0fcb564c7613fd42796fb83294e4d53fea86bcbd401"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/engine-result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/engine-result.json",
+      "bytes": 2568,
+      "sha256": "c2f325fdebc89a640ee4f025b4a6556a622d5056e407cb0d69aadb685972e7f9"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/result.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/result.json",
+      "bytes": 47116,
+      "sha256": "28b082422b05b498cd54edda79782bf12542db44df1b98b26f85c925f0777b54"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/native-capture-diagnostics.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/native-capture-diagnostics.jsonl",
+      "bytes": 654,
+      "sha256": "68aef2de93e96aff663c1478697728a3bb98ef3ae8478d6a4e6609e5054b5cf8"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/terminal-stop-evidence.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/terminal-stop-evidence.jsonl",
+      "bytes": 718,
+      "sha256": "d77bbfbf15a3bc678becc63d97d78dcc9c75c9a4160a96815d2681b29bbf8376"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/backend-terminal-drain.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/backend-terminal-drain.json",
+      "bytes": 30586,
+      "sha256": "08834f527a57934055d043ad9faeec930432157af3e9777ae008e786d8f95e00"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/budget-events.jsonl",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/budget-events.jsonl",
+      "bytes": 2104,
+      "sha256": "d088d4692fb9b05be02a0b839cd5f171b03a69ae4bc814de228312a60a5509e6"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/budget-registration.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/budget-registration.json",
+      "bytes": 1044,
+      "sha256": "0a518f4783272394fb14cdd17853432797b67deaf3fce2ee311f035aa5c03db7"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/budget-environment.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/episodes/train_7947e70a5aeda83d3d66a2a6/attempt_025d63617e03443fa51870ad204a11f1/budget-environment.json",
+      "bytes": 1575,
+      "sha256": "4c5d392e6c5f37a4bfe57960aafafd74dd48637c1aa7b905402a95b96ca5b75d"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/trajectory.json",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_1/session-sample-14-rollout-1-73ed31691ba44fafac2c8295d93594c4/trajectory.json",
+      "bytes": 448,
+      "sha256": "75ea8be99339790cfa03b49413513eb39d7db1af5f775ee8e51d351cbe92b20f"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/trajectory.npz",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/evidence/raw/agent_logs/step_1/session-sample-14-rollout-1-73ed31691ba44fafac2c8295d93594c4/trajectory.npz",
+      "bytes": 27896,
+      "sha256": "3c9bb126e6d6de2d50ba80dd141b2775c0301f95160a7a37fa129458ed8f2190"
+    },
+    {
+      "path": "episodes/attempt_025d63617e03443fa51870ad204a11f1/tokens.txt",
+      "source": "/Users/tianyu/Desktop/Skill训练证据-20261112-2344/reports/attempt_025d63617e03443fa51870ad204a11f1-tokens.txt",
+      "bytes": 62599,
+      "sha256": "d3bf3e842b533d4c5d32e89c4ec100c315c1d8a4d52cd16eb8e83795955d2046"
+    }
+  ]
+}

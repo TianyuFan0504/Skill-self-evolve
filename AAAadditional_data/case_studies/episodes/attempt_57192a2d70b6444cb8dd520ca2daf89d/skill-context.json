@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "builder_version": "host-skill-context-v2",
+  "context_version": "e7153e1e42986853ca5fb8566aea0edb233d35633390a5ff29b8365ace00f9f2",
+  "group_id": "39433b751ad76664c22ab3261069e2d9f3cbbde1388a7f91aa7c5ba721a3322f",
+  "snapshot_id": "937029a2aebd18be1be1a32c980c34249ef76ce1359864cc0afbd9ad8cdb12f6",
+  "retriever_version": "family-lexical-v1",
+  "query_sha256": "3cd9646368c6876ecea8f8aca55e1744c948a8220c4a761286ac94ee16615dcf",
+  "selected_refs": [
+    {
+      "skill_id": "skill-780b3250dd9c1e1b2c2390bd6d989a9f2074390e",
+      "version": "sha256:6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb",
+      "content_hash": "6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb"
+    },
+    {
+      "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+      "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+      "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+    }
+  ],
+  "injected_refs": [
+    {
+      "skill_id": "skill-780b3250dd9c1e1b2c2390bd6d989a9f2074390e",
+      "version": "sha256:6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb",
+      "content_hash": "6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb"
+    },
+    {
+      "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+      "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+      "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+    }
+  ],
+  "budget_excluded": [],
+  "skill_text_sha256": "72185866a3b46523085f0642694f286a1737a6660b239894f4635b4830e10899",
+  "skill_tokens": 459,
+  "skill_token_budget": 1024,
+  "base_prompt_tokens": 466,
+  "rendered_prompt_tokens": 925,
+  "max_prompt_tokens": 4096,
+  "budget_scope": "complete_task_chat_template; native_codex_prefix_and_tools_excluded",
+  "actual_native_request_verified": false,
+  "actual_gateway_capacity_guard": "encoded_context_before_backend; prompt_length_plus_response_length",
+  "tokenizer_version": "sha256:375a890b1070557b5a519b24b0642e99e0fe79e7e9f4eee6cbb9497671e4b814",
+  "original_messages_sha256": "522c9d3a0ba9b32f185d9f2638a6b8fb4f4ff441dbc9284a6d9c386b69c7a5b7",
+  "injected_messages_sha256": "48f3445cd5f45d183405f2f404bf4a7ea06388e0979985e917c7d338a231e8e0",
+  "rendered_prompt_sha256": "21bccc85ffd8e6ca1c4c06162cf3caee75e4418be22a1f7e2ba24482cfe83acd",
+  "rendered_token_ids_sha256": "778dd976a5deceaf2bd7313b634e58ec6cd3760645d3a15d28c0aaa1abb2c074",
+  "character_range_unit": "unicode_codepoints",
+  "ranges": [
+    {
+      "ref": {
+        "skill_id": "skill-780b3250dd9c1e1b2c2390bd6d989a9f2074390e",
+        "version": "sha256:6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb",
+        "content_hash": "6cd69603d20005d5c13a4d086274617e9ddfdf0b146eb72575d67d6062ec2ceb"
+      },
+      "block_char_range": [
+        128,
+        630
+      ],
+      "user_char_range": [
+        1430,
+        1932
+      ],
+      "rendered_char_range": [
+        1447,
+        1949
+      ],
+      "rendered_overlap_token_range": [
+        481,
+        654
+      ],
+      "text_sha256": "c8c9bfd01efa142e79f086bcfc3d63c066efc94f9b843ef3c31c1aaa0341e799"
+    },
+    {
+      "ref": {
+        "skill_id": "skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4",
+        "version": "sha256:9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5",
+        "content_hash": "9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5"
+      },
+      "block_char_range": [
+        632,
+        1509
+      ],
+      "user_char_range": [
+        1934,
+        2811
+      ],
+      "rendered_char_range": [
+        1951,
+        2828
+      ],
+      "rendered_overlap_token_range": [
+        655,
+        916
+      ],
+      "text_sha256": "1a1ea489efdd4ca1d9ac93f1afb7747ee78d70bf4dc32d19f282260668f0126b"
+    }
+  ],
+  "context_id": "132107237793c1477e3f7f806d618c7481c3d5c0963018ae03ea8baf7fcf465c"
+}

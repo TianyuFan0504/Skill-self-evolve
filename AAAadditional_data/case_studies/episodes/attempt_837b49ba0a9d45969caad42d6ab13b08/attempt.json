@@ -1,0 +1,23 @@
+{
+  "game_id": "train_87666f120cab9b68d00a7e46",
+  "stable_game_id": "train_87666f120cab9b68d00a7e46",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "look_at_obj_in_light",
+  "scene_id": "FloorPlan327",
+  "relative_game_path": "json_2.1.1/train/look_at_obj_in_light-Bowl-None-DeskLamp-327/trial_T20190907_094410_444756/game.tw-pddl",
+  "game_sha256": "4673f1fc805c33124a67e349006534fc59b1aae27fa483fdf3ead89c392a7813",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "cbb703c4-ee09-4273-9231-85f64f9c70f7",
+  "session_index": 0,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "f285c5c3c3d842f2bf0ead14bc7fb2a29cfe488beb029e05fecd5ef1bd77c7d0",
+  "skill_context_group_id": "17908625b42fc2c160e872cbe10b86a94bb8f9e6290b825e6112c5d748d38fef",
+  "global_step": 5,
+  "credit_probe_group": "406f5efabcf65a1d8c17bed0080911b5d268d091d9e01c67b96615a5d59639a1",
+  "credit_probe_variant": "without_skill",
+  "attempt_id": "837b49ba0a9d45969caad42d6ab13b08",
+  "started_at_epoch": 1794492021.1959672
+}

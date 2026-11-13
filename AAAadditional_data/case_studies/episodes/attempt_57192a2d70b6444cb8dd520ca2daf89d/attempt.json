@@ -1,0 +1,20 @@
+{
+  "game_id": "train_884bd1c33138fd6544a7dbe2",
+  "stable_game_id": "train_884bd1c33138fd6544a7dbe2",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "look_at_obj_in_light",
+  "scene_id": "FloorPlan323",
+  "relative_game_path": "json_2.1.1/train/look_at_obj_in_light-Pillow-None-DeskLamp-323/trial_T20190908_053135_013146/game.tw-pddl",
+  "game_sha256": "954f55b48534a220e9060b72e48d3a9327c84123fd339ffb4bc27fe28205f060",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 20,
+  "rollout_uid": "99778293-75f0-4bf6-b9b4-129ebc498c10",
+  "session_index": 1,
+  "skill_snapshot_id": "937029a2aebd18be1be1a32c980c34249ef76ce1359864cc0afbd9ad8cdb12f6",
+  "skill_context_version": "e7153e1e42986853ca5fb8566aea0edb233d35633390a5ff29b8365ace00f9f2",
+  "skill_context_group_id": "39433b751ad76664c22ab3261069e2d9f3cbbde1388a7f91aa7c5ba721a3322f",
+  "global_step": 7,
+  "attempt_id": "57192a2d70b6444cb8dd520ca2daf89d",
+  "started_at_epoch": 1794497595.4299102
+}

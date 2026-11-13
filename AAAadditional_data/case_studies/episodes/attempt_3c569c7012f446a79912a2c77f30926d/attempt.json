@@ -1,0 +1,23 @@
+{
+  "game_id": "train_174877cecf21c5351d806289",
+  "stable_game_id": "train_174877cecf21c5351d806289",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "look_at_obj_in_light",
+  "scene_id": "FloorPlan306",
+  "relative_game_path": "json_2.1.1/train/look_at_obj_in_light-Pencil-None-DeskLamp-306/trial_T20190907_235840_204311/game.tw-pddl",
+  "game_sha256": "aac7f80bb765707986d31c622ac0470d08ba577514338282ff9a4c401c810aea",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "41dac666-217d-41d3-ad96-5c506ae8a375",
+  "session_index": 3,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "7402651d5658a327f1627abff04e47aad534ded4c5f13a0f0fc3fc8952cfaf11",
+  "skill_context_version": "192f879d998324c792f284fbadc8f365380531ac635f6d52e0b47008f9a92739",
+  "skill_context_group_id": "ad7de0895e28952b68bc5810d48044251e812d3585ef9684bd4a6b22c46cd51a",
+  "global_step": 5,
+  "credit_probe_group": "e7e814299eb7f4eb8da41fcb97d55932d5eca8848fa844dec89f843f9e15327d",
+  "credit_probe_variant": "with_skill",
+  "attempt_id": "3c569c7012f446a79912a2c77f30926d",
+  "started_at_epoch": 1794492295.8954556
+}

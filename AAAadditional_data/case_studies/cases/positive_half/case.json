@@ -1,0 +1,318 @@
+{
+  "label": "positive_half",
+  "title": "Disambiguate closed receptacles before open inspection",
+  "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+  "source": {
+    "original_run_relative_path": "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+    "directory": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+    "files": {
+      "attempt.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/attempt.json",
+      "initial-state.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/initial-state.json",
+      "agent-messages.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-messages.json",
+      "agent-prompt.txt": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/agent-prompt.txt",
+      "skill-context.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/skill-context.json",
+      "environment-trace.jsonl": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/environment-trace.jsonl",
+      "codex-events.jsonl": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-events.jsonl",
+      "codex-stderr.log": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/codex-stderr.log",
+      "engine-result.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/engine-result.json",
+      "result.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/result.json",
+      "native-capture-diagnostics.jsonl": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/native-capture-diagnostics.jsonl",
+      "terminal-stop-evidence.jsonl": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/terminal-stop-evidence.jsonl",
+      "backend-terminal-drain.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/backend-terminal-drain.json",
+      "budget-events.jsonl": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-events.jsonl",
+      "budget-registration.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-registration.json",
+      "budget-environment.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/budget-environment.json",
+      "trajectory.json": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/trajectory.json",
+      "trajectory.npz": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/trajectory.npz",
+      "tokens.txt": "episodes/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644/tokens.txt"
+    },
+    "task_id": "train_fb4146731a0ff7328a02f04a",
+    "scene": "FloorPlan17",
+    "step": 1,
+    "goal": "clean some spatula and put it in diningtable.",
+    "reward": 1.0,
+    "steps": 44,
+    "invalid_actions": 3,
+    "engine_wall_seconds": 138.83770489692688,
+    "native_wall_seconds": 138.2216145992279,
+    "injected_skill_refs": [],
+    "last_world_action_after_native_start_seconds": 133.19044399261475
+  },
+  "source_ema": "ema:1",
+  "skill": {
+    "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+    "principle": "When retrieving items from a room, visiting a receptacle location does not guarantee access; execute go first then check observation for 'closed' state, and only proceed to open if access is blocked or required to verify content. Skips this cycle for open receptacles directly containing the target.",
+    "provenance": {
+      "action_token_ids_sha256": "6175d3cf6e3c60ab0716d1149f23b8aec6780f4520c89eec183082e944984169",
+      "behavior_policy_version": "ema:1",
+      "candidate_group_id": "cohort_98ee93af766ee834a2eca62c2427270935fb60d1893957a2e059e77a3b947acf",
+      "candidate_index": 0,
+      "collector_version": "native-codex-curate-v3",
+      "curate_record_id": "curate-0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036",
+      "observed_ema_weight_version": 1,
+      "producer_uid": "afa18c2e-6d62-4644-907d-5e47556d2e48",
+      "prompt_token_ids_sha256": "c97c970321e8f73a9adef837eb5b28a0cf2f62771293ab6152b1e92457e894ed",
+      "session_id": "curate-0f80a2d26f6f4672b5d9c12306d0e4e125b268dece8422fe5bb0ea2ce5190036",
+      "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+      "source_redacted_sha256": "c663055ff7f1bb2f7e7665d63ee5c7a2a6c6b214833d8be8373f9dec78600551",
+      "source_sha256": "a98bb51e71712d33fcaa80cdf4b7aa992cb7dbf2ecfb5297b761064df593c47a"
+    },
+    "schema_version": 1,
+    "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+    "task_families": [
+      "pick_clean_then_place_in_recep"
+    ],
+    "title": "Disambiguate closed receptacles before open inspection",
+    "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+    "when_to_apply": "Any goal requiring retrieval or examination within a room that involves potentially closed cabinets, drawers, or fake doors."
+  },
+  "curate_action_token_count": 157,
+  "utility": 0.5,
+  "paired_evaluations": [
+    {
+      "number": 1,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_df31f0407ee943d2a5c37f3461379721",
+        "directory": "episodes/attempt_df31f0407ee943d2a5c37f3461379721",
+        "files": {
+          "attempt.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/attempt.json",
+          "initial-state.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/initial-state.json",
+          "agent-messages.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/engine-result.json",
+          "result.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/budget-environment.json",
+          "tokens.txt": "episodes/attempt_df31f0407ee943d2a5c37f3461379721/tokens.txt"
+        },
+        "task_id": "train_fdbd13fca14a0b3a210456e2",
+        "scene": "FloorPlan18",
+        "step": 4,
+        "goal": "put a clean kettle in stoveburner.",
+        "reward": 1.0,
+        "steps": 25,
+        "invalid_actions": 3,
+        "engine_wall_seconds": 194.35147309303284,
+        "native_wall_seconds": 180.4850869178772,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+            "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+            "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 173.06194376945496
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_fdbd13fca14a0b3a210456e2/attempt_b695c988934a4cb6b60dd35a8a819e57",
+        "directory": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57",
+        "files": {
+          "attempt.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/attempt.json",
+          "initial-state.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/initial-state.json",
+          "agent-messages.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/engine-result.json",
+          "result.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/budget-environment.json",
+          "tokens.txt": "episodes/attempt_b695c988934a4cb6b60dd35a8a819e57/tokens.txt"
+        },
+        "task_id": "train_fdbd13fca14a0b3a210456e2",
+        "scene": "FloorPlan18",
+        "step": 4,
+        "goal": "put a clean kettle in stoveburner.",
+        "reward": 0.0,
+        "steps": 17,
+        "invalid_actions": 2,
+        "engine_wall_seconds": 165.04333877563477,
+        "native_wall_seconds": 163.0561363697052,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 146.7413523197174
+      },
+      "delta": 1.0,
+      "files": {
+        "paired-event.json": "cases/positive_half/pair_1/paired-event.json",
+        "paired-input-audit.json": "cases/positive_half/pair_1/paired-input-audit.json",
+        "paired-workdirs.json": "cases/positive_half/pair_1/paired-workdirs.json",
+        "intent.json": "cases/positive_half/pair_1/intent.json",
+        "with_skill/native-capture.json": "cases/positive_half/pair_1/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/positive_half/pair_1/without_skill/native-capture.json"
+      }
+    },
+    {
+      "number": 2,
+      "with_skill": {
+        "original_run_relative_path": "episodes/train_26e016cc74785986c4124748/attempt_6a7e90380c2e41bfb43cc248489cde8b",
+        "directory": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b",
+        "files": {
+          "attempt.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/attempt.json",
+          "initial-state.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/initial-state.json",
+          "agent-messages.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/engine-result.json",
+          "result.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/budget-environment.json",
+          "tokens.txt": "episodes/attempt_6a7e90380c2e41bfb43cc248489cde8b/tokens.txt"
+        },
+        "task_id": "train_26e016cc74785986c4124748",
+        "scene": "FloorPlan403",
+        "step": 4,
+        "goal": "put a clean soapbar in cabinet.",
+        "reward": 0.0,
+        "steps": 19,
+        "invalid_actions": 1,
+        "engine_wall_seconds": 160.70261311531067,
+        "native_wall_seconds": 140.3324556350708,
+        "injected_skill_refs": [
+          {
+            "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+            "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+            "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+          }
+        ],
+        "last_world_action_after_native_start_seconds": 133.99462246894836
+      },
+      "without_skill": {
+        "original_run_relative_path": "episodes/train_26e016cc74785986c4124748/attempt_54e2556d9d5947549adf5b8391514313",
+        "directory": "episodes/attempt_54e2556d9d5947549adf5b8391514313",
+        "files": {
+          "attempt.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/attempt.json",
+          "initial-state.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/initial-state.json",
+          "agent-messages.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/agent-messages.json",
+          "agent-prompt.txt": "episodes/attempt_54e2556d9d5947549adf5b8391514313/agent-prompt.txt",
+          "skill-context.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/skill-context.json",
+          "environment-trace.jsonl": "episodes/attempt_54e2556d9d5947549adf5b8391514313/environment-trace.jsonl",
+          "codex-events.jsonl": "episodes/attempt_54e2556d9d5947549adf5b8391514313/codex-events.jsonl",
+          "codex-stderr.log": "episodes/attempt_54e2556d9d5947549adf5b8391514313/codex-stderr.log",
+          "engine-result.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/engine-result.json",
+          "result.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/result.json",
+          "native-capture-diagnostics.jsonl": "episodes/attempt_54e2556d9d5947549adf5b8391514313/native-capture-diagnostics.jsonl",
+          "terminal-stop-evidence.jsonl": "episodes/attempt_54e2556d9d5947549adf5b8391514313/terminal-stop-evidence.jsonl",
+          "backend-terminal-drain.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/backend-terminal-drain.json",
+          "budget-events.jsonl": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-events.jsonl",
+          "budget-registration.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-registration.json",
+          "budget-environment.json": "episodes/attempt_54e2556d9d5947549adf5b8391514313/budget-environment.json",
+          "tokens.txt": "episodes/attempt_54e2556d9d5947549adf5b8391514313/tokens.txt"
+        },
+        "task_id": "train_26e016cc74785986c4124748",
+        "scene": "FloorPlan403",
+        "step": 4,
+        "goal": "put a clean soapbar in cabinet.",
+        "reward": 0.0,
+        "steps": 11,
+        "invalid_actions": 0,
+        "engine_wall_seconds": 114.16998982429504,
+        "native_wall_seconds": 109.35790872573853,
+        "injected_skill_refs": [],
+        "last_world_action_after_native_start_seconds": 94.87880969047546
+      },
+      "delta": 0.0,
+      "files": {
+        "paired-event.json": "cases/positive_half/pair_2/paired-event.json",
+        "paired-input-audit.json": "cases/positive_half/pair_2/paired-input-audit.json",
+        "paired-workdirs.json": "cases/positive_half/pair_2/paired-workdirs.json",
+        "intent.json": "cases/positive_half/pair_2/intent.json",
+        "with_skill/native-capture.json": "cases/positive_half/pair_2/with_skill/native-capture.json",
+        "without_skill/native-capture.json": "cases/positive_half/pair_2/without_skill/native-capture.json"
+      }
+    }
+  ],
+  "applied_updates": {
+    "update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98": "optimizer:5:update_af036045bf441e1aa6e57cc036eeeaa3c1ab6db74adcc7bf33c927156c50ba98"
+  },
+  "ordinary_reuse": {
+    "original_run_relative_path": "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f",
+    "directory": "episodes/attempt_24c886e2704d40469f66ded8cc53956f",
+    "files": {
+      "attempt.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/attempt.json",
+      "initial-state.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/initial-state.json",
+      "agent-messages.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/agent-messages.json",
+      "agent-prompt.txt": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/agent-prompt.txt",
+      "skill-context.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/skill-context.json",
+      "environment-trace.jsonl": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/environment-trace.jsonl",
+      "codex-events.jsonl": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/codex-events.jsonl",
+      "codex-stderr.log": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/codex-stderr.log",
+      "engine-result.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/engine-result.json",
+      "result.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/result.json",
+      "native-capture-diagnostics.jsonl": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/native-capture-diagnostics.jsonl",
+      "terminal-stop-evidence.jsonl": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/terminal-stop-evidence.jsonl",
+      "backend-terminal-drain.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/backend-terminal-drain.json",
+      "budget-events.jsonl": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-events.jsonl",
+      "budget-registration.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-registration.json",
+      "budget-environment.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/budget-environment.json",
+      "trajectory.json": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/trajectory.json",
+      "trajectory.npz": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/trajectory.npz",
+      "tokens.txt": "episodes/attempt_24c886e2704d40469f66ded8cc53956f/tokens.txt"
+    },
+    "task_id": "train_0321469ad704656d50775bde",
+    "scene": "FloorPlan4",
+    "step": 6,
+    "goal": "clean some bowl and put it in fridge.",
+    "reward": 1.0,
+    "steps": 32,
+    "invalid_actions": 1,
+    "engine_wall_seconds": 69.62604928016663,
+    "native_wall_seconds": 69.49568319320679,
+    "injected_skill_refs": [
+      {
+        "skill_id": "skill-0f80a2d26f6f4672b5d9c12306d0e4e125b268de",
+        "version": "sha256:d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54",
+        "content_hash": "d711ca71e578eb4d08a0537357bdfa347a45788c3da5ac42402feb0542481a54"
+      },
+      {
+        "skill_id": "skill-27cae2c86808caa0ec1af0ccba7738fb2cb79f04",
+        "version": "sha256:673770857a23c92a9e0b35d865fc133f77b35bff6e79f45e723ceccea4991edf",
+        "content_hash": "673770857a23c92a9e0b35d865fc133f77b35bff6e79f45e723ceccea4991edf"
+      }
+    ],
+    "last_world_action_after_native_start_seconds": 64.41768050193787
+  },
+  "files": {
+    "skill": "cases/positive_half/skill.json",
+    "replay": "cases/positive_half/curate_replay.json",
+    "settlement": "cases/positive_half/settlement.json",
+    "curator/agent-messages.json": "cases/positive_half/curator/agent-messages.json",
+    "curator/generated.json": "cases/positive_half/curator/generated.json",
+    "curator/complete.json": "cases/positive_half/curator/complete.json",
+    "curator/intent.json": "cases/positive_half/curator/intent.json",
+    "curator/redacted-source.json": "cases/positive_half/curator/redacted-source.json",
+    "curator/codex-events.jsonl": "cases/positive_half/curator/codex-events.jsonl",
+    "curator/codex-stderr.log": "cases/positive_half/curator/codex-stderr.log",
+    "curator_tokens": "cases/positive_half/curator/tokens.txt"
+  },
+  "grpo_siblings_in_raw_archive": [
+    "episodes/train_0321469ad704656d50775bde/attempt_24c886e2704d40469f66ded8cc53956f",
+    "episodes/train_0321469ad704656d50775bde/attempt_2d5f6135805a4590a1de051de4b62ddb",
+    "episodes/train_0321469ad704656d50775bde/attempt_5dbe82c382ba4b358e26ec1385b87d9a",
+    "episodes/train_0321469ad704656d50775bde/attempt_b6185bc0a5cb4356a18c0a770b1c3c47",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_019d5a330c7e4935b5fc50803edfdb07",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_4a7ad2a6aa0c4ac59f37e411d3ad7644",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_6d0b0bd19d4c4476979dfee6ecc0b531",
+    "episodes/train_fb4146731a0ff7328a02f04a/attempt_a98b17594a3148a09d9ced050ae43d1d"
+  ]
+}

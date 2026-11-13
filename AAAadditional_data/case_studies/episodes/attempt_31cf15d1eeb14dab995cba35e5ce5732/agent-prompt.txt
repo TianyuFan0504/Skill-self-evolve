@@ -1,0 +1,40 @@
+Complete the ALFWorld goal shown in the initial game state. Interact only with
+the game using `alfworld-step 'EXACT ACTION'`, choosing actions from the current
+admissible commands. Use the returned observations to track your inventory and
+progress. Stop as soon as the environment reports success or termination.
+
+
+Initial game state:
+{
+  "observation": "-= Welcome to TextWorld, ALFRED! =-\n\nYou are in the middle of a room. Looking quickly around you, you see a bed 1, a desk 1, a drawer 8, a drawer 7, a drawer 6, a drawer 5, a drawer 4, a drawer 3, a drawer 2, a drawer 1, a dresser 1, a garbagecan 1, a shelf 5, a shelf 4, a shelf 3, a shelf 2, and a shelf 1.\n\nYour task is to: look at bowl under the desklamp.",
+  "admissible_commands": [
+    "go to bed 1",
+    "go to desk 1",
+    "go to drawer 1",
+    "go to drawer 2",
+    "go to drawer 3",
+    "go to drawer 4",
+    "go to drawer 5",
+    "go to drawer 6",
+    "go to drawer 7",
+    "go to drawer 8",
+    "go to dresser 1",
+    "go to garbagecan 1",
+    "go to shelf 1",
+    "go to shelf 2",
+    "go to shelf 3",
+    "go to shelf 4",
+    "go to shelf 5",
+    "inventory",
+    "look"
+  ],
+  "steps": 0,
+  "max_steps": 50,
+  "won": false,
+  "done": false
+}
+
+Reusable skill notes:
+Use these notes only when applicable. The current environment goal and tool rules remain authoritative.
+[Skill skill-53acb7ad4e9f5a55f6bd4ff9154d519ceeae68a4@9bf9e449044fcea9625ad57651c89a0bcec15f230b0e2dbb708ffad03a0b79c5]
+{"principle": "Go to the object containing both target and light source, turn on the light source, pick up the target, optionally relocate if needed to view under the lamp. Role precondition: target and light source must be co-located on the same movable surface such that the target is in the lamp's shadow.", "title": "Retrieve object under lit desk lamp", "when_to_apply": "When the task is 'look at X under Y' where X and Y are a light source and an object. Apply when the target is occluded initially, the nearest light source is on the same object as the target, and the target is currently in the shadow of that light source. Precondition: The light source object is a valid light object (turnable) on the same movable surface as the target object."}

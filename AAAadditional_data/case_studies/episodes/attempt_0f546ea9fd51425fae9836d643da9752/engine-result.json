@@ -1,0 +1,66 @@
+{
+  "game_id": "train_0cdba25bf4dc5985335be8f3",
+  "split": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan318",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-CellPhone-None-ArmChair-318/trial_T20190909_120136_895030/game.tw-pddl",
+  "game_sha256": "9f6df98cf93e06b7180e507641cc496a62ad2d23355ed10d0402e0a9d7932b74",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "reward": 1.0,
+  "won": true,
+  "done": true,
+  "steps": 10,
+  "step_limit": false,
+  "max_steps": 50,
+  "invalid_actions": 0,
+  "wall_seconds": 22.957234144210815,
+  "termination_reason": "agent_finished",
+  "episode_budget": {
+    "schema_version": 1,
+    "policy_version": "alfworld-wall-budget-v1",
+    "admission_policy": "engine_entry_before_deadline; admitted_action_completes_before_snapshot",
+    "server_instance_id": "0b975a5dc1184b38b605379ea7d7adb6",
+    "binding": {
+      "binding_id": "e3373b77053d6fd543da0009c1456ce5ae2ce0b3ebe193ae60cb52bec501f02e",
+      "binding_sha256": "0ffbbee1c7f1edb5a5e90c16e54dca3b115667ccc7cac2b32f37516aadc21f6b",
+      "attempt_id": "0f546ea9fd51425fae9836d643da9752",
+      "gateway_session_id": "probe_b3b450433ecb5bc9104a496807b4ad3a450472fa8b755ca91be79127b6af6ed5_with_skill",
+      "environment_session_id": "2384745fec794e229415a0d6716785c5"
+    },
+    "account": {
+      "lease_id": "be55b22780c74847afe74f8c1bfd7c9e",
+      "uid": 20083,
+      "gid": 20083,
+      "name": "alfworld_ep2_083",
+      "owner": {
+        "run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+        "scope_id": "46e1e9f053c71704b1638c32a6dd287308f64b9fd39989674b54a27a94159ff4",
+        "kind": "pair"
+      }
+    },
+    "budget_seconds": 900,
+    "clock": "monotonic_ns",
+    "started_ns": 4302465604112270,
+    "deadline_ns": 4303365604112270,
+    "registration_sha256": "34c5cd697423d194843e6163f3b723e6091c84841d0749c700fbc287ff572957",
+    "now_ns": 4302488472078513,
+    "server_closed": true,
+    "closed_ns": 4302488472078513,
+    "close_reason": "agent_finished",
+    "deadline_reached": false,
+    "world_state": {
+      "won": true,
+      "done": true,
+      "steps": 10,
+      "max_steps": 50
+    },
+    "world_state_sha256": "c31f6078fa5354d271af688a3414d5123e9a483353eb36a82de6ed81ca8d4a3e",
+    "admitted_actions": 10,
+    "rejected_after_deadline": 0,
+    "last_admitted_ns": 4302482895074034,
+    "last_completed_ns": 4302482941779252,
+    "last_sequence": 10,
+    "action_error_count": 0,
+    "events_sha256": "7e57f38f292f3d679ade9693038b8d69c0315cdfcdfac733ab5ea6d7ce45b832"
+  }
+}

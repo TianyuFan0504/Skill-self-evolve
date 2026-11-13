@@ -1,0 +1,66 @@
+{
+  "game_id": "train_16693f2b7e98cc3e72c6f5ed",
+  "split": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan423",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-HandTowel-None-GarbageCan-423/trial_T20190907_025958_147612/game.tw-pddl",
+  "game_sha256": "787786e2e25c4e8e80b9e25d69ec662df6fa86b4c8c9664531e5717f4367f8c0",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "reward": 1.0,
+  "won": true,
+  "done": true,
+  "steps": 5,
+  "step_limit": false,
+  "max_steps": 50,
+  "invalid_actions": 0,
+  "wall_seconds": 15.798930644989014,
+  "termination_reason": "agent_finished",
+  "episode_budget": {
+    "schema_version": 1,
+    "policy_version": "alfworld-wall-budget-v1",
+    "admission_policy": "engine_entry_before_deadline; admitted_action_completes_before_snapshot",
+    "server_instance_id": "0b975a5dc1184b38b605379ea7d7adb6",
+    "binding": {
+      "binding_id": "a2f8f6357977e81b449836050763f6121f58b4c8dff230345c0808af17feaeb8",
+      "binding_sha256": "82f6cf638f254fd44c26a0952f49e3c2f12da3ef61edf9b21f9736c447580b3e",
+      "attempt_id": "ebc5599317eb4b44a253cdcc84d51af1",
+      "gateway_session_id": "probe_491f5b98b6f29f172bc82f8d0d52cd26f18a9c4813be1fc2b680afa6a5cee080_with_skill",
+      "environment_session_id": "f2dbfb5ce0894065a6f987bbac51b6c6"
+    },
+    "account": {
+      "lease_id": "cf8d2578f2e146a5a88017f2166cbfcb",
+      "uid": 20095,
+      "gid": 20095,
+      "name": "alfworld_ep2_095",
+      "owner": {
+        "run_root": "/root/nas_chaohuang/skill_training/runs/alfworld_joint_full64_v9_20261112",
+        "scope_id": "fc6386e5f5a579bae9f3c1ffbcd634c49db942e1cf7df6e6ae1f41b63d531f6e",
+        "kind": "pair"
+      }
+    },
+    "budget_seconds": 900,
+    "clock": "monotonic_ns",
+    "started_ns": 4303499466370825,
+    "deadline_ns": 4304399466370825,
+    "registration_sha256": "f320cee090144e27da90c223072ca4b68da2c0ecefb9f09198b6c82d9312b294",
+    "now_ns": 4303515135342493,
+    "server_closed": true,
+    "closed_ns": 4303515135342493,
+    "close_reason": "agent_finished",
+    "deadline_reached": false,
+    "world_state": {
+      "won": true,
+      "done": true,
+      "steps": 5,
+      "max_steps": 50
+    },
+    "world_state_sha256": "3f4715979fa53680cca1004bb89edc4f810920d8445e13202dba26df7b6dc0de",
+    "admitted_actions": 5,
+    "rejected_after_deadline": 0,
+    "last_admitted_ns": 4303509900459836,
+    "last_completed_ns": 4303509946362460,
+    "last_sequence": 5,
+    "action_error_count": 0,
+    "events_sha256": "f317e50e2f0137a3bfd41d07c5feaeeb1c0a2b5af1fe10e88bdb0653d6468b7f"
+  }
+}

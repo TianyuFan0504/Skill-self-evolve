@@ -1,0 +1,23 @@
+{
+  "game_id": "train_16693f2b7e98cc3e72c6f5ed",
+  "stable_game_id": "train_16693f2b7e98cc3e72c6f5ed",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan423",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-HandTowel-None-GarbageCan-423/trial_T20190907_025958_147612/game.tw-pddl",
+  "game_sha256": "787786e2e25c4e8e80b9e25d69ec662df6fa86b4c8c9664531e5717f4367f8c0",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 0,
+  "rollout_uid": "614d7caa-df54-4c17-973d-ca34c8d59a20",
+  "session_index": 3,
+  "role": "counterfactual_probe",
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "e9a4c1b81c0445c0ee8702fefc4c4558acd5faf7891b1211dc7e0daafdd61b34",
+  "skill_context_group_id": "9c82776c3d490d68cf1ba25e6cc813e820d087c64f7e8437b4f3893de66a5291",
+  "global_step": 4,
+  "credit_probe_group": "fc6386e5f5a579bae9f3c1ffbcd634c49db942e1cf7df6e6ae1f41b63d531f6e",
+  "credit_probe_variant": "without_skill",
+  "attempt_id": "8d7e6716ee7f45758f18d5a0c04583f1",
+  "started_at_epoch": 1794481163.4536934
+}

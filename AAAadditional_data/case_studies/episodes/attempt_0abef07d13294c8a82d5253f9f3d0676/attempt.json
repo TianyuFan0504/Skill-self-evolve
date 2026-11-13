@@ -1,0 +1,20 @@
+{
+  "game_id": "train_5b1988c6b1271c20467820b4",
+  "stable_game_id": "train_5b1988c6b1271c20467820b4",
+  "split": "train",
+  "dataset_phase": "train",
+  "task_type": "pick_and_place_simple",
+  "scene_id": "FloorPlan428",
+  "relative_game_path": "json_2.1.1/train/pick_and_place_simple-HandTowel-None-Toilet-428/trial_T20190908_064252_498410/game.tw-pddl",
+  "game_sha256": "a7c314b8f594472f5c763de23e02b52ee78240d74dc62d0cb86ddec1f7ff501b",
+  "catalog_digest": "807ca811954c24bc78ae2b5d92ae0662dab163f5d6aedad0b859d873f11d9b0b",
+  "sample_index": 20,
+  "rollout_uid": "6e500fbb-459c-4c29-b627-5468f94b4553",
+  "session_index": 1,
+  "skill_snapshot_id": "28059e06064b7e52ba8ce60669a610b28b525bfd731200f1bbc64a7ff72525f7",
+  "skill_context_version": "2b1ba51aca64ea3f676da07ea15d54f019c20e8dd80bf788daf44535926569c6",
+  "skill_context_group_id": "17f04a6555772b67e87f99e58b574ce6be2f76fcfd2444d990fd8ab193f6d668",
+  "global_step": 2,
+  "attempt_id": "0abef07d13294c8a82d5253f9f3d0676",
+  "started_at_epoch": 1794475448.6457827
+}
