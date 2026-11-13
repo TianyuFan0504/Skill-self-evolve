@@ -2,8 +2,10 @@
 
 ## Training path
 
-`examples/skill_self_evolve/run.sh` selects the installed Python interpreter.
-Its thin `scripts/launch.py` forwards the joint YAML and Hydra overrides to
+`examples/skill_self_evolve/run.sh` calls the single `scripts/launch.py` entry.
+The launcher reads explicit deployment settings, prepares fresh data and public
+assets, supervises the parallel environment service, and invokes the installed
+training interpreter with the joint YAML and Hydra overrides through
 `verl.experimental.skill_harness.train`. That module supplies one custom
 TaskRunner to the official `verl.trainer.main_ppo.run_ppo` entry. The TaskRunner
 creates one `SkillJointSyncTrainer`.

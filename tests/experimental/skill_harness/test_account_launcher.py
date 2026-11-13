@@ -14,7 +14,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location(
-    "_account_launcher_cpu", ROOT / "examples/skill_self_evolve/runtime/linux_accounts.py"
+    "_account_launcher_cpu", ROOT / "verl/experimental/skill_harness/backends/linux.py"
 )
 accounts = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(accounts)

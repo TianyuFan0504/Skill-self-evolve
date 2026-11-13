@@ -53,7 +53,7 @@ def load_task():
 
 task = load_task()
 SPEC = importlib.util.spec_from_file_location(
-    "_optional_linux_unit", ROOT / "examples/skill_self_evolve/runtime/linux_accounts.py"
+    "_optional_linux_unit", ROOT / "verl/experimental/skill_harness/backends/linux.py"
 )
 linux = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(linux)

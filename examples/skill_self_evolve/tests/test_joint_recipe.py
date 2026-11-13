@@ -34,10 +34,13 @@ class JointRecipeTests(unittest.TestCase):
         service.write_text("{}\n")
         self.environment = {
             "TRAINING_PYTHON": sys.executable,
-            "MODEL_PATH": str(model), "MODEL_NAME": "fixture-model",
+            "MODEL_PATH": str(model),
+            "MODEL_NAME": "fixture-model",
             "SKILL_RUN_DIR": str(self.root / "run"),
-            "SKILL_DATA_DIR": str(data), "ALFWORLD_DATA_DIR": str(data),
-            "ALFWORLD_TASK_CONFIG": str(task), "ALFWORLD_RUNTIME_CONFIG": str(runtime),
+            "SKILL_DATA_DIR": str(data),
+            "ALFWORLD_DATA_DIR": str(data),
+            "ALFWORLD_TASK_CONFIG": str(task),
+            "ALFWORLD_RUNTIME_CONFIG": str(runtime),
             "ALFWORLD_SERVER_CONFIG": str(service),
             "ALFWORLD_ENV_SERVER": str(RECIPE / "scripts/parallel_environment_server.py"),
             "CURATOR_USER": "fixture-curator",
@@ -47,7 +50,7 @@ class JointRecipeTests(unittest.TestCase):
         }
         self.hook = self.root / "hook"
         self.hook.mkdir()
-        (self.hook / "sitecustomize.py").write_text('''
+        (self.hook / "sitecustomize.py").write_text("""
 import json, os, sys
 from pathlib import Path
 
@@ -64,7 +67,7 @@ def guard(event, args):
         raise RuntimeError("Configuration checks must not start a training or environment runtime")
 
 sys.addaudithook(guard)
-''')
+""")
         # These packages are availability fixtures only. No SDK behavior is
         # replaced or claimed as verified by a configuration-only check.
         for name in ("uni_agent", "transfer_queue"):
@@ -73,7 +76,8 @@ sys.addaudithook(guard)
             (package / "__init__.py").write_text("")
         self.forbidden = self.root / "forbidden-activity"
         self.cli_environment = {
-            **os.environ, **self.environment,
+            **os.environ,
+            **self.environment,
             "PYTHONPATH": os.pathsep.join((str(self.hook), str(ROOT))),
             "FORBIDDEN_ACTIVITY": str(self.forbidden),
         }
@@ -95,8 +99,9 @@ sys.addaudithook(guard)
         self.assertEqual(config.trainer.total_training_steps, 9)
         self.assertEqual(config.trainer.v1.trainer_mode, "sync")
         self.assertTrue(config.trainer.v1.sampler.sync_refill_failed_groups)
-        self.assertEqual(config.trainer.v1.sampler.custom_sampler.path,
-                         "pkg://verl.experimental.skill_harness.group_sampler")
+        self.assertEqual(
+            config.trainer.v1.sampler.custom_sampler.path, "pkg://verl.experimental.skill_harness.group_sampler"
+        )
         self.assertEqual(config.trainer.v1.sampler.custom_sampler.name, "CompleteGroupReplayBuffer")
         self.assertTrue(config.skill_harness.ema.enabled)
         self.assertEqual(config.skill_harness.ema.update_every, 1)
@@ -131,34 +136,41 @@ sys.addaudithook(guard)
         self.assertIn("Missing training data", result.stderr)
         self.assertFalse(self.forbidden.exists())
 
-    def test_actual_launch_chain_preserves_interpreter_and_hydra_arguments(self):
-        captured = self.root / "launch.json"
-        environment = {**self.cli_environment, "CAPTURE_LAUNCH": str(captured)}
-        overrides = ["trainer.total_training_steps=9", "trainer.experiment_name=literal run"]
+    def test_single_launch_entry_describes_deployment_and_joint_smoke_options(self):
         result = subprocess.run(
-            ["bash", str(RECIPE / "run.sh"), *overrides], cwd=ROOT,
-            env=environment, capture_output=True, text=True,
+            ["bash", str(RECIPE / "run.sh"), "--help"],
+            cwd=ROOT,
+            env=self.cli_environment,
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(captured.read_text()), [
-            sys.executable, "-m", "verl.experimental.skill_harness.train",
-            f"--config-path={RECIPE / 'config'}", "--config-name=alfworld_joint", *overrides,
-        ])
+        self.assertIn("--deployment", result.stdout)
+        self.assertIn("--run-dir", result.stdout)
+        self.assertIn("--smoke", result.stdout)
         self.assertFalse(self.forbidden.exists())
         self.assertEqual(sorted(path.name for path in RECIPE.glob("run*.sh")), ["run.sh"])
         self.assertEqual(sorted(path.name for path in (RECIPE / "config").glob("*.yaml")), ["alfworld_joint.yaml"])
         self.assertEqual(list((RECIPE / "scripts").glob("train*.py")), [])
         self.assertFalse((ROOT / "skill_harness_examples/__init__.py").exists())
 
-    def test_optional_linux_provider_imports_from_recipe_checkout_without_startup(self):
+    def test_optional_linux_provider_imports_from_installed_verl_without_startup(self):
         result = subprocess.run(
-            [sys.executable, "-c", (
-                "from examples.skill_self_evolve.runtime.linux_accounts import LinuxAccountPool; "
-                "print(LinuxAccountPool.__module__)"
-            )], cwd=ROOT, env=self.cli_environment, capture_output=True, text=True,
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from verl.experimental.skill_harness.backends.linux import LinuxAccountPool; "
+                    "print(LinuxAccountPool.__module__)"
+                ),
+            ],
+            cwd=ROOT,
+            env=self.cli_environment,
+            capture_output=True,
+            text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "examples.skill_self_evolve.runtime.linux_accounts")
+        self.assertEqual(result.stdout.strip(), "verl.experimental.skill_harness.backends.linux")
         self.assertFalse(self.forbidden.exists())
 
 

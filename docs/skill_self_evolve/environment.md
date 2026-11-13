@@ -30,32 +30,27 @@ explicit `ALFWORLD_ENV_PYTHON` environment in the same way.
 
 ## Data and service
 
-Prepare catalog and parquet files using
-`verl/experimental/skill_harness/alfworld/prepare_data.py`. The benchmark root
-must contain existing official games under `data`; preparation does not
-retrieve data or synthesize tasks. Use a fresh dataset output directory and the
-same durable run directory that the recipe will use. Preserve the full official
-test partitions for final evaluation.
+The one-command [recipe launcher](../../examples/skill_self_evolve/README.md)
+reads an explicit host deployment JSON, prepares fresh catalog and parquet files
+with `verl/experimental/skill_harness/alfworld/prepare_data.py`, and supervises
+both the environment service and trainer. The benchmark root must contain
+existing official games under `data`; preparation does not retrieve data or
+synthesize tasks. Each launch requires a new output directory. Full official
+test partitions are preserved for final evaluation.
 
-Start the backend as a separately managed deployment process, using your
-chosen interpreter and explicit paths:
+The backend uses four engine processes and four I/O workers by default. Its
+private service configuration contains a loopback HTTP endpoint and
+administration capability. The launcher waits for health to match its owned
+backend PID, prepared catalog, process count and I/O count before training.
+It records owned PIDs and Linux process start ticks in `launch-processes.json`.
+On exit or a stop signal it stops its own children, preserving other runs.
 
-```bash
-"$ALFWORLD_ENV_PYTHON" "$ALFWORLD_ENV_SERVER" \
-  --benchmark-root "$ALFWORLD_BENCHMARK_ROOT" --run-root "$SKILL_RUN_DIR" \
-  --catalog-path "$ALFWORLD_DATA_DIR/catalog.json" \
-  --config-path "$ALFWORLD_SERVER_CONFIG" --allowed-splits train \
-  --environment-processes "$ENVIRONMENT_PROCESSES" --io-workers "$ENVIRONMENT_IO_WORKERS"
-```
-
-`ALFWORLD_ENV_SERVER` selects the generic
-`examples/skill_self_evolve/scripts/parallel_environment_server.py` backend.
-Its configuration file contains a loopback endpoint and administration
-capability; keep it readable only by the trusted training process. It advertises
-the action request-ID protocol used by the public request client. Publish
-`scripts/alfworld_request_client.py` as `alfworld-step` on the native agent's
-configured tool path. The runtime must provide that path and a compatible Python
-interpreter to agent commands.
+The deployment declares public asset copies and an explicit `tool_dir` and
+agent-readable `tool_python`. The launcher publishes the standard-library
+`scripts/alfworld_request_client.py` and an `alfworld-step` command there. The
+backend and public client share the action request-ID protocol. Only the
+session URL and declared public assets are passed to native agents; protected
+service capabilities stay in private run-local configuration.
 
 Final evaluation starts a separate test-only backend with the configured
 `skill_harness.evaluation.server_script` and optional `server_args`, using
@@ -73,7 +68,7 @@ deployments can provide another factory through this interface without adding
 a training entry point.
 
 The optional factory
-`examples.skill_self_evolve.runtime.linux_accounts:LinuxAccountPool` requires:
+`verl.experimental.skill_harness.backends.linux:LinuxAccountPool` requires:
 
 - `root`: absolute private registry directory;
 - `roster`: explicit existing non-root account names, UIDs and GIDs;
@@ -82,16 +77,18 @@ The optional factory
   the native agent.
 - `command_path`: executable search path containing the deployed `alfworld-step`
   command and required system tools.
-- `launcher_path`: optional absolute public copy of `runtime/linux_accounts.py`
+- `launcher_path`: optional absolute public copy of `verl/experimental/skill_harness/backends/linux.py`
   when leased accounts cannot read the checkout.
 
-The recipe provider is imported from the checkout in the documented editable
-deployment. A standalone verl wheel does not include the `examples` namespace;
-wheel-only deployments must install a provider package and select its factory.
+The optional provider lives in the installed `verl` package. Deployments may
+instead install their own provider package and select its importable factory.
 
 Provision the roster, directory ownership, required `setpriv` support and Linux
-Landlock/seccomp facilities before launch. Initialize this provider explicitly
-with `AccountPool().initialize()` during deployment setup. The harness does not
+Landlock/seccomp facilities before launch. A deployment may explicitly set
+`runtime.initialize_if_missing=true` for this provider. The launcher then calls
+`AccountPool().initialize()` only when the configured registry root is absent.
+Existing registry roots are never initialized, reset or reconciled. Alternatively,
+initialize the provider explicitly during deployment setup. The harness does not
 create Unix users, select a UID range or infer a host account layout. The
 provider reuses only resources whose process and cleanup lifecycle completed.
 
