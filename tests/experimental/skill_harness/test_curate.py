@@ -625,6 +625,10 @@ class CurateTest(unittest.TestCase):
         catalog = self.root / "native-catalog.json"
         catalog.write_text(json.dumps({"models": [{"slug": "Qwen3.5-4B-nothink", "base_instructions": "old"}]}))
 
+        public.mkdir(parents=True)
+        for node in (self.root, public, public.parent, public.parent.parent):
+            node.chmod(0o755)
+
         def account(name):
             return SimpleNamespace(pw_uid=1201 if name == "alfworld_curator" else 1202, pw_gid=1201)
 
@@ -641,6 +645,7 @@ class CurateTest(unittest.TestCase):
                     package_root=package,
                     model_catalog_path=catalog,
                     model_name="Qwen3.5-4B-nothink",
+                    unix_user="fixture-curator",
                 )
             finally:
                 os.umask(previous_umask)
@@ -761,7 +766,7 @@ class CurateTest(unittest.TestCase):
 
 
 class CuratorCatalogCleanupTest(unittest.IsolatedAsyncioTestCase):
-    async def test_real_catalog_and_owned_home_are_archived_then_removed(self):
+    async def test_catalog_and_home_cleanup_does_not_require_debug_archive(self):
         with tempfile.TemporaryDirectory(dir="/tmp") as temporary:
             root = Path(temporary)
             sandbox = object.__new__(curate.CuratorSandbox)
@@ -780,15 +785,12 @@ class CuratorCatalogCleanupTest(unittest.IsolatedAsyncioTestCase):
                 await sandbox.write_file(str(catalog), '{"model":"original curator config"}')
                 self.assertEqual(sandbox.created_files, [catalog])
                 await sandbox.close()
-                receipt = json.loads((sandbox.output_dir / "native-files.json").read_text())
-                self.assertEqual(receipt["status"], "archived_and_removed")
+                receipt = json.loads((sandbox.output_dir / "native-cleanup.json").read_text())
+                self.assertEqual(receipt["status"], "cleaned")
                 self.assertFalse(catalog.exists())
                 self.assertFalse(sandbox.workdir.exists())
-                import tarfile
-
-                with tarfile.open(receipt["archive_path"]) as archive:
-                    self.assertEqual(archive.extractfile("curator_workspace-1/.home/native-state.json").read(),
-                                     b"original curator native home state")
+                self.assertTrue(all(row["removed"] for row in receipt["sources"]))
+                self.assertFalse((sandbox.output_dir / "native-files.tar.gz").exists())
             finally:
                 catalog.unlink(missing_ok=True)
 

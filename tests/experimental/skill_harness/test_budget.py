@@ -55,9 +55,9 @@ class BudgetProofTest(unittest.TestCase):
         binding["binding_sha256"] = budget.digest(private_binding)
         account = {
             "lease_id": "5" * 32,
-            "uid": 19000,
-            "gid": 19000,
-            "name": "alfworld_ep_000",
+            "uid": 12345,
+            "gid": 12345,
+            "name": "unit_runtime_account",
             "owner": {"run_root": str(root), "kind": "ordinary", "scope_id": attempt},
         }
         payload = {"schema_version": 1, "budget_seconds": 900, "binding": binding, "account": account}
@@ -165,26 +165,17 @@ class BudgetProofTest(unittest.TestCase):
             "requests": [request],
         }
         write(output / "backend-terminal-drain.json", receipt)
-        archive = output / "native-files.tar.gz"
-        archive.write_bytes(b"CPU retained native-byte fixture; no model executed")
-        manifest = output / "native-files-manifest.json"
-        write(manifest, {"CPU": {"sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}})
         removed = [
             {"kind": kind, "path": str(root / ("removed_" + kind)), "removed": True}
             for kind in ("workspace", "codex_home", "model_catalog")
         ]
         native_files = {
-            "status": "archived_and_removed",
-            "source_stats_stable": True,
+            "status": "cleaned",
             "account_lease_id": account["lease_id"],
             "agent_uid": account["uid"],
-            "archive_path": str(archive),
-            "archive_sha256": budget.sha256_file(archive),
-            "source_manifest_path": str(manifest),
-            "source_manifest_sha256": budget.sha256_file(manifest),
             "sources": removed,
         }
-        write(output / "native-files.json", native_files)
+        write(output / "native-cleanup.json", native_files)
         write(
             output / "native-capture-diagnostics.jsonl",
             {
@@ -222,11 +213,11 @@ class BudgetProofTest(unittest.TestCase):
             "backend_stop_confirmed": True,
             "account_isolation": {
                 **account,
-                "policy_version": "alfworld-uid-landlock-v1",
+                "policy_version": "unit-runtime-v1",
                 "status": "attempt_closed",
                 "backend_drained": True,
                 "uid_drained": True,
-                "archive_receipt": str(output / "native-files.json"),
+                "cleanup_receipt": str(output / "native-cleanup.json"),
             },
         }
         return types.SimpleNamespace(
@@ -393,11 +384,19 @@ class BudgetProofTest(unittest.TestCase):
                 expected_ids={"train_cpu"},
                 catalog_digest=value.engine["catalog_digest"],
             )
-            tools = {"task": {"name": "alfworld_skill_training", "metadata": {
-                "game_id": "train_cpu", "game_sha256": value.engine["game_sha256"],
-                "split": "train", "dataset_phase": "test_seen", "catalog_digest": value.engine["catalog_digest"],
-                "run_dir": str(value.root),
-            }}}
+            tools = {
+                "task": {
+                    "name": "alfworld_skill_training",
+                    "metadata": {
+                        "game_id": "train_cpu",
+                        "game_sha256": value.engine["game_sha256"],
+                        "split": "train",
+                        "dataset_phase": "test_seen",
+                        "catalog_digest": value.engine["catalog_digest"],
+                        "run_dir": str(value.root),
+                    },
+                }
+            }
             metadata = audit.submit(["uid-budget"], [tools])[0]["task"]["metadata"]
             value.task.update(metadata)
             value.task.update(budget_reward_eligible=True, budget_failure_proof=self.verify(value))
@@ -407,8 +406,13 @@ class BudgetProofTest(unittest.TestCase):
                 value.task["backend_stop_confirmed"] = False
             write(value.output / "result.json", value.task)
             row = {
-                "rollout_uid": "uid-budget", "session_index": 0, "trajectory_key": "uid-budget_0_0",
-                "score": 0.0, "sampled_action_tokens": 1, "min_global_steps": 0, "max_global_steps": 0,
+                "rollout_uid": "uid-budget",
+                "session_index": 0,
+                "trajectory_key": "uid-budget_0_0",
+                "score": 0.0,
+                "sampled_action_tokens": 1,
+                "min_global_steps": 0,
+                "max_global_steps": 0,
                 "reward_context": {**metadata, "episode_output_dir": str(value.output)},
             }
             audit.capture([row])
@@ -476,9 +480,9 @@ class BudgetServerTest(unittest.IsolatedAsyncioTestCase):
             },
             "account": {
                 "lease_id": "5" * 32,
-                "uid": 19000,
-                "gid": 19000,
-                "name": "alfworld_ep_000",
+                "uid": 12345,
+                "gid": 12345,
+                "name": "unit_runtime_account",
                 "owner": {"kind": "ordinary", "run_root": str(self.root), "scope_id": "CPU"},
             },
         }

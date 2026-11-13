@@ -43,7 +43,7 @@ from .store import SkillStore
 
 MANIFEST_NAME = "joint_manifest.json"
 LATEST_NAME = "latest_joint_checkpoint.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class JointCheckpointError(RuntimeError):
@@ -154,9 +154,9 @@ class JointCheckpointSpec:
         for name in ("layout_fingerprint", "evaluator_fingerprint", "protocol_fingerprint"):
             if not isinstance(getattr(self, name), str) or not getattr(self, name):
                 raise ValueError(f"A named {name} is required")
-        required = {"code", "verl", "model", "tokenizer", "template"}
-        if not required <= self.versions.keys() or any(not isinstance(v, str) or not v for v in self.versions.values()):
-            raise ValueError("Explicit code/verl/model/tokenizer/template versions are required")
+        required = {"model", "tokenizer", "template"}
+        if set(self.versions) != required or any(not isinstance(v, str) or not v for v in self.versions.values()):
+            raise ValueError("Explicit model/tokenizer/template state identities are required")
         object.__setattr__(self, "versions", MappingProxyType(dict(self.versions)))
 
     def compatibility(self):
@@ -198,7 +198,8 @@ class RestoredJointState:
 
 def _validate_controller(payload, spec):
     required = {"optimizer_step", "protocol_fingerprint", "pending", "prepared_update", "applied_update_ids"}
-    if not isinstance(payload, Mapping) or not required <= payload.keys():
+    if (not isinstance(payload, Mapping) or payload.get("schema_version") != 1
+            or not required <= payload.keys()):
         raise JointCheckpointError("Controller snapshot must retain clocks, pending/prepared queues and applied IDs")
     if (type(payload["optimizer_step"]) is not int or payload["optimizer_step"] != spec.optimizer_step
             or payload["protocol_fingerprint"] != spec.protocol_fingerprint):
@@ -357,7 +358,7 @@ class JointCheckpointCoordinator:
             raise JointCheckpointError("Joint checkpoint lacks an intact COMPLETE manifest")
         spec = JointCheckpointSpec(**payload["spec"])
         if dict(expected) != spec.compatibility():
-            raise JointCheckpointError("Joint checkpoint world/layout/version/evaluator/protocol mismatch")
+            raise JointCheckpointError("Joint checkpoint layout/tokenizer/model/reward protocol mismatch")
         for relative, identity in payload["files"].items():
             if _file_digest(root / str(_relative(relative))) != identity:
                 raise JointCheckpointError(f"Checkpoint file digest mismatch: {relative}")
@@ -394,14 +395,16 @@ class JointCheckpointCoordinator:
 
     def restore(
         self, checkpoint_dir, *, expected: Mapping, destination_root,
-        load_online: Callable, load_ema: Callable, load_controller: Callable, fence: Callable,
+        load_online: Callable, load_ema: Callable, fence: Callable,
         load_training_state: Callable | None = None,
     ) -> RestoredJointState:
         """Validate everything before any live load; restore into an EMPTY new root.
 
+        Actor, EMA and sampler files are read directly from the immutable checkpoint;
+        only SkillStore/replay/ledger are copied into mutable working directories.
         load_online(actor_path, spec), load_ema(ema_path, spec), then
         load_training_state(paths, spec) restores declared dataloader/TQ files,
-        then load_controller(payload, expected_optimizer_step=step) finishes.
+        then returns the validated controller payload for normal controller creation.
         All callbacks must resolve worker RPCs. External side effects cannot be rolled back. Do not
         release a training fence after failure; abort startup/reconcile first.
         """
@@ -415,10 +418,12 @@ class JointCheckpointCoordinator:
                     "Joint restore requires a fresh destination; active state is never overwritten"
                 )
             source = Path(checkpoint.checkpoint_dir) / "joint_state"
-            _copy_tree(source, destination)
+            destination.mkdir(parents=True)
+            for component in ("skill_store", "replay", "ledger"):
+                _copy_tree(source / component, destination / component)
             _validate_storage(destination, checkpoint.payload["snapshots"])
-            controller = _read_json(destination / "controller.json")
-            evaluation = _read_json(destination / "evaluation.json")
+            controller = _read_json(source / "controller.json")
+            evaluation = _read_json(source / "evaluation.json")
             spec = checkpoint.payload["spec"]
             for callback, path in ((load_online, Path(checkpoint.checkpoint_dir) / "actor"),
                                    (load_ema, Path(checkpoint.checkpoint_dir) / "joint_state/ema")):
@@ -441,13 +446,6 @@ class JointCheckpointCoordinator:
                     raise JointCheckpointError(
                         "Training state restore returned an unresolved/non-JSON result"
                     ) from error
-            result = load_controller(controller, expected_optimizer_step=spec["optimizer_step"])
-            if inspect.isawaitable(result):
-                raise JointCheckpointError("Controller restore has not finished")
-            try:
-                _canonical(result)
-            except (TypeError, ValueError) as error:
-                raise JointCheckpointError("Controller restore returned an unresolved/non-JSON result") from error
             store = SkillStore(destination / "skill_store")
             replay = CurateReplay(destination / "replay")
             ledger = CreditLedger(destination / "ledger", replay)

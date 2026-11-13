@@ -1,30 +1,154 @@
-# Real joint solver/curate training; all roles use Uni-Agent and native Codex.
+# One joint solver/curator recipe; all deployment paths are explicit.
 defaults:
   - /ppo_trainer
-  - alfworld_common
   - _self_
 
 hydra:
   searchpath:
-    - file://${oc.env:VERL_SOURCE_ROOT,/workspace/verl-0.9.1}/verl/trainer/config
+    - pkg://verl.trainer.config
   run:
-    dir: ${oc.env:SKILL_RUN_DIR}/hydra
+    dir: ${skill_harness.artifact_root}/hydra
+
+data:
+  train_files: ${oc.env:SKILL_DATA_DIR}/train.parquet
+  val_files: ${oc.env:SKILL_DATA_DIR}/dev.parquet
+  return_raw_chat: true
+  max_prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,4096}}
+  max_response_length: ${oc.decode:${oc.env:MAX_RESPONSE_LENGTH,32768}}
+  train_batch_size: ${oc.decode:${oc.env:TRAIN_BATCH_SIZE,16}}
+  val_batch_size: ${oc.decode:${oc.env:VAL_BATCH_SIZE,16}}
+  val_max_samples: ${oc.decode:${oc.env:DEV_MAX_SAMPLES,64}}
+  shuffle: true
+  seed: ${oc.decode:${oc.env:DATA_SEED,42}}
+  validation_shuffle: false
+  filter_overlong_prompts: true
+  truncation: error
+  dataloader_num_workers: 4
+  apply_chat_template_kwargs:
+    enable_thinking: false
+
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: true
+  use_kl_in_reward: false
+  rollout_correction:
+    bypass_mode: false
+    rollout_is: token
+    rollout_is_threshold: 2.0
+    rollout_rs: null
 
 actor_rollout_ref:
+  model:
+    path: ${oc.env:MODEL_PATH}
+    trust_remote_code: false
+    use_remove_padding: false
+    use_fused_kernels: true
+    fused_kernel_options:
+      impl_backend: torch
+    enable_gradient_checkpointing: true
   actor:
+    strategy: fsdp2
     ppo_epochs: 1
+    ppo_mini_batch_size: ${oc.decode:${oc.env:PPO_MINI_BATCH_SIZE,16}}
+    ppo_micro_batch_size_per_gpu: 1
+    use_dynamic_bsz: false
+    ppo_max_token_len_per_gpu: ${oc.decode:${oc.env:TRAIN_MAX_TOKENS_PER_GPU,36864}}
+    use_torch_compile: ${oc.decode:${oc.env:USE_TORCH_COMPILE,false}}
+    loss_agg_mode: seq-mean-token-mean
+    entropy_coeff: 0.0
+    use_kl_loss: true
+    kl_loss_coef: ${oc.decode:${oc.env:KL_LOSS_COEF,0.001}}
+    kl_loss_type: low_var_kl
+    optim:
+      lr: ${oc.decode:${oc.env:LEARNING_RATE,0.000001}}
+      lr_warmup_steps: ${oc.decode:${oc.env:LR_WARMUP_STEPS,2}}
+    fsdp_config:
+      use_torch_compile: ${oc.decode:${oc.env:USE_TORCH_COMPILE,false}}
+      use_no_sync_for_gradient_accumulation: false
     checkpoint:
       async_save: false
+      save_contents: [model, optimizer, extra]
+  ref:
+    strategy: fsdp2
+    log_prob_use_dynamic_bsz: false
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: ${oc.decode:${oc.env:TRAIN_MAX_TOKENS_PER_GPU,36864}}
   rollout:
+    name: vllm
+    mode: async
+    n: ${oc.decode:${oc.env:ROLLOUT_N,4}}
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    calculate_log_probs: true
+    log_prob_use_dynamic_bsz: false
+    log_prob_micro_batch_size_per_gpu: 1
+    logprobs_mode: processed_logprobs
+    tensor_model_parallel_size: ${oc.decode:${oc.env:ROLLOUT_TP,1}}
+    gpu_memory_utilization: ${oc.decode:${oc.env:GPU_MEMORY_UTILIZATION,0.55}}
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    max_model_len: ${oc.decode:${oc.env:MAX_MODEL_LENGTH,36864}}
+    max_num_batched_tokens: ${oc.decode:${oc.env:MAX_NUM_BATCHED_TOKENS,8192}}
+    max_num_seqs: ${oc.decode:${oc.env:MAX_NUM_SEQS,32}}
+    enable_chunked_prefill: true
+    enforce_eager: ${oc.decode:${oc.env:ENFORCE_EAGER,false}}
+    free_cache_engine: true
+    checkpoint_engine:
+      backend: naive
+    val_kwargs:
+      do_sample: false
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      n: 1
+    multi_turn:
+      enable: true
+      max_parallel_calls: 1
+      format: qwen3_coder
     agent:
       agent_loop_manager_class: verl.experimental.skill_harness.framework.SkillAwareRolloutAdapter
+    custom:
+      agent_framework:
+        gateway_count: ${oc.decode:${oc.env:GATEWAY_COUNT,8}}
+        log_dir: ${skill_harness.artifact_root}/agent_logs
+        allowed_request_sampling_param_keys: [temperature, top_p, top_k]
+        mask_unfinished_episode: false
+        agent_runners:
+          task:
+            runner_fqn: verl.experimental.skill_harness.alfworld.runner.run_task
+            dispatch_mode: ray_task
+            max_concurrent_sessions: ${oc.decode:${oc.env:ROLLOUT_CONCURRENCY,64}}
+            trajectory_selection: all
+            runner_kwargs:
+              task_config_path: ${oc.env:ALFWORLD_TASK_CONFIG}
+              model_name: ${skill_harness.joint.model_name}
+
+reward:
+  custom_reward_function:
+    path: pkg://uni_agent.framework.task_runner
+    name: score_from_runner_result
+
+transfer_queue:
+  enable: true
 
 skill_harness:
-  mode: skill_joint
+  artifact_root: ${oc.env:SKILL_RUN_DIR}
+  store_root: ${skill_harness.artifact_root}/skill_store
+  split_manifest: ${oc.env:ALFWORLD_DATA_DIR}/split_manifest.json
   replay_root: ${skill_harness.artifact_root}/curate_replay
   ledger_root: ${skill_harness.artifact_root}/credit_ledger
+  terminal:
+    enabled: true
+    binding_root: ${skill_harness.artifact_root}/terminal_bindings
+  evaluation:
+    final: ${oc.decode:${oc.env:EVALUATE_OFFICIAL_TESTS,true}}
+    server_script: ${oc.env:ALFWORLD_ENV_SERVER}
+    server_args: []
   ema:
     enabled: true
+    decay: 0.95
+    update_every: 1
     buffer_policy: copy
   loading:
     enabled: true
@@ -38,22 +162,20 @@ skill_harness:
     historical_is_cap: 10.0
     max_log_ratio: 20.0
   joint:
+    model_name: ${oc.env:MODEL_NAME}
+    curator_public_root: ${oc.env:CURATOR_PUBLIC_ROOT}
+    curator_work_root: ${oc.env:CURATOR_WORK_ROOT}
+    curator_unix_user: ${oc.env:CURATOR_USER}
     solver_gpus: ${trainer.n_gpus_per_node}
     available_gpus: ${oc.decode:${oc.env:PHYSICAL_GPU_COUNT,8}}
-    curator_gpus: 2
-    credit_gpus: 2
+    curator_gpus: ${oc.decode:${oc.env:CURATOR_GPUS,2}}
+    credit_gpus: ${oc.decode:${oc.env:CREDIT_GPUS,2}}
     route_tensor_parallel_size: 1
     gateway_count: 2
-    # Every completed logical episode is queued; workers apply concurrency limits.
-    background_enabled: true
     curator_concurrency: 8
     credit_concurrency: 8
     max_source_backlog: 16384
-    sources_per_step: 0
-    # Curate uses an external signed advantage, so one candidate needs no
-    # within-group baseline and avoids censoring a valid sibling's cohort.
     candidates_per_source: 1
-    # 32 pairs produce 64 evaluator episodes on the two dedicated credit GPUs.
     probes_per_step: 32
     required_exposures: 2
     min_delay_steps: 2
@@ -68,18 +190,40 @@ skill_harness:
     seed: 42
     frozen_model_path: ${actor_rollout_ref.model.path}
 
+ray_kwargs:
+  ray_init:
+    num_cpus: ${oc.decode:${oc.env:RAY_NUM_CPUS,64}}
+    object_store_memory: 8589934592
+    include_dashboard: false
+    runtime_env:
+      worker_process_setup_hook: verl.experimental.skill_harness.bootstrap.configure_worker
+
 trainer:
+  use_v1: true
   v1:
+    trainer_mode: sync
     sync:
       train_batch_size: ${data.train_batch_size}
     sampler:
-      # Refill complete failed groups, including those with valid sibling rows.
       sync_refill_failed_groups: true
       custom_sampler:
-        path: ${oc.env:VERL_SOURCE_ROOT,/workspace/verl-0.9.1}/verl/experimental/skill_harness/group_sampler.py
-        name: ArchiveAwareReplayBuffer
+        path: pkg://verl.experimental.skill_harness.group_sampler
+        name: CompleteGroupReplayBuffer
+  nnodes: 1
   n_gpus_per_node: ${oc.decode:${oc.env:TRAINING_GPUS,4}}
+  project_name: alfworld_skill_self_evolve
+  experiment_name: ${oc.env:EXPERIMENT_NAME,alfworld_joint}
+  logger: [console, tensorboard]
+  total_epochs: ${oc.decode:${oc.env:TOTAL_EPOCHS,4}}
+  total_training_steps: ${oc.decode:${oc.env:TOTAL_TRAINING_STEPS,64}}
+  test_freq: ${oc.decode:${oc.env:DEV_EVAL_FREQUENCY,4}}
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQUENCY,8}}
+  val_before_train: false
+  log_val_generations: 4
+  resume_mode: ${oc.env:RESUME_MODE,auto}
+  default_local_dir: ${skill_harness.artifact_root}/checkpoints
+  rollout_data_dir: ${skill_harness.artifact_root}/rollouts
+  validation_data_dir: ${skill_harness.artifact_root}/validation
   checkpoint_callback_class: verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback
-  # A newer partial save must never prune the previous COMPLETE joint snapshot.
   max_actor_ckpt_to_keep: null
   remove_previous_ckpt_in_save: false

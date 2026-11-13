@@ -47,7 +47,7 @@ class JointCheckpointTests(unittest.TestCase):
         self.ledger.mark_applied(self.applied.settlement_id, "applied-update", lease_token=lease["lease_token"],
                                  model_update_id="online:4")
         self.spec = joint.JointCheckpointSpec(7, 4, 2, "layout:fsdp2:2-ranks", {
-            "code": "git:abc", "verl": "0.9.1", "model": "Qwen3.5-4B", "tokenizer": "tok:v1", "template": "t:v1",
+            "model": "Qwen3.5-4B", "tokenizer": "tok:v1", "template": "t:v1",
         }, "eval:frozen-1", "protocol:fixed-1")
         self.controller = {"schema_version": 1, "optimizer_step": 4,
                            "protocol_fingerprint": self.spec.protocol_fingerprint,
@@ -133,7 +133,7 @@ class JointCheckpointTests(unittest.TestCase):
     def restore(self, checkpoint, **changes):
         arguments = {"expected": self.spec.compatibility(), "destination_root": self.root / "restored",
                      "load_online": Mock(return_value=None), "load_ema": Mock(return_value=None),
-                     "load_controller": Mock(return_value=None), "load_training_state": Mock(return_value=None),
+                     "load_training_state": Mock(return_value=None),
                      "fence": self.fence}
         arguments.update(changes)
         return self.coordinator.restore(checkpoint.checkpoint_dir, **arguments)
@@ -161,8 +161,8 @@ class JointCheckpointTests(unittest.TestCase):
         shutil.copytree(saved.checkpoint_dir, relocated)
         shutil.rmtree(self.live)  # historical absolute export URIs no longer exist
         saved = joint.VerifiedJointCheckpoint(str(relocated), saved.manifest_id, saved.payload)
-        online, ema, controller = Mock(return_value=None), Mock(return_value=None), Mock(return_value=None)
-        state = self.restore(saved, load_online=online, load_ema=ema, load_controller=controller)
+        online, ema = Mock(return_value=None), Mock(return_value=None)
+        state = self.restore(saved, load_online=online, load_ema=ema)
         self.assertEqual(state.skill_store.head(), original_head)
         self.assertEqual(state.skill_store.head("evaluation"), original_head)
         self.assertEqual(state.replay.get("uncertain").producer_uid, "producer-uncertain")
@@ -172,7 +172,12 @@ class JointCheckpointTests(unittest.TestCase):
         self.assertEqual(state.ledger.training_status(self.applied.settlement_id, now=100)["state"], "applied")
         self.assertEqual(state.controller_state, original_controller)
         self.assertEqual(state.evaluation_state, self.evaluation)
-        controller.assert_called_once_with(original_controller, expected_optimizer_step=4)
+        online.assert_called_once_with(relocated.resolve() / "actor", saved.payload["spec"])
+        ema.assert_called_once_with(relocated.resolve() / "joint_state/ema", saved.payload["spec"])
+        # Large immutable tensors and metadata stay at the original checkpoint.
+        self.assertFalse((self.root / "restored/ema").exists())
+        self.assertFalse((self.root / "restored/controller.json").exists())
+        self.assertFalse((self.root / "restored/evaluation.json").exists())
         self.assertTrue((self.root / "restored/RESTORE_COMPLETE.json").is_file())
 
     def test_failure_before_ema_completion_never_publishes_latest_or_complete(self):
@@ -209,7 +214,7 @@ class JointCheckpointTests(unittest.TestCase):
         with self.assertRaises(joint.JointCheckpointError):
             self.coordinator.restore(root, expected=self.spec.compatibility(),
                                      destination_root=self.root / "bad-restore",
-                                     load_online=loader, load_ema=loader, load_controller=loader, fence=self.fence)
+                                     load_online=loader, load_ema=loader, fence=self.fence)
         with self.assertRaises(joint.JointCheckpointError):
             self.coordinator.latest(root.parent, expected=self.spec.compatibility())
         loader.assert_not_called()
@@ -231,7 +236,7 @@ class JointCheckpointTests(unittest.TestCase):
         (Path(saved.checkpoint_dir) / "actor/optim_world_size_2_rank_0.pt").write_bytes(b"wrong optimizer")
         loader = Mock()
         with self.assertRaisesRegex(joint.JointCheckpointError, "digest"):
-            self.restore(saved, load_online=loader, load_ema=loader, load_controller=loader)
+            self.restore(saved, load_online=loader, load_ema=loader)
         loader.assert_not_called()
         self.assertFalse((self.root / "restored").exists())
 
@@ -242,6 +247,17 @@ class JointCheckpointTests(unittest.TestCase):
                            ("evaluator_fingerprint", "other"), ("protocol_fingerprint", "other")):
             with self.subTest(key=key), self.assertRaisesRegex(joint.JointCheckpointError, "mismatch"):
                 self.coordinator.validate(saved.checkpoint_dir, expected={**self.spec.compatibility(), key: value})
+
+    def test_state_identities_exclude_source_versions_and_require_token_interpretation(self):
+        self.assertEqual(set(self.spec.versions), {"model", "tokenizer", "template"})
+        for versions in ({**self.spec.versions, "code": "source-bytes"},
+                         {key: value for key, value in self.spec.versions.items() if key != "tokenizer"}):
+            with self.subTest(versions=versions), self.assertRaises(ValueError):
+                replace(self.spec, versions=versions)
+
+    def test_controller_state_schema_is_checked_before_publication(self):
+        with self.assertRaisesRegex(joint.JointCheckpointError, "Controller"):
+            self.save("bad-controller-schema", controller_state={**self.controller, "schema_version": 99})
 
     def test_async_checkpoint_requires_explicit_completion_waiter(self):
         def asynchronous(directory):

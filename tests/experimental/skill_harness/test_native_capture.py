@@ -1,457 +1,440 @@
-# Copyright 2026 The Skill Self-Evolve Authors
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
-"""Exercise the actual Task capture class with real CPU subprocess groups."""
+"""CPU task lifecycle tests; external agent and service calls are interfaces only."""
 
-from __future__ import annotations
-
-import ast
 import asyncio
-import http.server
-import importlib.util
 import json
 import os
-import shlex
 import shutil
-import signal
-import subprocess
-import sys
 import tempfile
-import threading
-import time
 import types
 import unittest
-import urllib.request
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+from _native_runtime_test_support import PACKAGE, accounts, task
+
+Sandbox = task.AlfworldUserSandbox
 
 
-@dataclass
-class ExecResult:
-    exit_code: int
-    stdout: str
-    stderr: str
+class Response:
+    def __init__(self, value, entered=None):
+        self.value, self.entered = value, entered
+
+    async def __aenter__(self):
+        if self.entered:
+            self.entered()
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    async def json(self):
+        return self.value
 
 
-def load_capture_class():
-    """Load its source without importing the optional Uni-Agent/model stack."""
-    path = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/task.py"
-    tree = ast.parse(path.read_text())
-    spec = importlib.util.spec_from_file_location("_native_capture_guard", path.with_name("terminal_guard.py"))
-    guard = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = guard
-    spec.loader.exec_module(guard)
-    node = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "AlfworldUserSandbox")
-    account_spec = importlib.util.spec_from_file_location("_capture_accounts_cpu", path.with_name("accounts.py"))
-    accounts = importlib.util.module_from_spec(account_spec)
-    account_spec.loader.exec_module(accounts)
-    namespace = {
-        "AccountIsolationError": accounts.AccountIsolationError,
-        "decode_launcher_proof": accounts.decode_launcher_proof,
-        "record_isolation_incident": Mock(),
-        "asyncio": asyncio,
-        "json": json,
-        "os": os,
-        "signal": signal,
-        "time": time,
-        "Path": Path,
-        "LocalSandbox": object,
-        "ExecResult": ExecResult,
-        "monitor_terminal_process": guard.monitor_terminal_process,
-    }
-    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
-    return namespace["AlfworldUserSandbox"]
-
-
-Sandbox = load_capture_class()
-
-
-def running(pid):
-    result = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True, check=False)
-    return result.returncode == 0 and bool(result.stdout.strip()) and not result.stdout.strip().startswith("Z")
-
-
-class NativeCaptureTest(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        self.sandbox = object.__new__(Sandbox)
-        self.sandbox.output = self.root
-        self.sandbox.session_url = "http://127.0.0.1/unused"
-        self.sandbox.account = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
-        self.sandbox.account_pool = types.SimpleNamespace(register_resource=Mock(), mark_launcher=Mock())
-        self.sandbox.account_lease = {"lease_id": "cpu-only", "owner": {"run_root": str(self.root)}}
-        self.sandbox.attempt_id = "cpu-attempt"
-        self.sandbox.native_model_catalogs = []
-        self.sandbox.native_started = False
-        self.sandbox.launcher_proofs = []
-        self.sandbox.terminal_stop_evidence = []
-        self.sandbox.host_stop_evidence = []
-        self.requested_host_stops = []
-        self.sandbox._request_backend_stop = self.requested_host_stops.append
-
-        async def register_budget(timeout):
-            started_ns = time.monotonic_ns()
-            return {
-                "started_ns": started_ns,
-                "deadline_ns": started_ns + int(timeout * 1_000_000_000),
-                "budget_seconds": timeout,
-                "registration_sha256": "c" * 64,
-            }
-
-        async def budget_deadline_stop():
-            self.requested_host_stops.append("budget_timeout")
-
-        self.sandbox.register_native_budget = register_budget
-        self.sandbox._budget_deadline_stop = budget_deadline_stop
-        self.sandbox.private_tmp_identity = None
-        self.sandbox.CAPTURE_DRAIN_TIMEOUT_SECONDS = 0.08
-        self.sandbox.TERMINATION_TIMEOUT_SECONDS = 0.08
-        self.sandbox.TERMINAL_GRACE_SECONDS = 0.04
-        self.sandbox.TERMINAL_POLL_SECONDS = 0.005
-        self.sandbox.TERMINAL_OBSERVATION_TIMEOUT_SECONDS = 0.03
-
-        async def nonterminal():
-            return {"done": False, "won": False, "steps": 0, "max_steps": 50}
-
-        self.sandbox._observe_terminal_state = nonterminal
-        self.created = []
-        self.loop_errors = []
-        self.loop = asyncio.get_running_loop()
-        self.old_exception_handler = self.loop.get_exception_handler()
-        self.loop.set_exception_handler(lambda _loop, context: self.loop_errors.append(context))
-        original = asyncio.create_subprocess_exec
-
-        def fake_launcher(account, argv, *, home, cwd, ready_fd, **kwargs):
-            # This fixture exercises capture/drain only. The real kernel launcher
-            # has separate OS acceptance; no setpriv/Landlock runs on the Mac.
-            self.assertEqual(Path(cwd), self.root)
-            self.assertTrue(Path(home).is_dir())
-            proof = {
-                "policy_version": "alfworld-uid-landlock-v1",
-                "uid": account.pw_uid,
-                "euid": account.pw_uid,
-                "gid": account.pw_gid,
-                "groups": [],
-                "resuid": [account.pw_uid] * 3,
-                "resgid": [account.pw_gid] * 3,
-                "no_new_privs": 1,
-                "capabilities_zero": True,
-                "landlock_abi": 1,
-                "landlock_applied": True,
-                "seccomp_guard": "abi1-truncate-x86_64-v1",
-            }
-            os.write(ready_fd, json.dumps(proof).encode())
-            return argv, {}, None
-
-        async def direct_exec(*argv, **kwargs):
-            process = await original(*argv, **kwargs)
-            self.created.append(process)
-            return process
-
-        self.launch_patcher = patch.dict(Sandbox._exec.__globals__, {"launch_arguments": fake_launcher})
-        self.launch_patcher.start()
-        self.patcher = patch.object(asyncio, "create_subprocess_exec", side_effect=direct_exec)
-        self.patcher.start()
-
-    async def asyncTearDown(self):
-        self.patcher.stop()
-        self.launch_patcher.stop()
-        for home in getattr(self.sandbox, "native_codex_homes", ()):
-            shutil.rmtree(home, ignore_errors=True)
-        for process in self.created:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-        await asyncio.sleep(0.02)
-        self.temporary.cleanup()
-        self.loop.set_exception_handler(self.old_exception_handler)
-        self.assertEqual(self.loop_errors, [], "Capture must not leave unobserved asyncio future exceptions")
-
-    def diagnostic(self):
-        return json.loads((self.root / "native-capture-diagnostics.jsonl").read_text().splitlines()[-1])
-
-    async def execute(self, script, *, timeout=5, env=None):
-        home = "/tmp/codex-home-" + uuid.uuid4().hex
-        command = "env CODEX_HOME=" + home + " " + shlex.join([sys.executable, "-c", script])
-        return await self.sandbox._exec(["bash", "-c", command], timeout=timeout, workdir=str(self.root), env=env)
-
-    async def test_spawned_native_process_forces_all_offline_flags_after_caller_overrides(self):
-        flags = {
-            key: "0"
-            for key in ("PIP_NO_INDEX", "UV_OFFLINE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE")
-        }
-        keys = [*flags, "NO_PROXY", "no_proxy", "ALFWORLD_SESSION_URL"]
-        script = "import os,json;print(json.dumps({key:os.environ.get(key) for key in " + repr(keys) + "}))"
-        with patch.dict(os.environ, flags):
-            result = await self.execute(script, env=flags)
-        self.assertEqual(result.exit_code, 0)
-        observed = json.loads(result.stdout)
-        self.assertEqual({key: observed[key] for key in flags}, dict.fromkeys(flags, "1"))
-        self.assertEqual(observed["NO_PROXY"], "127.0.0.1,localhost")
-        self.assertEqual(observed["no_proxy"], "127.0.0.1,localhost")
-        self.assertEqual(observed["ALFWORLD_SESSION_URL"], self.sandbox.session_url)
-
-    async def test_spawned_pip_respects_offline_flag_without_hitting_loopback_index(self):
-        self.assertIsNotNone(importlib.util.find_spec("pip"), "This CPU acceptance requires installed pip")
-        hits = []
-
-        class Index(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                hits.append(self.path)
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"<html></html>")
-
-            def log_message(self, *_):
-                pass
-
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Index)
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        index = "http://127.0.0.1:" + str(server.server_port) + "/simple"
-        with urllib.request.urlopen(index, timeout=2) as response:
-            self.assertEqual(response.status, 200)
-        self.assertEqual(len(hits), 1)  # The local index is reachable.
-        hits.clear()
-        argv = [
-            sys.executable,
-            "-m",
-            "pip",
-            "--disable-pip-version-check",
-            "-v",
-            "install",
-            "--dry-run",
-            "--no-cache-dir",
-            "--retries",
-            "0",
-            "--timeout",
-            "1",
-            "--index-url",
-            index,
-            "--target",
-            str(self.root / "unused-package-target"),
-            "offline-env-proof-" + uuid.uuid4().hex,
-        ]
-        script = (
-            "import subprocess,json;result=subprocess.run(" + repr(argv) + ",capture_output=True,text=True);"
-            "print(json.dumps({'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}))"
+class NativePolicyCommandTest(unittest.TestCase):
+    def test_policy_keeps_native_binary_prompt_pipe_and_home(self):
+        command = (
+            "mkdir -p /tmp/codex-home-unit && printf %s dGFzaw== | base64 -d | "
+            "env CODEX_HOME=/tmp/codex-home-unit /native/codex exec --json --ephemeral"
         )
-        result = await self.execute(script, timeout=10, env={"PIP_NO_INDEX": "0", "PIP_CONFIG_FILE": os.devnull})
-        self.assertEqual(result.exit_code, 0)
-        pip = json.loads(result.stdout)
-        self.assertNotEqual(pip["returncode"], 0)
-        self.assertIn("No matching distribution found", pip["stdout"] + pip["stderr"])
-        self.assertEqual(hits, [])
-
-    async def wait_file(self, path):
-        async def available():
-            while not path.is_file():
-                await asyncio.sleep(0.01)
-
-        await asyncio.wait_for(available(), timeout=3)
-
-    async def test_completed_event_survives_descendant_pipe_drain_timeout(self):
-        child_file = self.root / "child.pid"
-        script = (
-            "import json,pathlib,subprocess,sys\n"
-            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
-            f"pathlib.Path({str(child_file)!r}).write_text(str(child.pid))\n"
-            "print(json.dumps({'type':'turn.completed','usage':{'output_tokens':1}}),flush=True)\n"
-            "print('native stderr stays native',file=sys.stderr,flush=True)\n"
+        result = task._native_policy_command(
+            ["bash", "-c", command], native_binary="/native/codex", instructions_file="/policy/solver instructions.md"
         )
-        result = await self.execute(script)
-        self.assertEqual(result.exit_code, 0)
-        self.assertEqual(json.loads(result.stdout)["type"], "turn.completed")
-        self.assertEqual(result.stderr, "native stderr stays native\n")
-        self.assertEqual((self.root / "codex-events.jsonl").read_text(), result.stdout)
-        self.assertEqual((self.root / "codex-stderr.log").read_text(), result.stderr)
-        diagnostic = self.diagnostic()
-        self.assertTrue(diagnostic["drain_timed_out"])
-        self.assertFalse(diagnostic["timed_out"])
-        self.assertEqual(diagnostic["native_exit_code"], 0)
-        self.assertEqual(diagnostic["stdout_bytes"], len(result.stdout.encode()))
-        self.assertIn("SIGTERM", diagnostic["termination_signals"])
-        self.assertFalse(running(int(child_file.read_text())))
+        self.assertEqual(result[:2], ["bash", "-c"])
+        prefix, native = result[2].split("/native/codex", 1)
+        self.assertEqual(prefix, command.split("/native/codex", 1)[0])
+        self.assertIn("skip_host_skill_discovery", native)
+        self.assertIn("skills.include_instructions=false", native)
+        self.assertIn("web_search=", native)
+        self.assertIn(" exec --json --ephemeral", native)
+        tokens = __import__("shlex").split(result[2])
+        self.assertIn('model_instructions_file="/policy/solver instructions.md"', tokens)
+        self.assertIn("image_generation", tokens)
 
-    async def test_partial_output_and_actual_nonzero_exit_are_not_replaced(self):
-        result = await self.execute("import sys; print('partial native output',flush=True); sys.exit(7)")
-        self.assertEqual(result.exit_code, 7)
-        self.assertEqual(result.stdout, "partial native output\n")
-        self.assertEqual(result.stderr, "")
-        self.assertFalse(self.diagnostic()["drain_timed_out"])
-        self.assertEqual(self.diagnostic()["returned_exit_code"], 7)
+    def test_unknown_command_shape_cannot_bypass_native_policy(self):
+        for command in (["/native/codex", "exec"], ["bash", "-c", "/different/codex exec --json"]):
+            with self.assertRaises(accounts.TaskSetupError):
+                task._native_policy_command(
+                    command, native_binary="/native/codex", instructions_file="/policy/solver.md"
+                )
 
-    def stubborn_script(self, ready):
-        return (
-            "import pathlib,signal,subprocess,sys,time\n"
-            "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
-            "child=subprocess.Popen([sys.executable,'-c',"
-            "'import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)'])\n"
-            f"pathlib.Path({str(ready)!r}).write_text(str(child.pid))\n"
-            "print('actual partial output',flush=True)\n"
-            "time.sleep(60)\n"
-        )
 
-    async def test_actual_timeout_returns_minus_one_and_kills_owned_group(self):
-        ready = self.root / "timeout-child.pid"
-        original_signal = os.killpg
-
-        def fenced_signal(pid, number):
-            self.assertEqual(self.requested_host_stops, ["budget_timeout"])
-            return original_signal(pid, number)
-
-        with patch.object(os, "killpg", side_effect=fenced_signal):
-            result = await self.execute(self.stubborn_script(ready), timeout=0.3)
-        self.assertEqual(result.exit_code, -1)
-        self.assertIn("actual partial output", result.stdout)
-        self.assertEqual(result.stderr, "")
-        diagnostic = self.diagnostic()
-        self.assertTrue(diagnostic["timed_out"])
-        self.assertFalse(diagnostic["cancelled"])
-        self.assertEqual(self.requested_host_stops, ["budget_timeout"])
-        self.assertIn("SIGKILL", diagnostic["termination_signals"])
-        self.assertFalse(running(diagnostic["pid"]))
-        self.assertFalse(running(int(ready.read_text())))
-
-    async def test_cancellation_still_kills_owned_group_and_preserves_logs(self):
-        ready = self.root / "cancel-child.pid"
-        task = asyncio.create_task(self.execute(self.stubborn_script(ready)))
-        await self.wait_file(ready)
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
-        diagnostic = self.diagnostic()
-        self.assertTrue(diagnostic["cancelled"])
-        self.assertFalse(diagnostic["timed_out"])
-        self.assertEqual(self.requested_host_stops, ["task_cancel"])
-        self.assertIn("actual partial output", (self.root / "codex-events.jsonl").read_text())
-        self.assertEqual((self.root / "codex-stderr.log").read_text(), "")
-        self.assertFalse(running(diagnostic["pid"]))
-        self.assertFalse(running(int(ready.read_text())))
-
-    async def test_cancellation_during_inherited_pipe_drain_also_terminates_group(self):
-        ready = self.root / "draining-child.pid"
-        self.sandbox.CAPTURE_DRAIN_TIMEOUT_SECONDS = 5
-        script = (
-            "import pathlib,subprocess,sys\n"
-            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
-            f"pathlib.Path({str(ready)!r}).write_text(str(child.pid))\n"
-            'print(\'{"type":"turn.completed"}\',flush=True)\n'
-        )
-        task = asyncio.create_task(self.execute(script))
-        await self.wait_file(ready)
-        while self.created[0].returncode is None:
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(0.03)
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
-        self.assertTrue(self.diagnostic()["cancelled"])
-        self.assertIsNone(self.diagnostic()["returned_exit_code"])
-        self.assertIn("turn.completed", (self.root / "codex-events.jsonl").read_text())
-        self.assertFalse(running(int(ready.read_text())))
-
-    async def test_proven_terminal_world_bounds_cli_but_preserves_actual_exit_and_missing_completion(self):
-        async def terminal():
-            return {"done": True, "won": False, "steps": 50, "max_steps": 50}
-
-        self.sandbox._observe_terminal_state = terminal
-        script = (
-            "import sys,time\n"
-            "print('actual-native-prefix',flush=True)\n"
-            "print('native-warning',file=sys.stderr,flush=True)\n"
-            "time.sleep(60)\n"
-        )
-        result = await self.execute(script)
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "actual-native-prefix\n")
-        self.assertEqual(result.stderr, "native-warning\n")
-        self.assertNotIn("turn.completed", result.stdout)
-        proof = self.sandbox.terminal_stop_evidence[-1]
-        self.assertEqual(proof["status"], "terminal_stop")
-        self.assertTrue(proof["termination_requested"])
-        self.assertTrue(proof["termination_completed"])
-        self.assertIsNone(proof["backend_stop_confirmed"])
-        self.assertEqual(self.diagnostic()["native_exit_code"], result.exit_code)
-        self.assertFalse(self.diagnostic()["timed_out"])
-        self.assertFalse(running(self.diagnostic()["pid"]))
-
-    async def test_unknown_observer_does_not_authorize_terminal_stop(self):
-        async def unknown():
-            raise OSError("transient public observer failure")
-
-        self.sandbox._observe_terminal_state = unknown
-        result = await self.execute("import time; print('real output',flush=True); time.sleep(.03)")
-        self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "real output\n")
-        proof = self.sandbox.terminal_stop_evidence[-1]
-        self.assertFalse(proof["termination_requested"])
-        self.assertGreater(proof["observation_error_count"], 0)
-
-    async def test_actual_backend_binder_api_and_task_relative_import_order(self):
-        task_path = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld/task.py"
-        tree = ast.parse(task_path.read_text())
-        imports = [
-            node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "backend_terminal"
-        ]
-        names = {alias.name for node in imports for alias in node.names}
-        self.assertTrue({"bind_episode", "wait_for_terminal_drain", "fence_host_stop"}.issubset(names))
-        self.assertTrue(all(node.level == 1 for node in imports))
-        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-        bind_line = next(
-            node.lineno for node in calls if isinstance(node.func, ast.Name) and node.func.id == "bind_episode"
-        )
-        drain_line = next(
-            node.lineno
-            for node in calls
-            if isinstance(node.func, ast.Name) and node.func.id == "wait_for_terminal_drain"
-        )
-        agent_line = next(
-            node.lineno
-            for node in calls
-            if isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "agent"
-            and node.func.attr == "run"
-        )
-        close_line = next(
-            node.lineno
-            for node in calls
-            if isinstance(node.func, ast.Attribute)
-            and node.func.attr == "post"
-            and any(isinstance(value, ast.Constant) and value.value == "/admin/close/" for value in ast.walk(node))
-        )
-        self.assertLess(bind_line, agent_line)
-        self.assertLess(drain_line, close_line)
-        module_stub = types.ModuleType("verl.workers.rollout.llm_server")
-        module_stub.LLMServerClient = object
-        path = task_path.with_name("backend_terminal.py")
-        spec = importlib.util.spec_from_file_location("_task_actual_backend_api", path)
-        backend = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {spec.name: backend, "verl.workers.rollout.llm_server": module_stub}):
-            spec.loader.exec_module(backend)
-            binding = backend.bind_episode(
-                self.root / "bindings",
-                gateway_base_url="http://127.0.0.1:9/sessions/gateway-cpu/v1",
-                environment_session_url="http://127.0.0.1:9/session/environment-cpu",
-                attempt_id="attempt-cpu",
+class NativeLaunchCancellationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_budget_registration_cancellation_closes_pipe_without_starting_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path("/tmp") / ("codex-home-" + uuid.uuid4().hex)
+            self.addCleanup(shutil.rmtree, home, True)
+            pool = Mock()
+            pool.prepare_resource.side_effect = lambda path, **kwargs: Path(path).mkdir(mode=0o700)
+            pool.command_environment.return_value = {"PATH": os.defpath}
+            pool.launch_arguments.return_value = (["/usr/bin/false"], {}, None)
+            sandbox = Sandbox(
+                "http://127.0.0.1",
+                Path(directory),
+                account=types.SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid()),
+                account_pool=pool,
+                account_lease={"lease_id": "unit"},
+                attempt_id="unit",
             )
-            self.assertEqual(binding.gateway_session_id, "gateway-cpu")
-            self.assertEqual(binding.environment_session_id, "environment-cpu")
-            self.assertEqual(len(binding.binding_sha256), 64)
-            backend.fence_episode(binding, {"done": True, "won": False, "steps": 50, "max_steps": 50})
-            receipt = await backend.wait_for_terminal_drain(binding, timeout_seconds=0.05)
-        self.assertTrue(receipt["backend_stop_confirmed"])
-        self.assertTrue(receipt["fenced"])
-        self.assertEqual(receipt["binding_sha256"], binding.binding_sha256)
-        self.assertFalse(receipt["expected_backend_terminal_stop"])
+            sandbox.native_binary = "/native/codex"
+            sandbox.solver_instructions = "/policy/solver.md"
+            sandbox.disabled_native_features = []
+            cancelled = asyncio.CancelledError("cancelled during native budget registration")
+            sandbox.register_native_budget = AsyncMock(side_effect=cancelled)
+            pipe_fds = []
+            open_pipe = os.pipe
+
+            def owned_pipe():
+                descriptors = open_pipe()
+                pipe_fds.extend(descriptors)
+                return descriptors
+
+            argv = ["bash", "-c", f"env CODEX_HOME={home} /native/codex exec --json"]
+            with patch.object(task.os, "pipe", side_effect=owned_pipe):
+                with patch.object(task.asyncio, "create_subprocess_exec", new_callable=AsyncMock) as launch:
+                    with self.assertRaises(asyncio.CancelledError) as caught:
+                        await sandbox._exec(argv, timeout=900, workdir=directory)
+                    self.assertIs(caught.exception, cancelled)
+                    launch.assert_not_called()
+            self.assertFalse(sandbox.native_started)
+            self.assertEqual(len(pipe_fds), 2)
+            for descriptor in pipe_fds:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+
+class NativeCaptureFinalizationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_finalization_joins_pending_event_reader_without_discarding_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Sandbox(
+                "http://127.0.0.1",
+                Path(directory),
+                account=None,
+                account_pool=None,
+                account_lease=None,
+                attempt_id="unit",
+            )
+            release = asyncio.Event()
+            events = []
+
+            async def reader():
+                await release.wait()
+                events.append("last native event")
+
+            sandbox.native_capture_tasks = [asyncio.create_task(reader())]
+            finalizing = asyncio.create_task(sandbox.finish_capture())
+            await asyncio.sleep(0)
+            self.assertFalse(finalizing.done())
+            release.set()
+            await finalizing
+            self.assertEqual(events, ["last native event"])
+
+    async def test_reader_failure_remains_execution_error_without_reward(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Sandbox(
+                "http://127.0.0.1",
+                Path(directory),
+                account=None,
+                account_pool=None,
+                account_lease=None,
+                attempt_id="unit",
+            )
+
+            async def reader():
+                raise OSError("event output unavailable")
+
+            sandbox.native_capture_tasks = [asyncio.create_task(reader())]
+            with self.assertRaises(accounts.TaskExecutionError):
+                await sandbox.finish_capture()
+
+
+class NativeReadinessPipeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_partial_pipe_proof_is_joined_without_executor_threads(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            reading = asyncio.create_task(task._read_launcher_ready(read_fd))
+            await asyncio.sleep(0)
+            os.write(write_fd, b'{"uid":')
+            await asyncio.sleep(0)
+            self.assertFalse(reading.done())
+            os.write(write_fd, b"12345}\n")
+            self.assertEqual(await reading, b'{"uid":12345}\n')
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    async def test_cancelled_pipe_reader_cannot_consume_reused_descriptor(self):
+        read_fd, write_fd = os.pipe()
+        reused = read_fd
+        reading = asyncio.create_task(task._read_launcher_ready(read_fd))
+        await asyncio.sleep(0)
+        reading.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await reading
+        os.close(read_fd)
+        os.close(write_fd)
+        next_read, next_write = os.pipe()
+        try:
+            if next_read != reused:
+                os.dup2(next_read, reused)
+                os.close(next_read)
+            os.write(next_write, b"next-owned-proof\n")
+            await asyncio.sleep(0)
+            self.assertEqual(os.read(reused, 65536), b"next-owned-proof\n")
+        finally:
+            os.close(reused)
+            os.close(next_write)
+
+    async def test_timeout_and_oversize_proof_release_reader_registration(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaises(asyncio.TimeoutError):
+                await task._read_launcher_ready(read_fd, timeout_seconds=0.001)
+            os.write(write_fd, b"proof-too-long")
+            with self.assertRaises(accounts.IsolationError):
+                await task._read_launcher_ready(read_fd, max_bytes=4)
+            self.assertEqual(os.read(read_fd, 65536), b"f-too-long")
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+
+class NativeLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.work = self.root / "work"
+        self.work.mkdir()
+        self.settings = self.root / "environment.json"
+        self.instructions = self.root / "solver.md"
+        self.instructions.write_text("Only solve the assigned text environment task.")
+        self.settings.write_text(
+            json.dumps(
+                {
+                    "url": "http://127.0.0.1:1",
+                    "admin_token": "unit",
+                    "catalog_digest": "catalog",
+                    "allowed_splits": ["train"],
+                    "native_policy": {"instructions_file": str(self.instructions)},
+                }
+            )
+        )
+        self.metadata = dict(
+            run_dir=str(self.root),
+            game_id="unit_game",
+            stable_game_id="unit_game",
+            split="train",
+            dataset_phase="train",
+            task_type="unit",
+            scene_id="scene",
+            relative_game_path="game",
+            game_sha256="game-digest",
+            catalog_digest="catalog",
+        )
+        self.closed = False
+        self.started = asyncio.Event()
+        self.draining = asyncio.Event()
+        self.release_drain = asyncio.Event()
+        self.release_drain.set()
+        self.agent_error = None
+        self.cancel_agent = False
+        self.receipt_confirmed = True
+        self.engine_won = False
+        self.pool = Mock()
+        self.pool.prepare_work_root.return_value = self.work
+        self.pool.acquire.return_value = dict(
+            lease_id="lease",
+            token="token",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            name="unit",
+            owner={"run_root": str(self.root), "scope_id": "scope", "kind": "ordinary"},
+        )
+        self.pool.public.side_effect = lambda ref: {key: value for key, value in ref.items() if key != "token"}
+        self.pool.account.return_value = types.SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid())
+        self.pool.drain.return_value = {"drained": True, "uid": os.geteuid(), "remaining_pids": []}
+        self.pool.close_attempt.return_value = {
+            "status": "attempt_closed",
+            "backend_drained": True,
+            "uid_drained": True,
+        }
+        self.binding = None
+        backend = types.ModuleType(PACKAGE + ".backend_terminal")
+
+        def bind_episode(directory, **kwargs):
+            self.binding = types.SimpleNamespace(
+                binding_id="binding",
+                binding_sha256="digest",
+                attempt_id=kwargs["attempt_id"],
+                gateway_session_id="gateway",
+                environment_session_id="environment",
+            )
+            return self.binding
+
+        async def wait_for_terminal_drain(binding, **kwargs):
+            self.draining.set()
+            await self.release_drain.wait()
+            return {
+                **vars(binding),
+                "schema_version": 1,
+                "backend_stop_confirmed": self.receipt_confirmed,
+                "active_requests": 0,
+                "backend_error_types": [],
+                "fenced": True,
+                "status": "drained",
+            }
+
+        backend.bind_episode = bind_episode
+        backend.fence_host_stop = Mock()
+        backend.wait_for_terminal_drain = wait_for_terminal_drain
+        self.backend = backend
+        fixture = self
+
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            def post(self, url, **kwargs):
+                if url.endswith("/admin/create"):
+                    return Response(
+                        {
+                            "session_id": "environment",
+                            "catalog_digest": "catalog",
+                            "state": {
+                                "observation": "initial observation",
+                                "admissible_commands": ["look"],
+                                "steps": 0,
+                                "max_steps": 50,
+                                "won": False,
+                                "done": False,
+                            },
+                        }
+                    )
+                return Response(
+                    {
+                        **fixture.metadata,
+                        "won": fixture.engine_won,
+                        "reward": float(fixture.engine_won),
+                        "steps": 1,
+                        "max_steps": 50,
+                        "invalid_actions": 0,
+                    },
+                    lambda: setattr(fixture, "closed", True),
+                )
+
+        self.client = Client()
+
+        class Agent:
+            config = types.SimpleNamespace(
+                model=types.SimpleNamespace(base_url="http://127.0.0.1:2/sessions/gateway/v1"),
+                codex_bin="/usr/bin/codex",
+            )
+
+            async def run(self, **kwargs):
+                fixture.started.set()
+                if fixture.cancel_agent:
+                    await asyncio.Event().wait()
+                if fixture.agent_error:
+                    raise fixture.agent_error
+                return types.SimpleNamespace(info={"ok": True, "error": None, "exit_code": 0}, finished=True)
+
+        self.agent = Agent()
+        self.instance = task.AlfworldSkillTrainingTask()
+        self.instance.config = types.SimpleNamespace(
+            metadata=self.metadata, prompt=[{"role": "user", "content": "solve task"}]
+        )
+        self.instance.build_agent = lambda: self.agent
+        self.patches = [
+            patch.dict(os.environ, {"ALFWORLD_SERVER_CONFIG": str(self.settings)}),
+            patch.object(task, "AccountPool", return_value=self.pool),
+            patch.object(task.aiohttp, "ClientSession", return_value=self.client, create=True),
+            patch.dict(__import__("sys").modules, {backend.__name__: backend}),
+        ]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    async def test_completed_task_preserves_authoritative_reward_without_optional_home_archive(self):
+        self.engine_won = True
+        with patch("builtins.print"):
+            result = await self.instance.run()
+        self.assertTrue(result.finished)
+        self.assertEqual(result.reward, 1.0)
+        self.assertEqual(result.accuracy, 1.0)
+        self.assertTrue(self.closed)
+        self.pool.close_attempt.assert_called_once()
+        output = next((self.root / "episodes" / "unit_game").iterdir())
+        self.assertEqual(json.loads((output / "native-cleanup.json").read_text())["status"], "cleaned")
+        self.assertFalse((output / "native-files.tar.gz").exists())
+
+    async def test_service_create_error_is_typed_setup_failure_without_reward(self):
+        self.client.post = Mock(side_effect=OSError("environment unavailable"))
+        with self.assertRaises(accounts.TaskSetupError):
+            await self.instance.run()
+        self.pool.acquire.assert_not_called()
+        self.assertEqual(list(self.root.glob("episodes/*/*/result.json")), [])
+
+    async def test_repeated_cancellation_waits_for_backend_environment_and_account_cleanup(self):
+        self.cancel_agent = True
+        self.release_drain.clear()
+        running = asyncio.create_task(self.instance.run())
+        await self.started.wait()
+        running.cancel()
+        await self.draining.wait()
+        running.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(running.done())
+        self.assertFalse(self.closed)
+        self.release_drain.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await running
+        self.assertTrue(self.closed)
+        self.pool.close_attempt.assert_called_once()
+        self.assertEqual(list(self.work.iterdir()), [])
+        output = next((self.root / "episodes" / "unit_game").iterdir())
+        self.assertFalse((output / "result.json").exists())
+        self.assertIn("initial observation", (output / "agent-prompt.txt").read_text())
+
+    async def test_invalid_agent_setup_closes_resources_and_raises_refillable_setup_error(self):
+        self.instance.build_agent = Mock(side_effect=ValueError("invalid agent configuration"))
+        with self.assertRaises(accounts.TaskSetupError):
+            await self.instance.run()
+        self.assertTrue(self.closed)
+        self.pool.close_attempt.assert_called_once()
+        self.assertEqual(list(self.work.iterdir()), [])
+        self.assertEqual(list(self.root.glob("episodes/*/*/result.json")), [])
+
+    async def test_execution_error_is_not_a_zero_reward(self):
+        self.agent_error = RuntimeError("native transport failed")
+        with self.assertRaises(accounts.TaskExecutionError):
+            await self.instance.run()
+        self.assertTrue(self.closed)
+        self.pool.close_attempt.assert_called_once()
+        self.assertEqual(list(self.root.glob("episodes/*/*/result.json")), [])
+
+    async def test_native_setup_error_inside_agent_remains_refillable(self):
+        self.agent_error = accounts.TaskSetupError("invalid native command configuration")
+        with self.assertRaises(accounts.TaskSetupError):
+            await self.instance.run()
+        self.assertTrue(self.closed)
+        self.pool.close_attempt.assert_called_once()
+
+    async def test_unconfirmed_backend_drain_remains_isolation_error(self):
+        self.receipt_confirmed = False
+        with self.assertRaises(accounts.IsolationError):
+            await self.instance.run()
+        self.assertTrue(self.closed)
+        self.pool.quarantine.assert_called_once()
+        self.pool.close_attempt.assert_not_called()
+        self.assertEqual(list(self.root.glob("episodes/*/*/result.json")), [])
 
 
 if __name__ == "__main__":

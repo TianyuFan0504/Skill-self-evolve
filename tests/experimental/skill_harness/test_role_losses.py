@@ -58,7 +58,26 @@ def normalization(batch, dp_size=1):
 
 
 def compute(current, batch, norm=None, **kwargs):
-    return losses.role_aware_ppo_loss(current, normalization=norm or normalization(batch), **batch, **kwargs)
+    from verl.trainer.ppo.core_algos import get_policy_loss_fn
+    from verl.workers.config.actor import ActorConfig
+
+    norm = norm or normalization(batch)
+    settings = kwargs.get("solver_config", losses.SolverLossConfig())
+    config = ActorConfig(
+        strategy="fsdp", rollout_n=1, ppo_micro_batch_size_per_gpu=1,
+        clip_ratio_low=settings.clip_low, clip_ratio_high=settings.clip_high,
+        clip_ratio_c=settings.dual_clip,
+        global_batch_info={"dp_size": norm.dp_size, "batch_num_tokens": norm.solver_tokens,
+                           "global_batch_size": norm.solver_sequences,
+                           "loss_scale_factor": settings.loss_scale_factor},
+    )
+    def solver(old, current, advantage, mask, weights):
+        return get_policy_loss_fn("vanilla")(
+            old_log_prob=old, log_prob=current, advantages=advantage, response_mask=mask,
+            loss_agg_mode=settings.loss_agg_mode, config=config, rollout_is_weights=weights,
+        )
+    kwargs.setdefault("solver_policy_loss", solver)
+    return losses.role_aware_ppo_loss(current, normalization=norm, **batch, **kwargs)
 
 
 def _distributed_counts_worker(rank, init_file, result_dir):
@@ -80,6 +99,11 @@ def _distributed_counts_worker(rank, init_file, result_dir):
 
 
 class RoleLossTests(unittest.TestCase):
+    def test_solver_requires_the_verl_policy_callback(self):
+        batch = mixed_batch()
+        with self.assertRaisesRegex(ValueError, "policy-loss callback"):
+            losses.role_aware_ppo_loss(torch.full((4, 3), -1.0), normalization=normalization(batch), **batch)
+
     def test_shared_parameter_updates_once_from_the_sum_of_both_losses(self):
         batch = mixed_batch()
         theta = torch.nn.Parameter(torch.tensor(-1.0))

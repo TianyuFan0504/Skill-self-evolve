@@ -14,7 +14,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location(
-    "_account_launcher_cpu", ROOT / "verl/experimental/skill_harness/alfworld/accounts.py"
+    "_account_launcher_cpu", ROOT / "examples/skill_self_evolve/runtime/linux_accounts.py"
 )
 accounts = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(accounts)
@@ -98,31 +98,31 @@ class AccountLauncherTests(unittest.TestCase):
     def test_readiness_requires_saved_ids_and_actual_seccomp(self):
         proof = {
             "policy_version": accounts.POLICY_VERSION,
-            "uid": 19000,
-            "euid": 19000,
-            "gid": 19000,
+            "uid": 12345,
+            "euid": 12345,
+            "gid": 12345,
             "groups": [],
-            "resuid": [19000] * 3,
-            "resgid": [19000] * 3,
+            "resuid": [12345] * 3,
+            "resgid": [12345] * 3,
             "no_new_privs": 1,
             "capabilities_zero": True,
             "landlock_applied": True,
             "landlock_abi": 1,
             "seccomp_guard": accounts.SECCOMP_GUARD,
         }
-        self.assertEqual(accounts.decode_launcher_proof(json.dumps(proof), uid=19000, gid=19000), proof)
-        for changes in ({"resuid": [19000, 19000, 0]}, {"seccomp_guard": None}, {"groups": [0]}):
+        self.assertEqual(accounts.decode_launcher_proof(json.dumps(proof), uid=12345, gid=12345), proof)
+        for changes in ({"resuid": [12345, 12345, 0]}, {"seccomp_guard": None}, {"groups": [0]}):
             with self.assertRaises(accounts.AccountIsolationError):
-                accounts.decode_launcher_proof(json.dumps({**proof, **changes}), uid=19000, gid=19000)
+                accounts.decode_launcher_proof(json.dumps({**proof, **changes}), uid=12345, gid=12345)
 
     def test_pidfd_signal_rechecks_uid_without_killing_numeric_pid(self):
         with (
             mock.patch.object(os, "pidfd_open", create=True, return_value=91) as opened,
             mock.patch.object(accounts.signal, "pidfd_send_signal", create=True) as sent,
             mock.patch.object(os, "close") as closed,
-            mock.patch.object(Path, "read_text", return_value="Name:\ttest\nUid:\t19000 19000 19000 19000\n"),
+            mock.patch.object(Path, "read_text", return_value="Name:\ttest\nUid:\t12345 12345 12345 12345\n"),
         ):
-            accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+            accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
             opened.assert_called_once_with(12345, 0)
             sent.assert_called_once_with(91, accounts.signal.SIGTERM, None, 0)
             closed.assert_called_once_with(91)
@@ -133,7 +133,7 @@ class AccountLauncherTests(unittest.TestCase):
             mock.patch.object(Path, "read_text", return_value="Uid:\t20000 20000 20000 20000\n"),
         ):
             with self.assertRaises(accounts.AccountIsolationError):
-                accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
             sent.assert_not_called()
 
     def test_missing_python_and_libc_wrappers_use_pidfd_syscalls(self):
@@ -145,11 +145,11 @@ class AccountLauncherTests(unittest.TestCase):
             mock.patch.object(accounts.ctypes, "CDLL", return_value=libc),
             mock.patch.object(accounts.sys, "platform", "linux"),
             mock.patch.object(accounts.platform, "machine", return_value="x86_64"),
-            mock.patch.object(Path, "read_text", return_value="Uid:\t19000 19000 19000 19000\n"),
+            mock.patch.object(Path, "read_text", return_value="Uid:\t12345 12345 12345 12345\n"),
             mock.patch.object(os, "close") as closed,
             mock.patch.object(os, "kill") as numeric_signal,
         ):
-            accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+            accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
         self.assertEqual(
             [[argument.value for argument in call.args] for call in syscall.call_args_list],
             [[434, 12345, 0], [424, 91, accounts.signal.SIGTERM, None, 0]],
@@ -186,10 +186,10 @@ class AccountLauncherTests(unittest.TestCase):
                     mock.patch.object(Path, "read_text") as status,
                 ):
                     if number == errno.ESRCH:
-                        accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                        accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
                     else:
                         with self.assertRaises(OSError) as error:
-                            accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                            accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
                         self.assertEqual(error.exception.errno, number)
                 status.assert_not_called()
 
@@ -199,15 +199,15 @@ class AccountLauncherTests(unittest.TestCase):
                 self.subTest(errno=number),
                 mock.patch.object(accounts, "_open_pidfd", return_value=93),
                 mock.patch.object(accounts, "_send_pidfd_signal", side_effect=OSError(number, os.strerror(number))),
-                mock.patch.object(Path, "read_text", return_value="Uid:\t19000 19000 19000 19000\n"),
+                mock.patch.object(Path, "read_text", return_value="Uid:\t12345 12345 12345 12345\n"),
                 mock.patch.object(os, "close") as closed,
                 mock.patch.object(os, "kill") as numeric_signal,
             ):
                 if number == errno.ESRCH:
-                    accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                    accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
                 else:
                     with self.assertRaises(OSError) as error:
-                        accounts._signal_uid_process(12345, 19000, accounts.signal.SIGTERM)
+                        accounts._signal_uid_process(12345, 12345, accounts.signal.SIGTERM)
                     self.assertEqual(error.exception.errno, number)
                 closed.assert_called_once_with(93)
                 numeric_signal.assert_not_called()

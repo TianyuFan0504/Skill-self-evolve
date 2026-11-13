@@ -20,6 +20,7 @@ package = types.ModuleType(PACKAGE)
 package.__path__ = [str(ROOT)]
 sys.modules[PACKAGE] = package
 probes = importlib.import_module(PACKAGE + ".probes")
+accounts = importlib.import_module(PACKAGE + ".alfworld.accounts")
 store_module = importlib.import_module(PACKAGE + ".store")
 credit = importlib.import_module(PACKAGE + ".credit")
 context = importlib.import_module(PACKAGE + ".context")
@@ -34,8 +35,11 @@ class FakeAccountPool:
     def acquire(self, *, run_root, scope_id, kind):
         identity = f"{len(self.leases) + 1:032x}"
         ref = {
-            "lease_id": identity, "token": "CPU-lease-fence-" + identity,
-            "uid": 1001, "gid": 1001, "name": "CPU-pair-account",
+            "lease_id": identity,
+            "token": "CPU-lease-fence-" + identity,
+            "uid": 1001,
+            "gid": 1001,
+            "name": "CPU-pair-account",
             "owner": {"run_root": str(Path(run_root).resolve()), "scope_id": scope_id, "kind": kind},
         }
         self.leases[identity] = copy.deepcopy(ref)
@@ -47,18 +51,8 @@ class FakeAccountPool:
 
     def finish(self, ref, *, abandoned=False):
         if self.leases[ref["lease_id"]] != ref:
-            raise probes.AccountIsolationError("CPU lease fence differs")
+            raise accounts.IsolationError("CPU lease fence differs")
         self.finished[ref["lease_id"]] = bool(abandoned)
-
-    def historical_pair(self, public, *, run_root, group):
-        ref = self.leases[public["lease_id"]]
-        if (
-            self.public(ref) != {key: public[key] for key in ("lease_id", "uid", "gid", "name", "owner")}
-            or self.finished.get(ref["lease_id"], True)
-            or ref["owner"] != {"run_root": str(Path(run_root).resolve()), "scope_id": group, "kind": "pair"}
-        ):
-            raise probes.AccountIsolationError("CPU cached pair has no complete historical lease")
-        return ref
 
 
 class ProbeTests(unittest.IsolatedAsyncioTestCase):
@@ -201,18 +195,13 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         variant = metadata["credit_probe_variant"]
         workdir = "/tmp/alfworld-skill-episodes/credit_" + group
         home = "/tmp/codex-home-" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:32]
-        archives = []
-        for name, source in (("workspace.tar", workdir), ("codex-home.tar", home)):
-            archive = output / name
-            archive.write_bytes(("CPU contract fixture: " + kwargs["session_id"]).encode())
-            archives.append(
-                {
-                    "source": source,
-                    "path": str(archive),
-                    "removed": True,
-                    "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                }
-            )
+        cleanup = {
+            "status": "cleaned",
+            "sources": [
+                {"kind": "workspace", "path": workdir, "removed": True},
+                {"kind": "codex_home", "path": home, "removed": True},
+            ],
+        }
         binding = {
             "binding_id": "binding_" + hashlib.sha256(kwargs["session_id"].encode()).hexdigest()[:16],
             "binding_sha256": hashlib.sha256(kwargs["session_id"].encode()).hexdigest(),
@@ -258,8 +247,10 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 "backend_stop_confirmed": True,
                 "account_isolation": {
                     **self.account_pool.public(metadata["host_account_lease"]),
-                    "policy_version": probes.ACCOUNT_POLICY_VERSION,
-                    "status": "attempt_closed", "backend_drained": True, "uid_drained": True,
+                    "policy_version": "unit-runtime-provider",
+                    "status": "attempt_closed",
+                    "backend_drained": True,
+                    "uid_drained": True,
                 },
                 "paired_workdir": {
                     "schema_version": 1,
@@ -270,7 +261,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                     "empty_before_run": True,
                     "cleanup_completed": True,
                     "codex_homes": [home],
-                    "archives": archives,
+                    "native_files": cleanup,
                     "host_uid": 0,
                     "agent_uid": 1001,
                     "agent_gid": 1001,
@@ -438,6 +429,27 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(probes.ProbeNotObserved):
             await self.collect(run_branch=different_cwd)
+
+    async def test_missing_owned_home_cleanup_or_wrong_lease_never_settles_credit(self):
+        async def missing_home_cleanup(**kwargs):
+            capture = await self.branch(**kwargs)
+            cleanup = capture["extra_info"]["paired_workdir"]["native_files"]
+            cleanup["sources"] = [row for row in cleanup["sources"] if row["kind"] != "codex_home"]
+            return capture
+
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "cleanup is unconfirmed"):
+            await self.collect(run_branch=missing_home_cleanup)
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+        self.request = replace(self.request, probe_id="wrong_lease")
+
+        async def wrong_lease(**kwargs):
+            capture = await self.branch(**kwargs)
+            capture["extra_info"]["account_isolation"]["lease_id"] = "another-lease"
+            return capture
+
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "exact successfully closed"):
+            await self.collect(run_branch=wrong_lease)
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
 
     async def test_partial_pair_cannot_be_finished_under_new_server_lifecycle(self):
         self.fail_after = 1
@@ -646,17 +658,26 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             capture.update(reward=0.0, accuracy=0.0)
             info = capture["extra_info"]
             info.update(
-                error="agent process timed out", native_finished=False, agent_ok=False,
-                budget_exhausted=True, budget_reward_eligible=True, budget_failure_proof=proof,
+                error="agent process timed out",
+                native_finished=False,
+                agent_ok=False,
+                budget_exhausted=True,
+                budget_reward_eligible=True,
+                budget_failure_proof=proof,
             )
             info["backend_terminal"].update(status="host_stopped", stop_kind="budget_timeout")
             output = Path(info["episode_output_dir"])
             engine = json.loads((output / "engine-result.json").read_text())
             engine.update(won=False, reward=0.0)
             (output / "engine-result.json").write_text(json.dumps(engine))
-            (output / "result.json").write_text(json.dumps({
-                "backend_binding": info["backend_binding"], "budget_failure_proof": proof,
-            }))
+            (output / "result.json").write_text(
+                json.dumps(
+                    {
+                        "backend_binding": info["backend_binding"],
+                        "budget_failure_proof": proof,
+                    }
+                )
+            )
             return capture
 
         with patch.object(probes, "verify_budget_failure", return_value=proof) as verify:
@@ -672,8 +693,10 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         async def claimed(**kwargs):
             capture = await self.branch(**kwargs)
             capture["extra_info"].update(
-                error="agent process timed out", native_finished=False,
-                budget_exhausted=True, budget_reward_eligible=True,
+                error="agent process timed out",
+                native_finished=False,
+                budget_exhausted=True,
+                budget_reward_eligible=True,
             )
             output = Path(capture["extra_info"]["episode_output_dir"])
             (output / "result.json").write_text("{}")

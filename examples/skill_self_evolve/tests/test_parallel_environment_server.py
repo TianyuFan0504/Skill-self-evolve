@@ -18,7 +18,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from skill_harness_examples import parallel_environment_server as server  # noqa: E402
+from examples.skill_self_evolve.scripts import parallel_environment_server as server  # noqa: E402
 
 _TOY_COUNTS = {}
 

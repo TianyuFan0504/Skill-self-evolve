@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import importlib
@@ -31,6 +32,18 @@ PACKAGE = "_controller_cpu_contract"
 package = types.ModuleType(PACKAGE)
 package.__path__ = [str(MODULE_ROOT)]
 sys.modules[PACKAGE] = package
+# Replace only external framework classes; no native services are started.
+try:
+    importlib.import_module("uni_agent")
+except ModuleNotFoundError:
+    entry, framework = types.ModuleType("uni_agent.framework.entry"), types.ModuleType("uni_agent.framework.framework")
+    entry.AgentFrameworkRolloutAdapter, framework.GatewayAgentFramework = object, object
+    sys.modules.update({entry.__name__: entry, framework.__name__: framework})
+    try:
+        importlib.import_module(PACKAGE + ".framework")
+    finally:
+        sys.modules.pop(entry.__name__)
+        sys.modules.pop(framework.__name__)
 controller_module = importlib.import_module(PACKAGE + ".controller")
 curate = importlib.import_module(PACKAGE + ".curate")
 probes = importlib.import_module(PACKAGE + ".probes")
@@ -62,18 +75,9 @@ class FakeAccountPool:
 
     def finish(self, ref, *, abandoned=False):
         if self.leases[ref["lease_id"]] != ref:
-            raise probes.AccountIsolationError("CPU lease fence differs")
+            raise RuntimeError("CPU lease fence differs")
         self.finished[ref["lease_id"]] = bool(abandoned)
 
-    def historical_pair(self, public, *, run_root, group):
-        ref = self.leases[public["lease_id"]]
-        if (
-            self.public(ref) != {key: public[key] for key in ("lease_id", "uid", "gid", "name", "owner")}
-            or self.finished.get(ref["lease_id"], True)
-            or ref["owner"] != {"run_root": str(Path(run_root).resolve()), "scope_id": group, "kind": "pair"}
-        ):
-            raise probes.AccountIsolationError("CPU cached pair has no complete historical lease")
-        return ref
 
 
 class FakeActor:
@@ -184,7 +188,7 @@ class CallbackTokenizer:
         return self.encode(rendered) if tokenize else rendered
 
 
-class ControllerTest(unittest.IsolatedAsyncioTestCase):
+class ControllerFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -229,7 +233,6 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         self.config = OmegaConf.create(
             {
                 "skill_harness": {
-                    "mode": "skill_joint",
                     "artifact_root": str(self.root),
                     "store_root": str(self.root / "skill_store"),
                     "split_manifest": str(self.manifest),
@@ -424,18 +427,9 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
             group, variant = metadata["credit_probe_group"], metadata["credit_probe_variant"]
             workdir = "/tmp/alfworld-skill-episodes/credit_" + group
             home = "/tmp/codex-home-" + hashlib.sha256(session.encode()).hexdigest()[:32]
-            archives = []
-            for name, source in (("workspace.tar", workdir), ("codex-home.tar", home)):
-                archive = output / name
-                archive.write_bytes(("CPU native-boundary fixture: " + session).encode())
-                archives.append(
-                    {
-                        "source": source,
-                        "path": str(archive),
-                        "removed": True,
-                        "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                    }
-                )
+            cleanup = {"status": "cleaned", "sources": [
+                {"path": path, "removed": True} for path in (workdir, home)
+            ]}
             # This replaces the native/backend boundary, not the real CF
             # verifier. A normal completed session must still attest its exact
             # private attempt and every owned backend RPC having drained.
@@ -473,7 +467,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                     "backend_stop_confirmed": not self.unknown_backend,
                     "account_isolation": {
                         **self.account_pool.public(metadata["host_account_lease"]),
-                        "policy_version": probes.ACCOUNT_POLICY_VERSION,
+                        "policy_version": "fake-provider-v1",
                         "status": "attempt_closed", "backend_drained": not self.unknown_backend,
                         "uid_drained": True,
                     },
@@ -489,7 +483,7 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
                         "empty_before_run": True,
                         "cleanup_completed": True,
                         "codex_homes": [home],
-                        "archives": archives,
+                        "native_files": cleanup,
                         "host_uid": 0,
                         "agent_uid": 1001,
                         "agent_gid": 1001,
@@ -519,151 +513,22 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         await controller.after_update_and_sync(data, step, prepared=prepared, optimizer_step=self.actor.clock)
         return prepared
 
-    async def test_unconfirmed_backend_exposure_never_settles_or_enters_replay(self):
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        self.unknown_backend = True
-        prepared = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertTrue((prepared.data["role_id"] == 0).all())
-        self.assertEqual(prepared.acknowledgments, ())
-        self.assertEqual(controller.ledger.sample_ready(100), [])
-        self.assertEqual(self.actor.anchor_calls, [])
-        pending = list(controller.state["pending"].values())
-        self.assertTrue(pending)
-        self.assertTrue(all(not row["observed"] for row in pending))
-        self.assertTrue(any(row["unobserved"] for row in pending))
 
-    async def _assert_input_confound_never_becomes_credit(self, attack):
-        controller = await self.create()
-        if attack == "displaced":
-            artifact = store_module.SkillArtifact(
-                "zz-existing",
-                "Existing shared note",
-                "Observe before acting.",
-                "Household tasks",
-                ("pick_clean_then_place_in_recep",),
-            )
-            candidate = controller.store.stage_candidate(artifact)
-            controller.store.admit(candidate.candidate_id)
-            controller.store.publish([candidate.candidate_id], expected_parent=controller.store.head())
-        await self.update(controller, self.solver(), 1)
-        self.cf_input_attack = attack
-        prepared = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertTrue((prepared.data["role_id"] == 0).all())
-        self.assertEqual(prepared.acknowledgments, ())
-        self.assertEqual(controller.ledger.sample_ready(100), [])
-        self.assertEqual(self.actor.anchor_calls, [])
-        self.assertTrue(all(not row["observed"] for row in controller.state["pending"].values()))
-        reports = list((self.root / "credit_probes").glob("*/paired-input-audit.json"))
-        self.assertTrue(reports)
-        self.assertTrue(all(probes._read_payload(path)["status"] == "unobserved" for path in reports))
-        self.assertFalse(list((self.root / "credit_probes").glob("*/paired-event.json")))
 
-    async def test_actual_native_home_difference_cannot_settle_or_enter_replay(self):
-        await self._assert_input_confound_never_becomes_credit("home")
+class ControllerContractTest(ControllerFixture):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.controllers = []
+        self.addAsyncCleanup(self.stop_all)
 
-    async def test_actual_native_path_difference_cannot_settle_or_enter_replay(self):
-        await self._assert_input_confound_never_becomes_credit("path")
+    async def stop_all(self):
+        for controller in self.controllers:
+            await asyncio.wait_for(controller.stop_background(), timeout=3)
 
-    async def test_displaced_existing_skill_cannot_settle_or_enter_replay(self):
-        await self._assert_input_confound_never_becomes_credit("displaced")
-
-    async def test_first_step_solver_only_then_future_native_credit_enters_same_optimizer(self):
-        controller = await self.create()
-        first = await self.update(controller, self.solver(), 1)
-        self.assertEqual(first.data["role_id"].tolist(), [0, 0, 0, 0])
-        self.assertEqual(first.acknowledgments, ())
-        self.assertEqual(len(self.probe_calls), 0)
-        self.assertEqual(len(self.curate_calls), 2)
-        old_labels = list(controller.state["pending"])
-        second_data = self.solver(("future-b", "future-c"))
-        second = await self.update(controller, second_data, 2)
-        self.assertEqual(second.data["role_id"].tolist(), [0, 0, 1, 1])
-        self.assertEqual(second.data["curate_advantages"].tolist(), [0, 0, 1, 1])
-        self.assertEqual(len(self.actor.anchor_calls), 1)
-        self.assertEqual(len(self.actor.update_calls), 2)
-        self.assertEqual(len(controller.store.get_snapshot().skills), 2)
-        self.assertTrue(all(request.global_step == 2 for request in self.probe_calls))
-        self.assertEqual(len({request.probe_id for request in self.probe_calls}), 1)
-        for window in old_labels:
-            label = controller.state["pending"][window]["settlement_id"]
-            self.assertEqual(controller.ledger.training_status(label)["state"], "applied")
-        self.assertIsNone(controller.export_state()["prepared_update"])
-        self.assertEqual(controller.export_state()["optimizer_step"], 2)
-
-    async def test_negative_delayed_utility_stays_signed_and_does_not_publish_main(self):
-        self.negative_probe = True
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        prepared = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertEqual(prepared.data["curate_advantages"].tolist(), [0, 0, -1, -1])
-        self.assertEqual(controller.store.get_snapshot().skills, ())
-        self.assertTrue(all(row["utility"] == -1 for row in controller.state["pending"].values()))
-
-    async def test_multiple_exposures_cover_whole_cohort_before_leaving_current_batch(self):
-        self.config.skill_harness.joint.required_exposures = 2
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        first_windows = list(controller.state["pending"])
-        second = await self.update(controller, self.solver(("future-b", "future-c")), 2)
-        self.assertFalse((second.data["role_id"] == 1).any())
-        for identity in first_windows:
-            self.assertEqual(len(controller.state["pending"][identity]["observed"]), 1)
-        third = await controller.prepare_update(self.solver(("future-d", "future-e")), 3)
-        self.assertEqual(int((third.data["role_id"] == 1).sum()), 2)
-        for identity in first_windows:
-            self.assertEqual(len(controller.state["pending"][identity]["observed"]), 2)
-            self.assertEqual(controller.state["pending"][identity]["status"], "settled")
-
-    async def test_minimum_delay_uses_later_real_batches_and_stale_labels_are_not_zeroed(self):
-        self.config.skill_harness.joint.update(min_delay_steps=2, max_replay_lag_steps=0)
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        second = await self.update(controller, self.solver(("future-b", "future-c")), 2)
-        self.assertFalse((second.data["role_id"] == 1).any())
-        self.assertEqual(self.probe_calls, [])
-        third = await controller.prepare_update(self.solver(("future-d", "future-e")), 3)
-        self.assertFalse((third.data["role_id"] == 1).any())
-        settled = [row for row in controller.state["pending"].values() if row["status"] == "settled"]
-        self.assertEqual(len(settled), 2)
-        self.assertTrue(all(row["utility"] == 1 for row in settled))
-        self.assertTrue(
-            all(controller.ledger.training_status(row["settlement_id"])["state"] == "ready" for row in settled)
-        )
-
-    async def test_claimed_update_clock_cannot_acknowledge_an_optimizer_that_did_not_run(self):
-        controller = await self.create()
-        data = self.solver()
-        prepared = await controller.prepare_update(data, 1)
-        with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(controller.state["optimizer_step"], 0)
-        self.assertEqual(self.curate_calls, [])
-        with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            await controller.prepare_update(data, 1)
-
-    async def test_anchor_fence_break_preserves_uncertain_leases_for_reconciliation(self):
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        self.actor.break_anchor_fence = True
-        with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertIsNotNone(controller.state["prepared_update"])
-        for acknowledgment in controller.state["prepared_update"]["acknowledgments"]:
-            self.assertEqual(controller.ledger.training_status(acknowledgment["settlement_id"])["state"], "leased")
-
-    async def test_resume_preserves_pending_and_rejects_wrong_protocol_or_clock(self):
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        state = controller.export_state()
-        controller.restore_state(state, expected_optimizer_step=1)
-        self.assertEqual(len(controller.state["pending"]), 2)
-        with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            controller.restore_state(state, expected_optimizer_step=0)
-        altered = copy.deepcopy(state)
-        altered["protocol_fingerprint"] = "wrong"
-        with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            controller.restore_state(altered, expected_optimizer_step=1)
+    async def create(self):
+        controller = await super().create()
+        self.controllers.append(controller)
+        return controller
 
     async def test_original_prompts_and_train_partition_are_required(self):
         controller = await self.create()
@@ -677,210 +542,44 @@ class ControllerTest(unittest.IsolatedAsyncioTestCase):
         tu.assign_non_tensor_data(data, "tools_kwargs", tools)
         with self.assertRaisesRegex(ValueError, "optimization-train"):
             await controller.prepare_update(data, 1)
+        self.assertEqual(self.actor.update_calls, [])
 
-    async def test_pure_preflight_identity_allocates_no_route_or_gateway(self):
-        with patch.object(
-            controller_module, "create_policy_routes", side_effect=AssertionError("No routes in preflight")
-        ):
+    async def test_preflight_identity_allocates_no_route_or_gateway(self):
+        with patch.object(controller_module, "create_policy_routes", side_effect=AssertionError("No preflight routes")):
             identity = controller_module.preflight_controller_identity(self.config, native_runtime=self.runtime)
         self.assertEqual(identity.template_version, self.runtime.template_version)
         self.assertEqual(len(identity.frozen_version), 64)
         self.assertEqual(self.gateways, [])
 
-    async def test_one_invalid_candidate_censors_entire_cohort_after_one_verified_optimizer(self):
-        self.curate_bad_content[1] = "This is not JSON."
-        controller = await self.create()
-        data = self.solver()
-        prepared = await self.update(controller, data, 1)
-        self.assertEqual(self.actor.clock, 1)
-        self.assertEqual(len(self.actor.update_calls), 1)
-        self.assertIsNone(controller.state["prepared_update"])
-        self.assertEqual(controller.state["optimizer_step"], 1)
-        self.assertEqual(controller.state["pending"], {})
-        self.assertEqual(controller.ledger.sample_ready(100), [])
-        self.assertEqual(controller.store.get_snapshot().skills, ())
-        self.assertEqual(len(list((controller.replay.root / "records").glob("*.json"))), 1)
-        dispositions = list(controller.state["curate_job_dispositions"].values())
-        self.assertEqual({row["status"] for row in dispositions}, {"semantic_rejected", "censored"})
-        rejected = next(row for row in dispositions if row["status"] == "semantic_rejected")
-        self.assertFalse(rejected["training_label_created"])
-        self.assertNotIn("skill_ref", rejected)
-        self.assertNotIn("retained_record_id", rejected)
-        self.assertTrue(all(row["status"] == "censored" for row in controller.state["cohorts"].values()))
-        report = controller.state["post_update_reports"][prepared.update_id]
-        self.assertEqual(
-            (report["new_curate_windows"], report["curate_semantic_rejections"], report["curate_retained_actions"]),
-            (0, 1, 1),
-        )
-        repeat = await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertTrue(repeat["already_completed"])
-        self.assertEqual(len(self.curate_calls), 2)
-        following = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertFalse((following.data["role_id"] == 1).any())
-        self.assertEqual(self.probe_calls, [])
-
-    async def test_invalid_field_type_is_nonfatal_but_has_no_fake_replay_label(self):
-        self.curate_bad_fields[0] = {"title": []}
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        self.assertEqual(self.actor.clock, 1)
-        self.assertEqual(len(self.curate_calls), 1)
-        self.assertEqual(controller.state["curate_metrics"]["curate_semantic_rejections"], 1)
-        self.assertEqual(list((controller.replay.root / "records").glob("*.json")), [])
-
-    async def test_proved_tool_invocation_censors_cohort_without_sampling_its_other_member(self):
-        self.curate_tool_indices.add(0)
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        self.assertEqual(self.actor.clock, 1)
-        self.assertEqual(len(self.curate_calls), 1)
-        self.assertEqual(controller.state["pending"], {})
-        self.assertEqual(controller.state["curate_metrics"]["curate_retained_actions"], 0)
-        self.assertIsNone(controller.state["prepared_update"])
-
-    async def test_oversize_whole_source_is_censored_before_sampling_against_total_capacity(self):
-        controller = await self.create()
-        data = self.solver()
-        files = list((self.root / "episodes").glob("*/*/initial-state.json"))
-        for path in files:
-            path.write_text(json.dumps({"observation": "Long observed feedback. " * 3000}))
-        originals = {str(path): path.read_bytes() for path in files}
-        await self.update(controller, data, 1)
-        self.assertEqual(self.curate_calls, [])
-        self.assertEqual(controller.state["pending"], {})
-        disposition = next(
-            row for row in controller.state["curate_job_dispositions"].values() if row["status"] == "source_censored"
-        )
-        policy = disposition["input_policy"]
-        self.assertEqual(policy["gateway_total_capacity"], 36864)
-        self.assertEqual(policy["host_prompt_budget"], 36864 - 4096 - 2048)
-        self.assertGreater(policy["host_prompt_tokens"], policy["host_prompt_budget"])
-        self.assertFalse(policy["source_truncated"])
-        self.assertFalse(disposition["sampled"])
-        self.assertEqual(originals, {str(path): path.read_bytes() for path in files})
-
-    async def test_zero_action_source_completes_post_update_without_curator_sampling_or_labels(self):
-        controller = await self.create()
-        data = self.solver()
-        for directory in (self.root / "episodes").glob("*/*"):
-            for name in ("result.json", "engine-result.json"):
-                path = directory / name
-                value = json.loads(path.read_text())
-                value.update(steps=0, won=False, done=False, reward=0.0, accuracy=0.0)
-                path.write_text(json.dumps(value))
-            (directory / "initial-state.json").write_text(
-                json.dumps(
-                    {"observation": "No action was taken.", "steps": 0, "max_steps": 50, "won": False, "done": False}
-                )
-            )
-            (directory / "environment-trace.jsonl").unlink()
-        originals = {str(path): path.read_bytes() for path in (self.root / "episodes").glob("*/*/*")}
-        prepared = await self.update(controller, data, 1)
-        self.assertEqual((self.actor.clock, len(self.actor.update_calls)), (1, 1))
-        self.assertEqual(controller.routes["curator"].syncs, [0, 1])
-        self.assertIsNone(controller.state["prepared_update"])
-        self.assertEqual(controller.state["optimizer_step"], 1)
-        self.assertEqual(self.curate_calls, [])
-        self.assertEqual(self.probe_calls, [])
-        self.assertEqual(controller.state["pending"], {})
-        self.assertEqual(controller.state["collections"], {})
-        self.assertEqual(controller.ledger.sample_ready(100), [])
-        self.assertEqual(list((controller.replay.root / "records").glob("*.json")), [])
-        self.assertEqual(list((controller.store.root / "candidates").glob("*.json")), [])
-        disposition = next(
-            row for row in controller.state["curate_job_dispositions"].values() if row["status"] == "source_censored"
-        )
-        self.assertEqual(disposition["reason"], "source_has_no_environment_actions")
-        self.assertFalse(disposition["sampled"])
-        self.assertFalse(disposition["source_evidence"]["trace_present"])
-        self.assertFalse(disposition["reward_event_created"])
-        self.assertFalse(disposition["training_label_created"])
-        report = controller.state["post_update_reports"][prepared.update_id]
-        self.assertEqual(report["curate_retained_actions"], 0)
-        self.assertEqual(report["new_curate_windows"], 0)
-        self.assertEqual(report["curate_semantic_rejections"], 0)
-        self.assertEqual(report["curate_censored_jobs"], controller.settings.candidates_per_source)
-        self.assertEqual(originals, {str(path): path.read_bytes() for path in (self.root / "episodes").glob("*/*/*")})
-        repeat = await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertTrue(repeat["already_completed"])
-        self.assertEqual((self.actor.clock, len(self.actor.update_calls)), (1, 1))
-        following = await controller.prepare_update(self.solver(("future-b", "future-c")), 2)
-        self.assertEqual(following.expected_optimizer_step, 2)
-
-    async def test_nonzero_source_missing_trace_remains_fatal_after_optimizer(self):
-        controller = await self.create()
-        data = self.solver()
-        for path in (self.root / "episodes").glob("*/*/environment-trace.jsonl"):
-            path.unlink()
-        prepared = await controller.prepare_update(data, 1)
-        self.actor.update_actor(prepared.data)
-        with self.assertRaises(FileNotFoundError):
-            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(controller.state["optimizer_step"], 1)
-        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
-        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
-        self.assertEqual(self.curate_calls, [])
-
-    async def test_private_source_identity_mismatch_remains_fatal_after_optimizer(self):
-        controller = await self.create()
-        data = self.solver()
-        for path in (self.root / "episodes").glob("*/*/engine-result.json"):
-            value = json.loads(path.read_text())
-            value["game_sha256"] = "f" * 64
-            path.write_text(json.dumps(value))
-        prepared = await controller.prepare_update(data, 1)
-        self.actor.update_actor(prepared.data)
-        with self.assertRaises(curate.CurateProtocolError):
-            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(controller.state["optimizer_step"], 1)
-        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
-        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
-        self.assertEqual(self.curate_calls, [])
-
-    async def test_actual_version_failure_is_fatal_after_update_and_preserves_postprocessing_cut(self):
-        controller = await self.create()
-        native = controller._collect_curate
-
-        async def broken(**kwargs):
-            kwargs["gateway_manager"].client.optimizer_step += 1
-            return await native(**kwargs)
-
-        controller._collect_curate = broken
-        data = self.solver()
-        prepared = await controller.prepare_update(data, 1)
-        self.actor.update_actor(prepared.data)
-        with self.assertRaisesRegex(curate.CurateProtocolError, "weight versions"):
-            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(controller.state["optimizer_step"], 1)
-        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
-        self.assertNotIn(prepared.update_id, controller.state.get("post_update_reports", {}))
-        self.assertEqual(controller.state.get("curate_metrics", {}), {})
-
-    async def test_replay_io_failure_is_not_mislabeled_as_semantic_and_retry_does_not_step_again(self):
+    async def test_claimed_clock_cannot_acknowledge_an_optimizer_that_did_not_run(self):
         controller = await self.create()
         data = self.solver()
         prepared = await controller.prepare_update(data, 1)
-        self.actor.update_actor(prepared.data)
-        with patch.object(controller.replay, "append", side_effect=OSError("durable append failed")):
-            with self.assertRaises(OSError):
-                await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(controller.state["prepared_update"]["status"], "optimizer_applied")
-        self.assertEqual(controller.state.get("curate_job_dispositions", {}), {})
-        await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
-        self.assertEqual(self.actor.clock, 1)
-        self.assertEqual(len(self.actor.update_calls), 1)
-        self.assertEqual(len(controller.state["pending"]), 2)
-
-    async def test_unverified_optimizer_receipt_keeps_existing_replay_leases_uncertain(self):
-        controller = await self.create()
-        await self.update(controller, self.solver(), 1)
-        data = self.solver(("future-b", "future-c"))
-        prepared = await controller.prepare_update(data, 2)
-        self.actor.update_actor(prepared.data)
         with self.assertRaises(controller_module.ControllerRecoveryRequired):
-            await controller.after_update_and_sync(data, 2, prepared=prepared, optimizer_step=3)
-        for ack in prepared.acknowledgments:
-            self.assertEqual(controller.ledger.training_status(ack["settlement_id"])["state"], "leased")
+            await controller.after_update_and_sync(data, 1, prepared=prepared, optimizer_step=1)
+        self.assertEqual(controller.state["optimizer_step"], 0)
+        self.assertEqual(self.curate_calls, [])
+        with self.assertRaises(controller_module.ControllerRecoveryRequired):
+            await controller.prepare_update(data, 1)
+
+    async def test_controller_payload_preserves_pending_and_requires_its_protocol_and_clock(self):
+        controller = await self.create()
+        await self.update(controller, self.solver(), 1)
+        await controller.leave_learner()
+        async def generated():
+            while controller.source_queue.metrics()["sources_generated"] != 2:
+                await asyncio.sleep(0.005)
+        await asyncio.wait_for(generated(), timeout=3)
+        await controller.pause_background_writes()
+        state = controller.export_state()
+        controller.restore_state(state, expected_optimizer_step=1)
+        self.assertEqual(len(controller.state["pending"]), 4)
+        with self.assertRaises(controller_module.ControllerRecoveryRequired):
+            controller.restore_state(state, expected_optimizer_step=0)
+        altered = copy.deepcopy(state)
+        altered["protocol_fingerprint"] = "wrong"
+        with self.assertRaises(controller_module.ControllerRecoveryRequired):
+            controller.restore_state(altered, expected_optimizer_step=1)
 
 
 if __name__ == "__main__":

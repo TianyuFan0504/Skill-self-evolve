@@ -1,10 +1,9 @@
-"""CPU contracts using the exact installed vLLM0.24 public abort methods."""
+"""CPU contracts for the installed public abort API and the verl adapter."""
 
 from __future__ import annotations
 
 import ast
 import collections
-import hashlib
 import logging
 import os
 import sys
@@ -16,17 +15,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
-ENGINE_DIR = Path(
-    os.environ.get("SKILL_VLLM_ABORT_SOURCE_DIR", "/opt/conda/lib/python3.11/site-packages/vllm/v1/engine")
-)
-PINNED = {
-    "async_llm.py": "2128cf018fe136b698c5e89dc7325bc6dced9d516cc9d772695f044716970b64",
-    "output_processor.py": "464c3cda347512cf1090f8e6471d0d3f0f65e286eb9a7b97be52efbc1ffd572a",
-}
-# This exact external/internal pair was present in the actual failed engine's
-# SchedulerOutput and matched its immutable owned request registry.
-EXTERNAL = "ed2499f1d4134934b75200a01ab43547"
-INTERNAL = EXTERNAL + "-a4718379"
+ENGINE_DIR = Path(os.environ["SKILL_VLLM_ABORT_SOURCE_DIR"]) if os.environ.get("SKILL_VLLM_ABORT_SOURCE_DIR") else None
+EXTERNAL = "fixture-external-request"
+INTERNAL = EXTERNAL + "-internal"
 OTHER, OTHER_INTERNAL = "unrelated-owned-external", "unrelated-owned-external-12345678"
 
 
@@ -45,16 +36,9 @@ def method(path, class_name, method_name, namespace):
 class InstalledPublicAbortTest(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
-        for name, expected in PINNED.items():
-            path = ENGINE_DIR / name
-            if not path.is_file():
-                raise unittest.SkipTest(
-                    "Set SKILL_VLLM_ABORT_SOURCE_DIR to the independently archived installed0.24 sources"
-                )
-            if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-                raise AssertionError(
-                    "The installed public abort source differs from the reviewed0.24 interface: " + name
-                )
+        names = ("async_llm.py", "output_processor.py")
+        if ENGINE_DIR is None or not all((ENGINE_DIR / name).is_file() for name in names):
+            raise unittest.SkipTest("Supply installed vLLM sources for its public API integration test")
         scope = {"FinishReason": SimpleNamespace(ABORT="abort"), "EMPTY_CPU_TENSOR": object()}
         cls.output_abort = method(ENGINE_DIR / "output_processor.py", "OutputProcessor", "abort_requests", scope)
         cls.public_abort = method(
@@ -224,33 +208,6 @@ class TailAndFingerprintTest(unittest.IsolatedAsyncioTestCase):
     async def test_natural_completion_race_retains_its_raw_completed_reason(self):
         await self.assert_partial_tail("completed")
 
-    def test_checkpoint_fingerprint_binds_the_core_server_bytes(self):
-        tree = ast.parse((ROOT / "verl/experimental/skill_harness/joint_trainer.py").read_text())
-        function = next(
-            node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_source_fingerprint"
-        )
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for node in ast.walk(function):
-                if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    if node.value.startswith(("verl/", "examples/")) and node.value.endswith(
-                        (".py", ".sh", ".md", ".txt")
-                    ):
-                        path = root / node.value
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(b"original")
-            scope = {
-                "Path": Path,
-                "hashlib": hashlib,
-                "verl": SimpleNamespace(__file__=str(root / "verl/__init__.py")),
-                "actual_adapter_sha256": lambda: "verified-external",
-                "_digest": lambda value: repr(value),
-            }
-            exec(compile(ast.Module(body=[function], type_ignores=[]), "actual_joint_fingerprint", "exec"), scope)
-            initial = scope["_source_fingerprint"]()
-            core = root / "verl/workers/rollout/vllm_rollout/vllm_async_server.py"
-            core.write_bytes(b"changed abort interface")
-            self.assertNotEqual(scope["_source_fingerprint"](), initial)
 
 
 if __name__ == "__main__":

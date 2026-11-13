@@ -1,97 +1,105 @@
-# ALFWorld Skill Self-Evolution Training
+# Joint skill self-evolution
 
-## Objective and acceptance
+## Training path
 
-Train Qwen3.5-4B through the official Uni-Agent Gateway and the native Codex
-agent, using `/workspace/verl-0.9.1` as the training framework. The benchmark
-root is `/root/nas_chaohuang/benchmarks/alfworld/data/json_2.1.1`.
+`examples/skill_self_evolve/run.sh` selects the installed Python interpreter.
+Its thin `scripts/launch.py` forwards the joint YAML and Hydra overrides to
+`verl.experimental.skill_harness.train`. That module supplies one custom
+TaskRunner to the official `verl.trainer.main_ppo.run_ppo` entry. The TaskRunner
+creates one `SkillJointSyncTrainer`.
 
-Completion requires a real training run and a reproducible comparison showing
-increased reward and accuracy under the same evaluation protocol. A successful
-import, a synthetic episode, a nonzero gradient, or an improved training reward
-alone does not establish this result. Unsuccessful experiments remain part of
-the experiment record.
+The rollout adapter delegates native agent execution to Uni-Agent. Codex runs
+the agent loop, and its session-scoped Responses Gateway records the local
+model's generated token IDs, action masks and behavior log probabilities.
+ALFWorld owns game state and the authoritative `won` reward. Training consumes
+the original generated tokens, rather than decoding and re-encoding actions.
 
-## Required invariants
+## One online learner
 
-1. Run the real Uni-Agent CodexAgent, with Qwen3.5-4B as its local policy.
-2. Train and curate only from the official train split. Create development
-   partitions from train; reserve valid_seen and valid_unseen for testing.
-3. Preserve the environment's authoritative `won` result as task reward and
-   accuracy. Never replace environment outcomes with model self-assessments.
-4. Keep generated model tokens, masks, and actual behavior log probabilities
-   from the Gateway. Do not decode and re-encode generated actions for training.
-5. Treat every episode attempt as a unique session, even when its game is
-   repeated by GRPO or across epochs. Record relative path and content hash;
-   numeric catalog indices are not stable benchmark identities.
-6. Use one online parameter set and optimizer for solver and curate losses.
-   The curator sampling replica receives parameter EMA only.
-7. Archive curate actions durably before short-lived TransferQueue data can be
-   cleared. Preserve the original EMA behavior probabilities unchanged.
-8. Bind every rollout group to an immutable skill snapshot and rendered
-   context. Skill retrieval happens in the host context builder, not in the
-   dataset loader.
-9. Collect delayed credit with a fixed, versioned evaluator and exposure
-   protocol. Keep actual live-solver ROI distinct from reference credit.
-10. Recover model, optimizer, EMA, skill snapshots, replay, credit ledger, and
-    update cursors from the same completed joint checkpoint.
-11. Perform all external downloads, GitHub fetches, and pushes on the local
-    workstation. Transfer code and artifacts over SSH; never place GitHub
-    credentials on the server.
-12. Keep prompts, technical documentation, commit descriptions, and artifact
-    schemas in English. Preserve complete trajectories and failed-run evidence.
+The online parameters and optimizer minimize
 
-## Extension strategy
+```text
+L_online = L_solver_GRPO + lambda_curate * L_curate_replay
+```
 
-Use the documented `agent_loop_manager_class`, custom Task, TaskRunner, trainer
-hooks, actor-worker subclass, and public `set_loss_fn` RPC. Preserve the standard
-solver GRPO path. Do not replace the working core with Uni-Agent's vendored
-development copy of verl.
+Solver rows retain the normal GRPO objective and rollout correction. Curator
+rows use their own action mask, settled signed advantage and recorded sampling
+probabilities. Both losses update the same online parameters in the joint
+learner. The separate curator sampling replica receives parameter EMA updates;
+it has no optimizer or backward pass. A separate frozen evaluator supplies a
+stable policy for counterfactual skill tests.
 
-The native Codex process calls a session-scoped Responses Gateway. The Gateway
-collects token-level trajectories and forwards generation to the local policy.
-The ALFWorld service owns world state and rewards; the agent only receives the
-game interface and its allowed observations.
+## Skill creation and delayed credit
 
-The online learner computes `L_solver + lambda_curate * L_curate`. The solver
-uses task outcome rewards. The curate branch uses settled counterfactual utility
-minus declared costs, with role-specific masks and explicit off-policy handling.
-The EMA replica never receives backward calls or an independent optimizer.
+1. Each accepted logical solver episode enters the source queue once, even if
+   its trajectory spans several transport segments.
+2. The EMA curator sees the recorded episode context and either proposes one
+   reusable skill or explicitly abstains. The complete sampled action, mask,
+   context and original behavior log probabilities are persisted before
+   temporary transport data can disappear.
+3. The host retrieves skills from immutable SkillStore snapshots and injects
+   bounded guidance into later original ALFWorld tasks. Each rollout group
+   records the snapshot and rendered context it actually used.
+4. The credit workers compare the same later task with and without the
+   candidate skill. They hold the evaluator policy, other skills and task setup
+   fixed. A credit window settles only after the configured exposure and delay
+   requirements are met; censored observations remain distinguishable from
+   observed failures.
+5. The settled counterfactual utility, less declared costs, labels the original
+   curator action. Delayed replay applies bounded importance correction and
+   explicit replay-age limits before the joint learner consumes that action.
 
-## Module sequence
+Action importance correction addresses the recorded curator sampling policy.
+It does not fully correct changes in the live solver, retriever, task
+population or library. Clipping and replay limits are practical approximations;
+a positive paired estimate is not a claim of improved full benchmark accuracy.
 
-| Module | Result | Verification |
-| --- | --- | --- |
-| Benchmark bridge | Complete catalog, isolated train/dev/test rows, repeatable native Codex tasks | Stable IDs, split isolation, unique attempt directories, engine reward provenance |
-| Solver training recipe | Uni-Agent + native Codex + Qwen3.5-4B through core 0.9.1 | Import provenance, real Gateway tokens, one training update, matching-protocol baseline |
-| Skill storage and loading | Immutable snapshots, bounded host injection, producer/consumer lineage | Atomic publication, branch isolation, actual injected token accounting |
-| EMA policy route | Separate online and EMA replica versions | EMA numerical update, correct export, no accidental online overwrite |
-| Delayed credit and replay | Durable actions, idempotent usage events, mature credit | Delayed reward linkage, negative/zero records, restart consistency |
-| Role-aware learner | Solver and curate losses update the online model | Per-role gradients, actual parameter changes, genuine behavior correction |
-| Training and evaluation | Saved runs and increased reward/accuracy | Fixed protocol, development-only selection, untouched final test comparison |
+## Data and final evaluation
 
-Commit and push each completed module independently. Each commit records what
-changed and what was actually tested. The local workstation relays the server's
-offline commits to the configured GitHub repository.
+Only official train tasks enter optimization. Development tasks are held-out
+training scenes. Official `valid_seen` and `valid_unseen` games remain reserved
+for the final trained-policy evaluation. No generated task chains are needed.
+Catalog identities, dataset splits and token/sampling metadata are checked for
+consistency because they define the learning and evaluation observations.
 
-## Reward and causal scope
+Final evaluation runs after a completed trained joint checkpoint. Background
+curation and credit generation stop, and evaluation pins the trained policy and
+final library snapshot. It uses greedy single-sample validation on each
+complete official test split, with no optimizer updates or skill publication.
+The environment backend and interpreter are explicit deployment configuration.
+A separate test-only service is routed through the existing task interface and
+the training service configuration is restored on exit. Raw case outcomes are
+reconciled with the recorded validation metrics.
 
-For a skill S, compare the same downstream task with S and without S, keeping
-other skills, evaluator policy, environment state, and evaluation protocol fixed.
-Record the difference, sample count, costs, and uncertainty. Deduplicate usage
-events before aggregating a credit window. Unobserved or censored skills are not
-automatically failures.
+## Runtime and persistence
 
-Reference credit trains a curator conditional objective on recorded contexts.
-Action importance ratios do not correct every change in the live solver,
-retriever, task distribution, and library. Clip, rejection, and replay limits
-are conservative approximations, not guarantees for arbitrarily old actions.
+The runtime-provider interface separates the learning algorithm from the
+host's process isolation and cleanup mechanism. A deployment explicitly selects
+an importable provider and its settings. The optional Linux account provider
+uses a provisioned roster and configured workspace/read roots. The generic
+process-based ALFWorld backend and idempotent `alfworld-step` client provide the
+environment transport; they are not alternate training entry points.
 
-## Artifacts
+Joint checkpoints bind the online model, optimizer, EMA clock and weights,
+skill snapshots, replay, credit ledger, source queue and loader progress at one
+consistent cut. Run outputs also preserve native/Gateway trajectories,
+environment outcomes, skill decisions, paired outcomes, losses and
+`metrics.jsonl`. Plots derive from those raw series. Deployment-specific host
+histories and source-code fingerprint receipts are outside the training path.
 
-Every run writes a manifest, source commit and dirty-state record, data and
-protocol hashes, task configuration, model/policy versions, environment actions,
-Codex events, Gateway token trajectories, rollout rewards, per-role losses,
-resource telemetry, checkpoints, and machine-readable metric series. Curves are
-derived from those saved series. No credentials or private runtime tokens belong
-in the repository or experiment exports.
+## Module responsibilities
+
+| Module | Responsibility |
+| --- | --- |
+| `train.py`, `joint_trainer.py`, `joint_worker.py` | Official trainer integration and joint update lifecycle |
+| `framework.py`, `group_sampler.py`, `alfworld/task.py`, `alfworld/runner.py` | Skill-aware rollout, complete-group refill and native Task execution |
+| `context.py`, `store.py` | Immutable skill snapshots and bounded host retrieval |
+| `controller.py`, `source_queue.py`, `curate.py` | Background source review and EMA curator actions |
+| `probes.py`, `credit.py` | Frozen paired evaluation and delayed credit windows |
+| `replay.py`, `replay_batch.py`, `losses.py` | Durable action replay and joint objective |
+| `ema.py`, `ema_worker.py`, `policy_routes.py` | Parameter EMA and separate generation routes |
+| `joint_checkpoint.py`, `evaluation.py` | Consistent joint state and final trained-only evaluation |
+| `telemetry.py`, `scripts/plot_metrics.py` | Recorded metrics and plots |
+
+See the [recipe](../../examples/skill_self_evolve/README.md) and
+[deployment requirements](environment.md) for configuration.

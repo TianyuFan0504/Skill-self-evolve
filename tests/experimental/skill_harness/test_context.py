@@ -373,15 +373,12 @@ class ContextTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "integrity check"):
             context.pin_prompt_group(self.fields(), **kwargs)
 
-    def test_adapter_baseline_delegates_original_config_without_tokenizer(self):
-        config = SimpleNamespace(skill_harness={"mode": "solver_baseline", "loading": {"enabled": False}})
-        with patch.object(framework, "_tokenizer_version", side_effect=AssertionError("Baseline must not load skills")):
+    def test_disabled_loading_uses_the_original_adapter_configuration(self):
+        config = SimpleNamespace(skill_harness={"loading": {"enabled": False}})
+        with patch.object(framework, "_tokenizer_version", side_effect=AssertionError("Disabled loading")):
             adapter = framework.SkillAwareRolloutAdapter.create(config=config, llm_client="native-client")
         self.assertIs(adapter.native_create_kwargs["config"], config)
         self.assertEqual(adapter.native_create_kwargs["llm_client"], "native-client")
-        config.skill_harness["loading"]["enabled"] = True
-        with self.assertRaisesRegex(ValueError, "solver_baseline"):
-            framework.SkillAwareRolloutAdapter.create(config=config)
 
     def test_token_callback_estimates_and_non_integer_ids_are_rejected(self):
         self.publish()

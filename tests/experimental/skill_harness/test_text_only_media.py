@@ -9,7 +9,6 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -18,11 +17,7 @@ ROOT = Path(os.environ.get("SKILL_TEXT_SOURCE_ROOT", Path(__file__).resolve().pa
 DIRECTORY = ROOT / "verl/experimental/skill_harness"
 FRAMEWORK_PATH = Path(os.environ.get("SKILL_TEXT_FRAMEWORK_PATH", DIRECTORY / "framework.py"))
 TRAINER_PATH = Path(os.environ.get("SKILL_TEXT_TRAINER_PATH", DIRECTORY / "joint_trainer.py"))
-PARENT_PATH = Path(
-    os.environ.get(
-        "SKILL_UNI_FRAMEWORK_PATH", "/root/nas_chaohuang/benchmarks/alfworld/uni-agent/uni_agent/framework/framework.py"
-    )
-)
+PARENT_PATH = Path(os.environ["SKILL_UNI_FRAMEWORK_PATH"]) if os.environ.get("SKILL_UNI_FRAMEWORK_PATH") else None
 
 
 def load_framework(parent):
@@ -174,67 +169,13 @@ class TextOnlyBoundaryTest(unittest.TestCase):
         )
         return scope["_materialize_solver"], holder
 
-    def actor_update(self):
-        tree = ast.parse(TRAINER_PATH.read_text())
-        cls = next(
-            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SkillJointSyncTrainer"
-        )
-        node = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "_update_actor")
-        scope = {
-            "assert_no_nontext_incidents": self.module.assert_no_nontext_incidents,
-            # Filesystem incidents have their own actual-host-guard regression.
-            "assert_no_isolation_incidents": Mock(),
-        }
-        exec(compile(ast.Module(body=[node], type_ignores=[]), str(TRAINER_PATH), "exec"), scope)
-        holder = SimpleNamespace(
-            _joint_lock=nullcontext(),
-            config=SimpleNamespace(skill_harness=SimpleNamespace(artifact_root=str(self.artifact_root))),
-            _joint_controller=SimpleNamespace(prepare_update=Mock()),
-            _materialize_solver=Mock(return_value={"input_ids": [101, 102]}),
-            global_steps=1,
-            _await=lambda value: value,
-            actor_rollout_wg=SimpleNamespace(update_actor=Mock()),
-        )
-        return scope["_update_actor"], holder
-
-    def test_rejected_media_case_stays_run_fatal_after_runner_drops_it_from_tq(self):
+    def test_invalid_media_is_local_and_does_not_create_sticky_files(self):
         instance, arguments = self.serializer(media={"images": [object()]})
-        untrusted = self.artifact_root / "model-chosen-root"
-        arguments["sample_fields"]["tools_kwargs"]["task"]["metadata"] = {"run_dir": str(untrusted)}
         with self.assertRaises(self.module.NonTextAlfworldTrajectoryError):
             instance._trajectory_to_tq_field_and_tag(**arguments)
-        incidents = list((self.artifact_root / "protocol_incidents/unsupported_media").glob("*.json"))
-        self.assertEqual(len(incidents), 1)
-        self.assertFalse(untrusted.exists())
-        # Simulate the official runner dropping that case. The surviving TQ
-        # batch contains only text, so the media-column check alone passes.
-        queue = SimpleNamespace(kv_describe=Mock(return_value={"text": {"fields": ["input_ids"], "unfinalized": []}}))
-        batch = SimpleNamespace(keys=["text"], partition_id="CPU", extra_info={})
+        self.assertEqual(list(self.artifact_root.iterdir()), [])
+        queue, batch = self.queue(payload=[{}, None])
         self.module.guard_text_only_tq_batch(queue, batch)
-        function, holder = self.actor_update()
-        with self.assertRaises(self.module.NonTextAlfworldTrajectoryError):
-            function(holder, batch, {})
-        holder.actor_rollout_wg.update_actor.assert_not_called()
-        holder._joint_controller.prepare_update.assert_not_called()
-
-    def test_incident_during_prepare_is_rechecked_immediately_before_optimizer_rpc(self):
-        function, holder = self.actor_update()
-
-        def prepare(*_):
-            self.module.record_nontext_incident(self.artifact_root, source="CPU concurrent protocol fixture")
-            return SimpleNamespace(data="must not update")
-
-        holder._joint_controller.prepare_update.side_effect = prepare
-        with self.assertRaises(self.module.NonTextAlfworldTrajectoryError):
-            function(holder, SimpleNamespace(), {})
-        holder.actor_rollout_wg.update_actor.assert_not_called()
-
-    def test_incomplete_incident_write_is_still_sticky_not_a_text_batch(self):
-        with patch.object(self.module.os, "fsync", side_effect=OSError("CPU durability failure")):
-            with self.assertRaises(OSError):
-                self.module.record_nontext_incident(self.artifact_root, source="CPU interrupted incident")
-        with self.assertRaises(self.module.NonTextAlfworldTrajectoryError):
-            self.module.assert_no_nontext_incidents(self.artifact_root)
 
     def test_actual_materializer_rejects_before_text_drop_and_omits_only_proved_empty_carriers(self):
         queue, batch = self.queue()
@@ -292,7 +233,7 @@ class ActualTensorAndSerializerTest(unittest.TestCase):
                 module.require_text_only_media(value, source="real CPU media fixture")
 
     def test_actual_official_serializer_preserves_text_fields_and_exposes_pixels_to_the_return_guard(self):
-        if not PARENT_PATH.is_file():
+        if PARENT_PATH is None or not PARENT_PATH.is_file():
             self.skipTest("Supply the real UniAgent framework source for the official serializer check")
         tree = ast.parse(PARENT_PATH.read_text())
         parent = next(

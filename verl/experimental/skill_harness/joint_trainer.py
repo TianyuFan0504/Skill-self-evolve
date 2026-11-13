@@ -19,6 +19,7 @@ updates/restores abort startup/training; no lease is cleared on a timeout.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
@@ -33,18 +34,17 @@ import ray
 import torch
 from omegaconf import open_dict
 
-import verl
 from verl.trainer.ppo.checkpoint_callback import CheckpointCallback
 from verl.trainer.ppo.utils import Role
+from verl.trainer.ppo.v1.trainer_sync import PPOTrainerSync
 from verl.utils import tensordict_utils as tu
+from verl.utils.import_utils import load_class_from_fqn
 from verl.utils.metric import Metric
 from verl.utils.transferqueue_utils import tq
 
-from .alfworld.accounts import assert_no_isolation_incidents
 from .controller import SkillJointController, preflight_controller_identity
 from .framework import (
     TEXT_ONLY_MEDIA_FIELDS,
-    assert_no_nontext_incidents,
     guard_text_only_tq_batch,
     require_text_only_media,
 )
@@ -58,8 +58,7 @@ from .joint_worker import JointEMAActorRolloutRefWorker
 from .policy_routes import fingerprint_model
 from .replay_batch import required_solver_fields
 from .store import SkillStore
-from .trainer import SkillSyncTrainer
-from .uniagent_compat import actual_adapter_sha256
+from .telemetry import append_metrics, episode_metrics
 
 CALLBACK_FQN = "verl.experimental.skill_harness.joint_trainer.SkillJointCheckpointCallback"
 
@@ -79,26 +78,6 @@ def ordered_layout_fingerprint(rows, world_size):
         raise RuntimeError("Online layout metadata world/layout mismatch")
     return _digest([{key: row[key] for key in ("worker_rank", "world_size", "layout_fingerprint")}
                     for row in ordered])
-
-
-def _source_fingerprint():
-    root = Path(verl.__file__).resolve().parent.parent
-    paths = list((root / "verl/experimental/skill_harness").rglob("*.py"))
-    paths.extend(root / relative for relative in (
-        "verl/workers/engine_workers.py", "verl/workers/utils/losses.py", "verl/workers/utils/padding.py",
-        "verl/workers/engine/base.py", "verl/workers/engine/fsdp/transformer_impl.py",
-        "verl/workers/rollout/vllm_rollout/vllm_async_server.py",
-        "verl/utils/checkpoint/fsdp_checkpoint_manager.py", "verl/trainer/ppo/v1/trainer_base.py",
-        "verl/trainer/ppo/v1/trainer_sync.py", "verl/trainer/ppo/core_algos.py",
-        "examples/skill_self_evolve/scripts/codex_entrypoint.sh",
-        "examples/skill_self_evolve/scripts/launch.py",
-        "examples/skill_self_evolve/prompts/solver_system.md",
-        "examples/skill_self_evolve/prompts/solver_task.txt",
-    ))
-    payload = [(path.relative_to(root).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
-               for path in sorted(set(paths))]
-    payload.append(("external/uni_agent/gateway/adapters/openai_response.py", actual_adapter_sha256()))
-    return _digest(payload)
 
 
 async def _resolve(value):
@@ -146,8 +125,8 @@ def normalize_actor_metrics(output):
     return result
 
 
-class SkillJointSyncTrainer(SkillSyncTrainer):
-    supported_modes = ("skill_joint",)
+class SkillJointSyncTrainer(PPOTrainerSync):
+    """One synchronous solver/curator optimizer with EMA and delayed replay."""
 
     def __init__(self, config):
         self._joint_lock = threading.RLock()
@@ -158,8 +137,12 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         self._joint_identity = None
         self._joint_compatibility = None
         self._joint_restored = None
-        self._joint_deferred_controller = None
         self._joint_coordinator = JointCheckpointCoordinator()
+        self._background_stopped = False
+        self._final_evaluation_enabled = False
+        self._final_checkpoint_seal = None
+        self.artifact_root = Path(config.skill_harness.artifact_root)
+        self.artifact_root.mkdir(parents=True, exist_ok=True)
         self._validate_joint_config(config)
         callback = config.trainer.get("checkpoint_callback_class")
         if callback not in (None, CALLBACK_FQN):
@@ -168,12 +151,12 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             config.trainer.checkpoint_callback_class = CALLBACK_FQN
         super().__init__(config)
         if self.use_critic:
-            raise ValueError("The initial joint harness requires solver GRPO without a critic optimizer")
+            raise ValueError("Joint training requires solver GRPO without a critic optimizer")
 
     @staticmethod
     def _validate_joint_config(config):
-        if config.skill_harness.mode != "skill_joint" or config.trainer.v1.trainer_mode != "sync":
-            raise ValueError("Joint skill training requires the synchronous skill_joint mode")
+        if config.trainer.v1.trainer_mode != "sync" or config.algorithm.adv_estimator != "grpo":
+            raise ValueError("Joint training requires synchronous solver GRPO")
         ema = config.skill_harness.ema
         if not ema.enabled or ema.get("update_every", 1) != 1:
             raise ValueError("Joint training requires EMA after every observed optimizer update")
@@ -239,10 +222,6 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         return self._joint_identity
 
     def _compatibility(self):
-        if self._joint_compatibility is not None:
-            bound = self._joint_compatibility.get("versions", {}).get("uni_agent_adapter")
-            if bound is not None and bound != actual_adapter_sha256():
-                raise RuntimeError("Uni-Agent adapter changed after checkpoint compatibility was initialized")
         if self._joint_compatibility is None:
             identity = self._identity()
             ema = self.config.skill_harness.ema
@@ -252,9 +231,7 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             layout = ordered_layout_fingerprint(ranks, self.actor_rollout_wg.world_size)
             self._joint_compatibility = {
                 "world_size": self.actor_rollout_wg.world_size, "layout_fingerprint": layout,
-                "versions": {"code": _source_fingerprint(), "verl": verl.__version__,
-                             "uni_agent_adapter": actual_adapter_sha256(),
-                             "model": fingerprint_model(self.config.actor_rollout_ref.model.path)["fingerprint"],
+                "versions": {"model": fingerprint_model(self.config.actor_rollout_ref.model.path)["fingerprint"],
                              "tokenizer": identity.tokenizer_version, "template": identity.template_version},
                 "evaluator_fingerprint": identity.frozen_version, "protocol_fingerprint": identity.protocol_fingerprint,
             }
@@ -299,6 +276,8 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         with self._joint_lock:
             if self._joint_controller is not None:
                 raise RuntimeError("The joint controller cannot be initialized twice")
+            if self.global_steps > self.total_training_steps:
+                return super().on_train_begin()
             identity = self._identity()
             self._joint_controller = self._await(SkillJointController.create(
                 self, native_runtime=identity.runtime, restored_state=self._joint_restored,
@@ -306,9 +285,62 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
             if (self._joint_controller.protocol_fingerprint != identity.protocol_fingerprint
                     or self._joint_controller.frozen_version != identity.frozen_version):
                 raise RuntimeError("The live controller differs from the checkpoint compatibility preflight")
-            # Parent's official initial tests run only after dedicated routes and
-            # immutable evaluator/curator identities have been established.
             super().on_train_begin()
+
+    def _compute_metrics(self, batch, metrics, timing_raw, global_steps, epoch):
+        super()._compute_metrics(batch, metrics, timing_raw, global_steps, epoch)
+        fields = tq.kv_batch_get(
+            keys=batch.keys,
+            partition_id=batch.partition_id,
+            select_fields=["uid", "session_id", "rm_scores", "extra_fields"],
+        )
+        uids = tu.get(fields, "uid")
+        sessions = tu.get(fields, "session_id")
+        scores = fields["rm_scores"].to_padded_tensor(0.0).sum(dim=-1).tolist()
+        extras = tu.get(fields, "extra_fields")
+        rows = []
+        for i, (uid, session, score, extra) in enumerate(zip(uids, sessions, scores, extras, strict=True)):
+            info = extra.get("reward_extra_info", {})
+            if "acc" not in info:
+                raise RuntimeError("Native ALFWorld runner did not provide authoritative TaskResult.accuracy")
+            rows.append(
+                {
+                    "uid": uid,
+                    "session_id": session,
+                    "reward": score,
+                    "accuracy": info["acc"],
+                    "error": info.get("error"),
+                    "padding": batch.tags[i].get("is_padding", False),
+                }
+            )
+        metrics.update(episode_metrics(rows))
+        for key in ("actor/grad_norm", "actor/pg_loss"):
+            value = metrics.get(key)
+            if value is not None and not math.isfinite(float(value)):
+                raise FloatingPointError(f"Nonfinite optimizer metric: {key}={value}")
+        append_metrics(self.artifact_root, step=global_steps, phase="train", metrics=metrics)
+
+    def get_llm_client(self):
+        terminal = self.config.skill_harness.get("terminal", {})
+        if not terminal.get("enabled", False):
+            return super().get_llm_client()
+        from .alfworld.backend_terminal import TerminalAwareLLMServerClient
+
+        return self.llm_server_manager.get_client(
+            client_cls=TerminalAwareLLMServerClient,
+            binding_root=terminal.get("binding_root", str(self.artifact_root / "terminal_bindings")),
+        )
+
+    def _validate(self):
+        metrics = super()._validate()
+        append_metrics(
+            self.artifact_root,
+            step=self.global_steps,
+            phase=getattr(self, "_evaluation_phase", "dev"),
+            stage=getattr(self, "_evaluation_stage", None),
+            metrics=metrics,
+        )
+        return metrics
 
     def _materialize_solver(self, batch):
         guard_text_only_tq_batch(tq, batch, artifact_root=self.config.skill_harness.artifact_root)
@@ -343,14 +375,10 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
 
     def _update_actor(self, batch, metrics):
         with self._joint_lock:
-            assert_no_isolation_incidents(self.config.skill_harness.artifact_root)
-            assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             if self._joint_controller is None:
                 raise RuntimeError("Joint controller must be initialized before any optimizer update")
             source = self._materialize_solver(batch)
             prepared = self._await(self._joint_controller.prepare_update(source, self.global_steps))
-            assert_no_isolation_incidents(self.config.skill_harness.artifact_root)
-            assert_no_nontext_incidents(self.config.skill_harness.artifact_root)
             output = self._await(self.actor_rollout_wg.update_actor(prepared.data))
             actual = self._ema_clock()
             if actual != prepared.expected_optimizer_step:
@@ -377,18 +405,40 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
                         metrics["skill/" + key] = value
             return batch  # Parent metrics and cleanup retain ONLY the original solver KVBatchMeta.
 
+    def _stop_background(self):
+        if self._joint_controller is not None and not getattr(self, "_background_stopped", False):
+            self._await(self._joint_controller.stop_background())
+            self._background_stopped = True
+
+    def _checkpoint_seal(self, checkpoint):
+        spec = checkpoint.payload["spec"]
+        return {
+            "optimizer_step": spec["optimizer_step"],
+            "checkpoint_step": spec["global_step"],
+            "checkpoint_dir": checkpoint.checkpoint_dir,
+            "manifest_id": checkpoint.manifest_id,
+            "snapshot_id": checkpoint.payload["snapshots"]["skill_heads"]["main"],
+        }
+
     def _save_checkpoint(self):
-        # The post-save callback alone is too late to fence a concurrent actor
-        # update. Hold the same lock around the native model/data save as well.
+        # The native model/optimizer save and joint state share the learner fence.
         with self._joint_lock:
+            final = (getattr(self, "_final_evaluation_enabled", False)
+                     and self.global_steps >= self.total_training_steps)
+            if final:
+                self._stop_background()
             controller = self._joint_controller
-            was_active = True
+            was_active = None
             if controller is not None:
                 was_active = self._await(controller.pause_background_writes())
             try:
-                return super()._save_checkpoint()
+                result = super()._save_checkpoint()
+                if final:
+                    self._final_checkpoint_seal = self._checkpoint_seal(self._last_joint_checkpoint)
+                    self._assert_final_seal()
+                return result
             finally:
-                if controller is not None:
+                if controller is not None and not getattr(self, "_background_stopped", False):
                     self._await(controller.resume_background_writes(was_active))
 
     def _load_checkpoint(self):
@@ -425,15 +475,10 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
                 raise JointCheckpointError("The synchronous joint trainer expects its complete dataloader state")
             self.train_dataloader.load_state_dict(torch.load(paths[0], weights_only=False, map_location="cpu"))
 
-        def load_controller(payload, *, expected_optimizer_step):
-            if payload["optimizer_step"] != expected_optimizer_step:
-                raise JointCheckpointError("Deferred controller restore clock mismatch")
-            self._joint_deferred_controller = payload
-
         restored = self._joint_coordinator.restore(
             checkpoint.checkpoint_dir, expected=expected, destination_root=destination,
             load_online=load_online, load_ema=load_ema, load_training_state=load_training,
-            load_controller=load_controller, fence=lambda: self._joint_lock,
+            fence=lambda: self._joint_lock,
         )
         with open_dict(self.config.skill_harness):
             self.config.skill_harness.store_root = str(restored.skill_store.root)
@@ -442,35 +487,101 @@ class SkillJointSyncTrainer(SkillSyncTrainer):
         self._joint_restored = restored
         self.global_steps = restored.checkpoint.payload["spec"]["global_step"]
 
+    def _assert_final_seal(self):
+        seal = self._final_checkpoint_seal
+        if seal is None or seal["optimizer_step"] <= 0:
+            raise RuntimeError("Final evaluation requires a completed trained joint checkpoint")
+        if self._ema_clock() != seal["optimizer_step"] or self._joint_store.head() != seal["snapshot_id"]:
+            raise RuntimeError("The policy or library changed after the final joint checkpoint")
+
+    def _pinned_validation_manager(self, snapshot_id):
+        config = copy.deepcopy(self.config)
+        with open_dict(config.skill_harness.loading):
+            config.skill_harness.loading.snapshot_id = snapshot_id
+        manager_class = load_class_from_fqn(
+            config.actor_rollout_ref.rollout.agent.agent_loop_manager_class, "AgentLoopManager",
+        )
+        return manager_class.create(
+            config=config,
+            llm_client=self.get_llm_client(),
+            teacher_client=self.get_teacher_client(),
+            reward_loop_worker_handles=self.get_reward_handles(),
+        )
+
+    def _evaluate_final(self):
+        from .evaluation import evaluate_official_splits
+
+        self._assert_final_seal()
+        self.agent_loop_manager = self._pinned_validation_manager(self._final_checkpoint_seal["snapshot_id"])
+        lifecycle = {
+            "schema_version": 1,
+            "kind": "quiescent_final_evaluation",
+            **self._final_checkpoint_seal,
+            "evaluation_step": self.global_steps,
+            "background_stopped_before_test_service": True,
+        }
+        root = self.artifact_root / "evaluation" / "final"
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / "lifecycle.json").open("x", encoding="utf-8") as stream:
+            json.dump(lifecycle, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        self._init_dump_executor()
+        try:
+            evaluate_official_splits(self)
+            self._assert_final_seal()
+            with (root / "complete.json").open("x", encoding="utf-8") as stream:
+                json.dump({**lifecycle, "optimizer_updates_during_test": 0}, stream, indent=2, sort_keys=True)
+                stream.write("\n")
+        finally:
+            self._shutdown_dump_executor()
+
+    def _shutdown_joint_services(self):
+        errors = []
+        try:
+            self._stop_background()
+        except BaseException as error:
+            errors.append(error)
+        if self._joint_controller is not None:
+            for name in ("ema_gateway", "frozen_gateway"):
+                gateway = getattr(self._joint_controller, name, None)
+                if gateway is not None:
+                    try:
+                        self._await(gateway.shutdown())
+                        setattr(self._joint_controller, name, None)
+                    except BaseException as error:
+                        errors.append(error)
+        if errors:
+            raise errors[0]
+
     def fit(self, agent_loop_manager):
         try:
-            return super().fit(agent_loop_manager)
+            self._final_evaluation_enabled = self.config.skill_harness.get("evaluation", {}).get("final", False)
+            self._final_checkpoint_seal = None
+            if self._final_evaluation_enabled:
+                root = self.artifact_root / "evaluation" / "final"
+                if root.exists() and any(root.iterdir()):
+                    raise FileExistsError("Completed or partial final evaluation artifacts already exist")
+                if self._joint_restored is not None:
+                    self._final_checkpoint_seal = self._checkpoint_seal(self._joint_restored.checkpoint)
+            result = super().fit(agent_loop_manager)
+            self._shutdown_joint_services()
+            if self._final_evaluation_enabled:
+                self._evaluate_final()
+            return result
         finally:
             primary_error = sys.exc_info()[1]
-            cleanup_errors = []
             try:
-                if self._joint_controller is not None:
-                    try:
-                        self._await(self._joint_controller.stop_background())
-                    except BaseException as error:
-                        cleanup_errors.append(error)
-                    for name in ("ema_gateway", "frozen_gateway"):
-                        gateway = getattr(self._joint_controller, name, None)
-                        if gateway is not None:
-                            try:
-                                self._await(gateway.shutdown())
-                            except BaseException as error:
-                                cleanup_errors.append(error)
+                self._shutdown_joint_services()
+            except BaseException as error:
+                if primary_error is None:
+                    raise
+                if hasattr(primary_error, "add_note"):
+                    primary_error.add_note("Background cleanup also failed: " + repr(error))
             finally:
                 if self._joint_loop.is_running():
                     self._joint_loop.call_soon_threadsafe(self._joint_loop.stop)
                     self._joint_thread.join()
                 self._joint_loop.close()
-            if cleanup_errors:
-                if primary_error is None:
-                    raise cleanup_errors[0]
-                if hasattr(primary_error, "add_note"):
-                    primary_error.add_note("Background cleanup also failed: " + repr(cleanup_errors[0]))
 
 
 class SkillJointCheckpointCallback(CheckpointCallback):

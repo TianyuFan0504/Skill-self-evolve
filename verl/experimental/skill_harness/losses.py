@@ -319,14 +319,9 @@ def role_aware_ppo_loss(
             "actor/pg_clipfrac_lower": ((pessimistic > dual_bound) & (adv < 0) & solver_mask)
             .sum().detach() * metric_scale,
         })
-        if solver_policy_loss is not None:
-            solver_loss, _ = solver_policy_loss(old, solver_current, adv, solver_mask, weights)
-        else:
-            dual = torch.minimum(dual_bound, pessimistic)
-            values = torch.where(adv < 0, dual, pessimistic)
-            if weights is not None:
-                values = values * weights
-            solver_loss = _aggregate_solver(values, solver_mask, normalization, solver_config)
+        if solver_policy_loss is None:
+            raise ValueError("The solver objective must be supplied by verl's policy-loss callback")
+        solver_loss, _ = solver_policy_loss(old, solver_current, adv, solver_mask, weights)
         solver_pg_loss = solver_loss
         if entropy is not None:
             entropy_values = _active_tensor(entropy, solver_mask, "entropy")

@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import importlib
-import importlib.util
-import logging
-import os
 import sys
 import tempfile
 import types
@@ -21,95 +17,56 @@ package = types.ModuleType(PACKAGE)
 package.__path__ = [str(ROOT)]
 sys.modules[PACKAGE] = package
 probes = importlib.import_module(PACKAGE + ".probes")
-SOURCE = Path(os.environ["UNI_AGENT_SOURCE_ROOT"]) if os.environ.get("UNI_AGENT_SOURCE_ROOT") else None
+accounts = importlib.import_module(PACKAGE + ".alfworld.accounts")
 
 
-def official_class(path, original, methods, *, namespace):
-    """Execute unchanged lifecycle method bodies without importing Ray/HTTP."""
-    tree = ast.parse(path.read_text(), filename=str(path))
-    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == original)
-    selected = [node for node in cls.body if isinstance(node, ast.AsyncFunctionDef) and node.name in methods]
-    if len(selected) != len(methods):
-        raise AssertionError("Installed public Gateway lifecycle API changed")
-    fixture = ast.ClassDef(name=original, bases=[], keywords=[], body=selected, decorator_list=[])
-    module = ast.fix_missing_locations(ast.Module(body=[fixture], type_ignores=[]))
-    exec(compile(module, str(path), "exec"), namespace)
-    return namespace[original]
+class Trajectory:
+    def __init__(self, **fields):
+        self.__dict__.update(dict(finished=False, reward=0.0, accuracy=0.0, extra_fields={}), **fields)
 
 
-def installed_lifecycle_manager(session_id, rows, *, before_finalize=None):
-    """Use the pinned real Trajectory and three actual public lifecycle layers."""
-    spec = importlib.util.spec_from_file_location(
-        PACKAGE + "._official_types", SOURCE / "uni_agent/gateway/session/types.py"
+def lifecycle_manager(session_id, rows, *, before_finalize=None):
+    """Exercise capture against the public async lifecycle interface only."""
+    session = types.SimpleNamespace(
+        handle=types.SimpleNamespace(
+            session_id=session_id, base_url="http://127.0.0.1:1/sessions/" + session_id + "/v1"
+        ),
+        request_lock=asyncio.Lock(),
+        phase="ACTIVE",
+        materialized_chains=[types.SimpleNamespace(order_seq=i, trajectory=row) for i, row in enumerate(rows)],
     )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    namespace = {
-        "SessionPhase": types.SimpleNamespace(ACTIVE="ACTIVE", ABORTED="ABORTED", FINALIZED="FINALIZED"),
-        "Trajectory": module.Trajectory,
-        "logger": logging.getLogger(__name__),
-    }
-    session_cls = official_class(
-        SOURCE / "uni_agent/gateway/session/session.py", "GatewaySession", {"finalize", "abort"}, namespace=namespace
-    )
-    actor_cls = official_class(
-        SOURCE / "uni_agent/gateway/gateway.py",
-        "_GatewayActor",
-        {"finalize_session", "abort_session"},
-        namespace=namespace,
-    )
-    manager_cls = official_class(
-        SOURCE / "uni_agent/gateway/manager.py",
-        "GatewayManager",
-        {"finalize_session", "abort_session"},
-        namespace=namespace,
-    )
-    session = session_cls()
-    session.handle = module.SessionHandle(session_id, "http://127.0.0.1:1/sessions/" + session_id + "/v1")
-    session.request_lock = asyncio.Lock()
-    session.phase = "ACTIVE"
-    session.active_chains = []
-    session.materialized_chains = [types.SimpleNamespace(order_seq=i, trajectory=row) for i, row in enumerate(rows)]
-    session.reserved_chain_ids = set()
-    session._coalesced_request_count = session._rollback_count = 0
-    session._touch = lambda: None
-    session._materialize_active_chains = lambda: None
-    actor = actor_cls()
-    actor._sessions = {session_id: session}
-    actor._session_policies = {session_id: "frozen"}
-    actor._get_session = lambda identity: actor._sessions[identity]
     calls = []
-
-    async def finalize(**kwargs):
-        calls.append("finalize")
-        if before_finalize:
-            before_finalize()
-        return await actor.finalize_session(**kwargs)
-
-    async def abort(**kwargs):
-        calls.append("abort")
-        return await actor.abort_session(**kwargs)
-
-    remote = types.SimpleNamespace(
-        finalize_session=types.SimpleNamespace(remote=finalize),
-        abort_session=types.SimpleNamespace(remote=abort),
-    )
-    manager = manager_cls()
-    manager._session_to_gateway_index = {session_id: 0}
-    manager.active_sessions_per_gateway = [1]
-    manager._get_gateway = lambda identity: (remote, manager._session_to_gateway_index[identity])
+    manager = types.SimpleNamespace(_session_to_gateway_index={session_id: 0}, active_sessions_per_gateway=[1])
 
     async def create(identity, **kwargs):
         if identity != session_id:
             raise AssertionError("Unexpected session")
         return session.handle
 
-    manager.create_session = create
-    return manager, session, module.Trajectory, calls
+    async def finalize(identity):
+        calls.append("finalize")
+        if before_finalize:
+            before_finalize()
+        async with session.request_lock:
+            if session.phase == "ABORTED":
+                raise RuntimeError("The session was aborted")
+            result = [row.trajectory for row in session.materialized_chains]
+            session.phase = "FINALIZED"
+            manager._session_to_gateway_index.pop(identity, None)
+            manager.active_sessions_per_gateway[0] = 0
+            return result
+
+    async def abort(identity):
+        calls.append("abort")
+        async with session.request_lock:
+            session.phase = "ABORTED"
+            manager._session_to_gateway_index.pop(identity, None)
+            manager.active_sessions_per_gateway[0] = 0
+
+    manager.create_session, manager.finalize_session, manager.abort_session = create, finalize, abort
+    return manager, session, Trajectory, calls
 
 
-@unittest.skipIf(SOURCE is None, "Set UNI_AGENT_SOURCE_ROOT to the verified offline UniAgent source")
 class NativeFailureCaptureTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -121,7 +78,7 @@ class NativeFailureCaptureTests(unittest.IsolatedAsyncioTestCase):
             "frozen_model_version": "b" * 64,
             "model_fingerprint": "b" * 64,
             "model_path": "/models/frozen",
-            "lifecycle_id": "actual-source-CPU-fixture",
+            "lifecycle_id": "public-lifecycle-CPU-fixture",
         }
         self.sample = {
             "raw_prompt": [{"role": "user", "content": "Original task"}],
@@ -131,9 +88,7 @@ class NativeFailureCaptureTests(unittest.IsolatedAsyncioTestCase):
         }
 
     def manager(self, *, empty=False, before_finalize=None):
-        manager, session, trajectory, calls = installed_lifecycle_manager(
-            "session_1", [], before_finalize=before_finalize
-        )
+        manager, session, trajectory, calls = lifecycle_manager("session_1", [], before_finalize=before_finalize)
         row = trajectory(
             prompt_ids=[10, 20],
             response_ids=[30, 40, 50],
@@ -166,18 +121,18 @@ class NativeFailureCaptureTests(unittest.IsolatedAsyncioTestCase):
     def payload(self, name):
         return probes._read_payload(self.root / name)
 
-    async def test_actual_public_finalize_preserves_real_type_tokens_mu_and_original_cause(self):
+    async def test_public_finalize_preserves_token_fields_and_original_cause(self):
         def before_finalize():
-            self.assertEqual(self.payload("native-failure.json")["error"]["type"], "AccountIsolationError")
+            self.assertEqual(self.payload("native-failure.json")["error"]["type"], "IsolationError")
 
         manager, _, row, calls = self.manager(before_finalize=before_finalize)
         cause = RuntimeError("owned backend drain remained unknown")
-        primary = probes.AccountIsolationError("Task isolation failed")
+        primary = accounts.IsolationError("Task isolation failed")
 
         async def runner(**kwargs):
             raise primary from cause
 
-        with self.assertRaises(probes.AccountIsolationError) as caught:
+        with self.assertRaises(accounts.IsolationError) as caught:
             await self.run_branch(manager, runner)
         self.assertIs(caught.exception, primary)
         self.assertIs(primary.__cause__, cause)
@@ -264,7 +219,7 @@ class NativeFailureCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((self.root / "native-failure-capture.json").is_file())
         self.assertTrue(any("disk full" in note for note in primary.__notes__))
 
-    async def test_normal_success_retains_official_token_payload_and_no_failure_files(self):
+    async def test_normal_success_retains_token_payload_and_no_failure_files(self):
         manager, _, row, calls = self.manager()
 
         async def runner(**kwargs):
@@ -316,7 +271,7 @@ class PairPrimaryPreservationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.request = types.SimpleNamespace(window_id="window_1", probe_id="probe_1")
-        self.cleanup_error = probes.AccountIsolationError("UID remains quarantined")
+        self.cleanup_error = accounts.IsolationError("UID remains quarantined")
 
         def finish(*args, **kwargs):
             raise self.cleanup_error
@@ -340,7 +295,7 @@ class PairPrimaryPreservationTests(unittest.TestCase):
         self.assertNotIn("private CPU fixture", str(payload))
 
     def test_cleanup_alone_is_fatal(self):
-        with self.assertRaises(probes.AccountIsolationError) as caught:
+        with self.assertRaises(accounts.IsolationError) as caught:
             with probes._pair_account_scope(self.root, request=self.request, run_root=self.root, pool=self.pool):
                 pass
         self.assertIs(caught.exception, self.cleanup_error)

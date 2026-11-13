@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -70,6 +72,8 @@ class EvaluationProtocolTest(unittest.TestCase):
         }
         self.manifest_path = self.data / "split_manifest.json"
         self.write_manifest()
+        self.backend = self.run / "backend.py"
+        self.backend.write_text("# Explicit backend fixture\n")
         self.config = self.run / "environment.json"
         self.config.write_text(
             json.dumps(
@@ -80,12 +84,16 @@ class EvaluationProtocolTest(unittest.TestCase):
                     "catalog_digest": self.digest,
                     "allowed_splits": ["train"],
                     "max_steps": 50,
+                    "budget_seconds": 900,
+                    "action_request_protocol": evaluation.ACTION_REQUEST_PROTOCOL,
                 }
             )
             + "\n"
         )
         self.config.chmod(0o600)
-        self.environment_patch = patch.dict(evaluation.os.environ, {"ALFWORLD_SERVER_CONFIG": str(self.config)})
+        self.environment_patch = patch.dict(evaluation.os.environ, {
+            "ALFWORLD_SERVER_CONFIG": str(self.config), "ALFWORLD_ENV_PYTHON": "ENV-PYTHON",
+        })
         self.environment_patch.start()
         self.addCleanup(self.environment_patch.stop)
 
@@ -104,7 +112,10 @@ class EvaluationProtocolTest(unittest.TestCase):
                     val_batch_size=16,
                 ),
                 trainer=Options(validation_data_dir="dev-output", log_val_generations=5),
-                skill_harness=Options(split_manifest=str(self.manifest_path), artifact_root=str(self.run)),
+                skill_harness=Options(
+                    split_manifest=str(self.manifest_path), artifact_root=str(self.run),
+                    evaluation=Options(server_script=str(self.backend), server_args=[]),
+                ),
                 actor_rollout_ref=SimpleNamespace(
                     rollout=SimpleNamespace(
                         val_kwargs=Options(evaluation.GREEDY_SETTINGS),
@@ -123,6 +134,7 @@ class EvaluationProtocolTest(unittest.TestCase):
             on_validate_begin=Mock(),
             on_validate_end=Mock(),
             _dump_futures=[Mock()],
+            _assert_final_seal=Mock(),
         )
         trainer._validate = Mock(return_value={"val-core/alfworld/acc/mean@1": 0.5})
         return trainer
@@ -145,12 +157,17 @@ class EvaluationProtocolTest(unittest.TestCase):
             catalog_path=self.catalog,
             digest=self.digest,
             environment_python="ENV-PYTHON",
+            environment_server=self.backend,
+            environment_args=["--environment-processes", "2", "--io-workers", "1"],
         )
 
     def fake_process_factory(self, *, ready):
         processes = []
 
         def start(argv, **kwargs):
+            self.assertEqual(argv[0:2], ["ENV-PYTHON", str(self.backend)])
+            self.assertIn("--budget-seconds", argv)
+            self.assertEqual(argv[-4:], ["--environment-processes", "2", "--io-workers", "1"])
             self.assertTrue(kwargs["start_new_session"])
             self.assertTrue(kwargs["close_fds"])
             process = Mock(pid=456, returncode=0)
@@ -167,6 +184,8 @@ class EvaluationProtocolTest(unittest.TestCase):
                             "catalog_digest": self.digest,
                             "allowed_splits": ["valid_seen", "valid_unseen"],
                             "max_steps": 50,
+                            "budget_seconds": 900,
+                            "action_request_protocol": evaluation.ACTION_REQUEST_PROTOCOL,
                         }
                     )
                 )
@@ -245,6 +264,60 @@ class EvaluationProtocolTest(unittest.TestCase):
         processes[0].terminate.assert_called_once()
         self.assertEqual(self.config.read_bytes(), before)
 
+    def test_real_configured_backend_routes_final_tests_and_preserves_provider(self):
+        self.backend.write_text('''
+import argparse, json, os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+p = argparse.ArgumentParser()
+for field in ("benchmark-root", "run-root", "catalog-path", "config-path"):
+    p.add_argument("--" + field)
+p.add_argument("--allowed-splits", nargs="+")
+for field in ("max-steps", "budget-seconds", "port", "environment-processes", "io-workers"):
+    p.add_argument("--" + field, type=int)
+a = p.parse_args()
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(json.dumps(settings).encode())
+    def log_message(self, *_args):
+        pass
+
+server = HTTPServer(("127.0.0.1", a.port), Handler)
+settings = {
+    "url": "http://127.0.0.1:" + str(server.server_port),
+    "admin_token": "test-only-capability", "pid": os.getpid(), "ready": True,
+    "catalog_digest": json.loads(Path(a.catalog_path).read_text())["catalog_digest"],
+    "allowed_splits": a.allowed_splits, "max_steps": a.max_steps,
+    "budget_seconds": a.budget_seconds, "action_request_protocol": "alfworld-step-request-id-v1",
+}
+path = Path(a.config_path)
+path.write_text(json.dumps(settings))
+path.chmod(0o600)
+server.serve_forever()
+''')
+        training = json.loads(self.config.read_bytes())
+        training["account_pool"] = {"factory": "fixture:Pool", "kwargs": {"root": "fixture"}}
+        training["native_policy"] = {"instructions_file": str(self.run / "instructions.md"),
+                                     "disabled_features": ["fixture_feature"]}
+        self.config.write_text(json.dumps(training))
+        original = self.config.read_bytes()
+        kwargs = self.service_kwargs()
+        kwargs["environment_python"] = sys.executable
+        with evaluation.official_test_service(**kwargs, startup_timeout=5):
+            routed = json.loads(self.config.read_bytes())
+            self.assertEqual(set(routed["allowed_splits"]), set(evaluation.TEST_SPLITS.values()))
+            self.assertEqual(routed["budget_seconds"], 900)
+            self.assertEqual(routed["account_pool"], training["account_pool"])
+            self.assertEqual(routed["native_policy"], training["native_policy"])
+            self.assertNotEqual(routed["pid"], training["pid"])
+        self.assertEqual(self.config.read_bytes(), original)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(routed["pid"], 0)
+
     def test_validation_context_restores_config_loader_and_phase_on_failure(self):
         trainer = self.trainer()
         trainer._evaluation_phase = "dev"
@@ -256,11 +329,11 @@ class EvaluationProtocolTest(unittest.TestCase):
                     path=self.data / "test_seen.parquet",
                     expected_games=2,
                     phase="test_seen",
-                    stage="initial",
+                    stage="final",
                     output_dir=self.run / "output",
                 ):
                     self.assertEqual(trainer._evaluation_phase, "test_seen")
-                    self.assertEqual(trainer._evaluation_stage, "initial")
+                    self.assertEqual(trainer._evaluation_stage, "final")
                     self.assertEqual(trainer.config.data.val_max_samples, -1)
                     self.assertEqual(trainer.config.trainer.log_val_generations, 0)
                     raise RuntimeError("failed validation")
@@ -294,16 +367,16 @@ class EvaluationProtocolTest(unittest.TestCase):
             patch.object(evaluation, "official_test_service", side_effect=service),
         ):
             with self.assertRaisesRegex(RuntimeError, "Official cases/scores are incomplete"):
-                evaluation.evaluate_official_splits(trainer, phase_prefix="initial")
-        self.assertEqual(phases, [("test_seen", "initial", 2)])
+                evaluation.evaluate_official_splits(trainer)
+        self.assertEqual(phases, [("test_seen", "final", 2)])
         self.assertEqual(verify.call_count, 2)
         self.assertEqual(trainer.on_validate_begin.call_count, 1)
         self.assertEqual(trainer.on_validate_end.call_count, 1)
         self.assertEqual(trainer._dump_futures[0].result.call_count, 1)
         self.assertIs(trainer.val_dataloader, original_loader)
         self.assertIs(trainer.agent_loop_manager, original_manager)
-        self.assertFalse((self.run / "evaluation/initial/summary.json").exists())
-        audit = next((self.run / "evaluation/initial/test_seen").glob("case-session-audit-*.json"))
+        self.assertFalse((self.run / "evaluation/final/summary.json").exists())
+        audit = next((self.run / "evaluation/final/test_seen").glob("case-session-audit-*.json"))
         self.assertFalse(json.loads(audit.read_text())["complete"])
         reports = "".join(path.read_text() for path in (self.run / "evaluation").rglob("*.json"))
         self.assertNotIn("TRAINING-SECRET", reports)
@@ -328,7 +401,7 @@ class EvaluationProtocolTest(unittest.TestCase):
         self.assertIs(trainer.config.data, original_data)
         self.assertIs(trainer.val_dataloader, original_loader)
         self.assertFalse(hasattr(trainer, "_evaluation_phase"))
-        self.assertFalse((self.run / "evaluation/initial/summary.json").exists())
+        self.assertFalse((self.run / "evaluation/final/summary.json").exists())
 
     def test_non_greedy_workers_are_rejected_before_service_start(self):
         trainer = self.trainer()
@@ -338,26 +411,14 @@ class EvaluationProtocolTest(unittest.TestCase):
                 evaluation.evaluate_official_splits(trainer)
         service.assert_not_called()
 
-    def test_final_evaluation_rejects_changed_baseline_budgets(self):
+    def test_evaluation_requires_completed_trained_checkpoint_before_service(self):
         trainer = self.trainer()
-        stage_root = self.run / "evaluation/initial"
-        stage_root.mkdir(parents=True)
-        _, catalog_path, files = evaluation._read_protocol(self.manifest_path)
-        dataset = {
-            "manifest_sha256": evaluation._sha256(self.manifest_path),
-            "catalog_digest": self.digest,
-            "catalog_sha256": evaluation._sha256(catalog_path),
-            "splits": {
-                phase: {key: value for key, value in spec.items() if key != "ids"} for phase, spec in files.items()
-            },
-        }
-        budgets = evaluation._budgets(trainer.config)
-        evaluation._write_report(stage_root / "protocol.json", {"dataset": dataset, "budgets": budgets})
-        trainer.config.actor_rollout_ref.rollout.response_length = 8192
+        trainer._assert_final_seal.side_effect = RuntimeError("A trained checkpoint is required")
         with patch.object(evaluation, "official_test_service") as service:
-            with self.assertRaisesRegex(ValueError, "initial test identities, prompts, and generation budgets"):
-                evaluation.evaluate_official_splits(trainer, phase_prefix="final")
+            with self.assertRaisesRegex(RuntimeError, "trained checkpoint"):
+                evaluation.evaluate_official_splits(trainer)
         service.assert_not_called()
+        self.assertFalse((self.run / "evaluation").exists())
 
     def test_dataset_filtering_cannot_hide_missing_official_cases(self):
         trainer = self.trainer()
@@ -370,7 +431,7 @@ class EvaluationProtocolTest(unittest.TestCase):
                     path=self.data / "test_seen.parquet",
                     expected_games=2,
                     phase="test_seen",
-                    stage="initial",
+                    stage="final",
                     output_dir=self.run / "output",
                 ):
                     self.fail("A partial official dataset must never be evaluated")

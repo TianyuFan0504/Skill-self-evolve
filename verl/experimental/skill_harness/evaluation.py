@@ -23,6 +23,7 @@ from pathlib import Path
 
 TEST_SPLITS = {"test_seen": "valid_seen", "test_unseen": "valid_unseen"}
 GREEDY_SETTINGS = {"n": 1, "do_sample": False, "temperature": 0.0, "top_p": 1.0, "top_k": -1}
+ACTION_REQUEST_PROTOCOL = "alfworld-step-request-id-v1"
 _MISSING = object()
 
 
@@ -138,7 +139,7 @@ def _verify_parquet_rows(path, **kwargs):
     _assert_test_rows(pq.read_table(path, columns=["extra_info"]).column("extra_info").to_pylist(), **kwargs)
 
 
-def _health(settings, *, digest, max_steps):
+def _health(settings, *, digest, max_steps, budget_seconds):
     from urllib.parse import urlsplit
 
     url = urlsplit(settings["url"])
@@ -146,7 +147,13 @@ def _health(settings, *, digest, max_steps):
         raise ValueError("The evaluation environment must be a local loopback service")
     with urllib.request.urlopen(settings["url"].rstrip("/") + "/health", timeout=1) as response:
         value = json.load(response)
-    return value.get("ready") is True and value.get("catalog_digest") == digest and value.get("max_steps") == max_steps
+    return (
+        value.get("ready") is True
+        and value.get("catalog_digest") == digest
+        and value.get("max_steps") == max_steps
+        and value.get("budget_seconds") == budget_seconds
+        and value.get("action_request_protocol") == ACTION_REQUEST_PROTOCOL
+    )
 
 
 def _stop_owned_service(process):
@@ -170,6 +177,8 @@ def official_test_service(
     catalog_path,
     digest,
     environment_python,
+    environment_server,
+    environment_args=(),
     startup_timeout=30.0,
 ):
     """Temporarily route native tasks to an owned test-only environment service.
@@ -198,12 +207,16 @@ def official_test_service(
         if set(training.get("allowed_splits", [])) != {"train"} or training.get("catalog_digest") != digest:
             raise ValueError("The original service must be train-only and use this immutable catalog")
         max_steps = int(training["max_steps"])
+        budget_seconds = int(training["budget_seconds"])
+        server_path = Path(environment_server).resolve()
+        if not server_path.is_file():
+            raise FileNotFoundError("Configure the installed ALFWorld environment backend script")
         runtime = Path(artifact_root) / ("service-" + uuid.uuid4().hex)
         runtime.mkdir(parents=True, mode=0o700)
         settings_path = runtime / "environment.json"
         argv = [
             str(environment_python),
-            str(Path(__file__).with_name("alfworld") / "server.py"),
+            str(server_path),
             "--benchmark-root",
             str(benchmark_root),
             "--run-root",
@@ -216,8 +229,11 @@ def official_test_service(
             *TEST_SPLITS.values(),
             "--max-steps",
             str(max_steps),
+            "--budget-seconds",
+            str(budget_seconds),
             "--port",
             "0",
+            *map(str, environment_args),
         ]
         with (runtime / "server.log").open("ab") as output:
             process = subprocess.Popen(
@@ -240,9 +256,13 @@ def official_test_service(
                         settings.get("catalog_digest") == digest
                         and set(settings.get("allowed_splits", [])) == set(TEST_SPLITS.values())
                         and settings.get("max_steps") == max_steps
+                        and settings.get("budget_seconds") == budget_seconds
+                        and settings.get("action_request_protocol") == ACTION_REQUEST_PROTOCOL
                         and settings.get("pid") == process.pid
                     )
-                    if compatible and _health(settings, digest=digest, max_steps=max_steps):
+                    if compatible and _health(
+                        settings, digest=digest, max_steps=max_steps, budget_seconds=budget_seconds,
+                    ):
                         break
                 except (OSError, ValueError, KeyError):
                     pass
@@ -250,9 +270,19 @@ def official_test_service(
                 raise TimeoutError("The owned evaluation service did not become healthy; training service is unchanged")
             time.sleep(0.1)
         # Tasks retain this exact path in existing Ray worker environments.
+        for key in ("account_pool", "native_policy"):
+            if key in training:
+                settings[key] = training[key]
+        settings_bytes = (json.dumps(settings) + "\n").encode()
         _atomic_bytes(config_path, settings_bytes, mode=original_mode)
         swapped = True
-        yield {"catalog_digest": digest, "max_steps": max_steps, "allowed_splits": list(TEST_SPLITS.values())}
+        yield {
+            "catalog_digest": digest,
+            "max_steps": max_steps,
+            "budget_seconds": budget_seconds,
+            "action_request_protocol": ACTION_REQUEST_PROTOCOL,
+            "allowed_splits": list(TEST_SPLITS.values()),
+        }
     finally:
         try:
             if swapped:
@@ -443,15 +473,13 @@ def _budgets(config):
     return budgets
 
 
-def evaluate_official_splits(trainer, *, phase_prefix="initial"):
-    """Evaluate complete official test splits without actor updates or curation.
-
-    The caller installs ``trainer.agent_loop_manager`` before an initial call
-    made ahead of the base trainer's ``fit``. Scheduled validation remains on the
-    train-derived development set because every temporary setting is restored.
-    """
-    if phase_prefix not in {"initial", "final"}:
-        raise ValueError("Official evaluation stage must be initial or final")
+def evaluate_official_splits(trainer):
+    """Evaluate the trained joint checkpoint on both complete official splits."""
+    seal_check = getattr(trainer, "_assert_final_seal", None)
+    if not callable(seal_check):
+        raise RuntimeError("Official tests require a completed trained joint checkpoint")
+    seal_check()
+    phase_prefix = "final"
     if getattr(trainer, "agent_loop_manager", None) is None:
         raise RuntimeError("Official tests require the already initialized native agent loop manager")
     harness = trainer.config.skill_harness
@@ -464,7 +492,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
     stage_root = artifact_root / "evaluation" / phase_prefix
     stage_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if (stage_root / "summary.json").exists():
-        raise FileExistsError(f"Completed {phase_prefix} test artifacts already exist; preserve the original baseline")
+        raise FileExistsError("Completed final test artifacts already exist")
     budgets = _budgets(trainer.config)
     dataset_protocol = {
         "manifest_sha256": _sha256(manifest_path),
@@ -472,12 +500,6 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
         "catalog_sha256": _sha256(catalog_path),
         "splits": {phase: {key: value for key, value in spec.items() if key != "ids"} for phase, spec in files.items()},
     }
-    if phase_prefix == "final":
-        initial_path = artifact_root / "evaluation/initial/protocol.json"
-        if initial_path.is_file():
-            initial = json.loads(initial_path.read_bytes())
-            if initial["dataset"] != dataset_protocol or initial["budgets"] != budgets:
-                raise ValueError("Final tests must retain the initial test identities, prompts, and generation budgets")
     for phase, spec in files.items():
         _verify_parquet_rows(
             spec["path"],
@@ -492,7 +514,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
             "schema_version": 1,
             "stage": phase_prefix,
             "global_step": trainer.global_steps,
-            "policy": "already_initialized_training_policy",
+            "policy": "final_trained_policy",
             "agent": "native_uni_agent_codex",
             "optimizer_updates": False,
             "curation": False,
@@ -509,10 +531,9 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
             run_root=run_root,
             catalog_path=catalog_path,
             digest=manifest["catalog_digest"],
-            environment_python=os.environ.get(
-                "ALFWORLD_ENV_PYTHON",
-                str(Path(manifest["benchmark_root"]) / "env/bin/python"),
-            ),
+            environment_python=os.environ["ALFWORLD_ENV_PYTHON"],
+            environment_server=_get(harness.evaluation, "server_script"),
+            environment_args=_get(harness.evaluation, "server_args", ()),
         ) as service:
             _write_report(stage_root / "environment-protocol.json", service)
             for phase, spec in files.items():
@@ -578,6 +599,7 @@ def evaluate_official_splits(trainer, *, phase_prefix="initial"):
             },
         )
         raise
+    seal_check()
     _write_report(
         stage_root / "summary.json",
         {

@@ -1,105 +1,118 @@
-# Training Environment and Offline Relay
+# Deployment requirements
 
-## Current instance
+## Installed dependencies
 
-The November 12 training instance exposes eight NVIDIA H100 80GB devices,
-104 CPU quota cores, and 1600 GiB of container memory. `/dev/shm` is 800 GiB
-and counts toward memory use. Large run artifacts and checkpoints belong on
-`/root/nas_chaohuang`, not the 49 GiB overlay root filesystem.
+Use one installed training environment for the driver and Ray workers, with
+verl, Uni-Agent, Torch, FSDP2, vLLM, Ray, TransferQueue, Hydra, PyArrow and the
+model/tokenizer dependencies. The environment-engine interpreter needs
+ALFWorld, TextWorld and aiohttp. Native Codex must be installed as an actual
+executable with readable package assets. The configured Uni-Agent version must
+support the native Codex agent, Responses Gateway trajectories, custom Task
+registration and the empty effective tool set used by the curator.
 
-The training interpreter is `/opt/conda/bin/python` (Python 3.11.13), with
-PyTorch 2.11.0+cu130, vLLM 0.24.0, Transformers 5.10.4, Ray 2.50.1,
-TransferQueue 0.1.12, and the editable core at `/workspace/verl-0.9.1`.
+Use `uv` to manage environments. Acquire source distributions, compatible
+Linux GPU wheels, model weights and benchmark data on the networked local Mac
+workstation, then transfer them to the Linux host. Prepare a complete wheelhouse
+for the target Python, operating system, GPU stack and architecture. For
+example, install transferred dependencies on the host without network access:
 
-Uni-Agent source is provided by the benchmark checkout. Its inference venv
-also exposes a different development version of verl. The runtime bootstrap
-appends same-ABI dependency packages without executing editable `.pth` files,
-pins actual imports to core 0.9.1, and applies the same setup in Ray workers.
-
-## H100 FlashAttention repair
-
-The previous FlashAttention 2.8.3.post2 extension contained native sm89 code
-for L40S and PTX 9.2. H100 fell back to PTX JIT, which driver 580 could not
-compile. All eight devices passed ordinary PyTorch bf16 matrix backward,
-but the original FlashAttention kernel failed.
-
-The exact cached 2.8.3.post2 source was rebuilt offline with the coherent
-CUDA 13.2 toolkit, `FLASH_ATTN_CUDA_ARCHS=90`,
-`TORCH_CUDA_ARCH_LIST=9.0`, `MAX_JOBS=16`, and `NVCC_THREADS=2`.
-Only the same-version FlashAttention wheel was installed with offline uv and
-no dependency resolution. PyTorch and vLLM were not replaced.
-
-Preview and fresh-process post-install validation passed with PTX JIT
-disabled: fp16/bf16 dense attention at head dimensions 64, 128 and 256, plus
-variable-length grouped-query attention matching Qwen3.5's 16 query heads,
-four KV heads and head dimension 256. All tested gradients were finite and
-nonzero. Maximum bf16 absolute error against fp32 SDPA was 0.00972.
-
-Installed extension SHA256:
-
-```text
-10f9001e45f397d05c51041c513f5d3695b2aad7ec428d225372bce414b14d74
+```bash
+uv venv --python 3.12 "$TRAINING_ENV"
+uv pip install --python "$TRAINING_ENV/bin/python" --offline --no-index \
+  --find-links "$WHEELHOUSE" -e '.[fsdp,vllm]' "$UNI_AGENT_WHEEL"
 ```
 
-Original package backups, exact source/wheel, build logs and repair evidence:
+Supply the environment and wheelhouse paths explicitly. The recipe neither
+installs dependencies nor alters another environment's `.pth` files. Set
+`TRAINING_PYTHON` to that environment's Python and ensure the same installed
+packages are available to each worker. Prepare engine dependencies in the
+explicit `ALFWORLD_ENV_PYTHON` environment in the same way.
 
-```text
-/root/nas_chaohuang/skill_training/environment/flash_attn_sm90_20261112_010608/
+## Data and service
+
+Prepare catalog and parquet files using
+`verl/experimental/skill_harness/alfworld/prepare_data.py`. The benchmark root
+must contain existing official games under `data`; preparation does not
+retrieve data or synthesize tasks. Use a fresh dataset output directory and the
+same durable run directory that the recipe will use. Preserve the full official
+test partitions for final evaluation.
+
+Start the backend as a separately managed deployment process, using your
+chosen interpreter and explicit paths:
+
+```bash
+"$ALFWORLD_ENV_PYTHON" "$ALFWORLD_ENV_SERVER" \
+  --benchmark-root "$ALFWORLD_BENCHMARK_ROOT" --run-root "$SKILL_RUN_DIR" \
+  --catalog-path "$ALFWORLD_DATA_DIR/catalog.json" \
+  --config-path "$ALFWORLD_SERVER_CONFIG" --allowed-splits train \
+  --environment-processes "$ENVIRONMENT_PROCESSES" --io-workers "$ENVIRONMENT_IO_WORKERS"
 ```
 
-This establishes H100 kernel compatibility, not successful distributed
-ALFWorld training. The native Uni-Agent/Codex training run is a separate gate.
+`ALFWORLD_ENV_SERVER` selects the generic
+`examples/skill_self_evolve/scripts/parallel_environment_server.py` backend.
+Its configuration file contains a loopback endpoint and administration
+capability; keep it readable only by the trusted training process. It advertises
+the action request-ID protocol used by the public request client. Publish
+`scripts/alfworld_request_client.py` as `alfworld-step` on the native agent's
+configured tool path. The runtime must provide that path and a compatible Python
+interpreter to agent commands.
 
-## Network boundary
+Final evaluation starts a separate test-only backend with the configured
+`skill_harness.evaluation.server_script` and optional `server_args`, using
+`ALFWORLD_ENV_PYTHON`. The backend preserves the training action limit and
+episode budget. Its endpoint is temporary; the existing training service is
+not replaced or terminated.
 
-All public downloads and GitHub operations run on the local workstation.
-Source archives, wheels and offline server commit bundles move over SSH.
-No GitHub credential is copied to the server. Internal loopback services
-and Ray/Gateway traffic remain inside the training instance.
-# Colocated solver weight synchronization
+## Native runtime provider
 
-The pinned synchronous V1 trainer explicitly uses the `naive` checkpoint
-manager for its colocated online solver replicas. Keep the recipe's solver
-checkpoint backend consistent with that manager. An `nccl` setting here eagerly
-initializes an unused optional transport in actor workers and can fail before
-rollout when CuPy is absent. The CPU preflight now validates the selected
-backend before launching model workers. Dedicated EMA curator transport uses
-its own separately configured checkpoint engine and must not reuse this route.
+`ALFWORLD_RUNTIME_CONFIG` is a trusted JSON document containing
+`account_pool.factory` and `account_pool.kwargs`. The factory is an importable
+provider implementing the native lifecycle in `alfworld/accounts.py`. It owns
+leases, process isolation, launch arguments, cleanup and capacity. Alternative
+deployments can provide another factory through this interface without adding
+a training entry point.
 
-The first native rollout exposed an intermediate public-runtime directory with
-mode 0700 under the host's restrictive umask. Runtime installation now makes
-only that public launcher directory traversable, and CPU preflight executes
-the actual wrapper as `alfworld_eval` to verify access before any model loads.
-It does not relax private benchmark, run or administration directories.
+The optional factory
+`examples.skill_self_evolve.runtime.linux_accounts:LinuxAccountPool` requires:
 
-Concurrent first-use GPU kernel compilation briefly filled the 49 GiB root
-filesystem. New runs put transient compiler files and Ray scratch in the large
-`/dev/shm` filesystem. The supervisor records GPU memory, utilization, power,
-host load and available disk every 15 seconds in `resources.jsonl`, and copies
-owned Ray logs back to the durable NAS run after training exits. Failed attempts
-and the append-only training log remain preserved.
+- `root`: absolute private registry directory;
+- `roster`: explicit existing non-root account names, UIDs and GIDs;
+- `work_root`: absolute native episode workspace root;
+- `read_roots`: public executable, package, instruction and tool paths needed by
+  the native agent.
+- `command_path`: executable search path containing the deployed `alfworld-step`
+  command and required system tools.
+- `launcher_path`: optional absolute public copy of `runtime/linux_accounts.py`
+  when leased accounts cannot read the checkout.
 
-## Frozen Qwen3.5 evaluation
+The recipe provider is imported from the checkout in the documented editable
+deployment. A standalone verl wheel does not include the `examples` namespace;
+wheel-only deployments must install a provider package and select its factory.
 
-The actual first joint launch showed that vLLM 0.24 rejects batch-invariant
-execution for Qwen3.5's `GDN_ATTN` backend. Both auxiliary routes therefore keep
-`full_determinism=false`. The frozen evaluator still uses immutable verified
-weights, temperature zero, and a declared per-request reference seed. Its
-protocol and route attestation record these settings. This does not promise
-bitwise invariance across different runtime batches.
+Provision the roster, directory ownership, required `setpriv` support and Linux
+Landlock/seccomp facilities before launch. Initialize this provider explicitly
+with `AccountPool().initialize()` during deployment setup. The harness does not
+create Unix users, select a UID range or infer a host account layout. The
+provider reuses only resources whose process and cleanup lifecycle completed.
 
-## Offline plotting dependencies
+Configure the curator's separate Unix account using `CURATOR_USER`, and its
+readable public-assets and work directories using `CURATOR_PUBLIC_ROOT` and
+`CURATOR_WORK_ROOT`. Solver and curator need access to their declared public
+assets and isolated work areas. Benchmark files, administration capabilities,
+other episodes and training checkpoints stay outside the agent's allowed
+native workspace. Configure `CODEX_NATIVE_BIN`, `ALFWORLD_CODEX_PACKAGE_ROOT`
+and the Uni-Agent task file with the actual installed locations.
+The protected environment service configuration may also declare
+`native_policy.instructions_file` and `native_policy.disabled_features`.
+The task uses the configured instructions directly, with
+`ALFWORLD_SOLVER_INSTRUCTIONS_FILE` as the explicit fallback, and preserves the
+actual native binary and Uni-Agent prompt transport.
 
-The base training interpreter originally lacked plotting support. Only six
-missing packages were added from workstation-downloaded Linux cp311 wheels:
-Matplotlib 3.11.2, contourpy 1.3.3, cycler 0.12.1, fonttools 4.68.0,
-kiwisolver 1.5.1, and pyparsing 3.3.3. Installation used offline/no-index/no-deps
-mode. All 371 preexisting package versions and metadata hashes were unchanged,
-including Torch, vLLM, Transformers and NumPy.
+## Configuration checks
 
-CPU Agg rendering and the unchanged metric exporter passed. PNG/SVG curves use
-the exact recorded observations; the failed baseline contains only one initial
-development score and therefore supplies no training-improvement evidence.
-Wheel, package and rendering evidence is retained at
-`/root/nas_chaohuang/skill_training/env/plotting_1794422702454`.
-
+The [recipe](../../examples/skill_self_evolve/README.md) lists required
+variables. Its CPU preflight checks dependency availability, resolves Hydra
+configuration and verifies input files and the provider declaration. It starts
+no agent, engine, model or optimizer. GPU count, memory, process limits and
+provider capacity must match the explicit rollout, curator and credit
+concurrency settings of the chosen deployment.

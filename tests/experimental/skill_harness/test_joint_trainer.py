@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib
 import importlib.util
 import os
 import sys
@@ -19,12 +20,22 @@ import unittest
 from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-from verl.experimental.skill_harness.bootstrap import configure_runtime
-
-configure_runtime(register_tasks=False)
+# Only the external framework base classes are absent in the CPU environment.
+# The tested controller, joint worker, optimizer and loss below remain real.
+try:
+    importlib.import_module("uni_agent")
+except ModuleNotFoundError:
+    entry, framework = ModuleType("uni_agent.framework.entry"), ModuleType("uni_agent.framework.framework")
+    entry.AgentFrameworkRolloutAdapter, framework.GatewayAgentFramework = object, object
+    sys.modules.update({entry.__name__: entry, framework.__name__: framework})
+    try:
+        importlib.import_module("verl.experimental.skill_harness.framework")
+    finally:
+        sys.modules.pop(entry.__name__)
+        sys.modules.pop(framework.__name__)
 
 import ray
 import torch
@@ -37,6 +48,7 @@ from verl.experimental.skill_harness.joint_checkpoint import JointCheckpointCoor
 from verl.experimental.skill_harness.joint_worker import JointEMATrainingWorker
 from verl.experimental.skill_harness.replay import CurateReplay
 from verl.experimental.skill_harness.replay_batch import _nested, _position_ids
+from verl.experimental.skill_harness.source_queue import SourceQueue
 from verl.experimental.skill_harness.store import SkillStore
 from verl.trainer.ppo.utils import Role
 from verl.utils import tensordict_utils as tu
@@ -56,8 +68,8 @@ SPEC.loader.exec_module(joint)
 
 def config(root):
     return OmegaConf.create({
-        "skill_harness": {"mode": "skill_joint", "artifact_root": str(root / "artifacts"),
-                          "store_root": str(root / "skills"), "evaluation": {"initial": False},
+        "skill_harness": {"artifact_root": str(root / "artifacts"),
+                          "store_root": str(root / "skills"), "evaluation": {"final": False},
                           "ema": {"enabled": True, "decay": 0.95, "update_every": 1, "buffer_policy": "copy"},
                           "curate_loss": {"coefficient": 0.1}, "joint": {}},
         "trainer": {"v1": {"trainer_mode": "sync"}, "max_actor_ckpt_to_keep": None,
@@ -232,9 +244,10 @@ class GatewayService:
 
 class CuratorRouteService:
     def __init__(self, config, events):
-        self.config, self.events = config, events
+        self.config, self.events, self.optimizer_step = config, events, 0
 
     async def sync_ema(self, step):
+        self.optimizer_step = step
         self.events.append("curator_sync")
 
     def get_client(self):
@@ -288,7 +301,7 @@ class JointTrainerTests(unittest.TestCase):
         trainer.artifact_root.mkdir(parents=True, exist_ok=True)
         trainer._joint_lock, trainer._joint_loop = threading.RLock(), asyncio.new_event_loop()
         self.addCleanup(trainer._joint_loop.close)
-        trainer._joint_controller, trainer._joint_restored, trainer._joint_deferred_controller = None, None, None
+        trainer._joint_controller, trainer._joint_restored = None, None
         trainer._joint_coordinator = JointCheckpointCoordinator()
         trainer.actor_rollout_wg = ActorService(self.events)
         identity = SimpleNamespace(frozen_version="frozen:1", protocol_fingerprint="p" * 64,
@@ -302,11 +315,11 @@ class JointTrainerTests(unittest.TestCase):
             "layout_fingerprint": joint.ordered_layout_fingerprint(
                 trainer.actor_rollout_wg.get_online_layout_metadata(), 1,
             ),
-            "versions": {"code": "code:v1", "verl": "0.9.1", "model": "model:v1",
+            "versions": {"model": "model:v1",
                          "tokenizer": "tok:v1", "template": "template:v1"},
             "evaluator_fingerprint": identity.frozen_version, "protocol_fingerprint": identity.protocol_fingerprint,
         }
-        trainer.global_steps = 0
+        trainer.global_steps, trainer.total_training_steps = 0, 2
         trainer.use_critic, trainer.trainer_mode = False, "sync"
         trainer.checkpoint_manager = SimpleNamespace(update_weights=lambda _step: self.events.append("solver_sync"))
         trainer.checkpoint_callback = joint.SkillJointCheckpointCallback(config=trainer.config)
@@ -317,7 +330,7 @@ class JointTrainerTests(unittest.TestCase):
         controller = object.__new__(SkillJointController)
         controller.trainer, controller.config, controller.actor = trainer, trainer.config, trainer.actor_rollout_wg
         controller.settings = JointSettings(solver_gpus=1, available_gpus=3, curator_gpus=1, credit_gpus=1,
-                                             sources_per_step=0, probes_per_step=0, replay_batch_size=0)
+                                             candidates_per_source=1, probes_per_step=0, replay_batch_size=0)
         controller.artifact_root = trainer.artifact_root
         controller.state_path = trainer.artifact_root / "controller/state.json"
         controller.store = SkillStore(trainer.config.skill_harness.store_root)
@@ -330,6 +343,8 @@ class JointTrainerTests(unittest.TestCase):
         controller._writes_allowed = asyncio.Event()
         controller._writes_allowed.set()
         controller._background_pump = None
+        controller._background_tasks = {}
+        controller._background_stopping = False
         controller._ema_publication_task = None
         controller._learner_active = True
         controller.ema_gateway, controller.frozen_gateway = GatewayService(), GatewayService()
@@ -342,7 +357,10 @@ class JointTrainerTests(unittest.TestCase):
         controller._gateway_factory = gateway_factory
         controller.state = {"schema_version": 1, "optimizer_step": 0, "protocol_fingerprint": "p" * 64,
                             "pending": {}, "cohorts": {}, "prepared_update": None,
-                            "applied_update_ids": {}, "collections": {}, "last_global_step": 0}
+                            "applied_update_ids": {}, "collections": {}, "last_global_step": 0, "probe_jobs": {}}
+        controller.source_queue = SourceQueue(controller.state.setdefault("source_queue", {}),
+                                              persist=controller.save_state,
+                                              max_backlog=controller.settings.max_source_backlog)
         prepare, after = controller.prepare_update, controller.after_update_and_sync
 
         async def observed_prepare(*args, **kwargs):
@@ -417,9 +435,8 @@ class JointTrainerTests(unittest.TestCase):
         self.assertEqual(self.events[:3], ["configure_loss", "initialize_ema", "solver_sync"])
         self.assertEqual(self.trainer.actor_rollout_wg.initializations, 1)
 
-    def test_controller_is_ready_before_parents_initial_official_tests(self):
+    def test_controller_is_created_once_before_training(self):
         self.trainer._joint_controller = None
-        self.trainer.config.skill_harness.evaluation.initial = True
         self.trainer.global_steps = 1
 
         async def create_service(trainer, **kwargs):
@@ -428,14 +445,11 @@ class JointTrainerTests(unittest.TestCase):
             self.assertIs(kwargs["native_runtime"], self.trainer._joint_identity.runtime)
             return self.controller
 
-        def official_tests(trainer, **_kwargs):
-            self.events.append("official_tests")
-            self.assertIs(trainer._joint_controller, self.controller)
-
-        with (patch.object(SkillJointController, "create", side_effect=create_service),
-              patch("verl.experimental.skill_harness.evaluation.evaluate_official_splits", side_effect=official_tests)):
+        with patch.object(SkillJointController, "create", side_effect=create_service):
             self.trainer.on_train_begin()
-        self.assertLess(self.events.index("controller_ready"), self.events.index("official_tests"))
+        self.assertIs(self.trainer._joint_controller, self.controller)
+        with self.assertRaisesRegex(RuntimeError, "twice"):
+            self.trainer.on_train_begin()
 
     def test_post_save_callback_binds_completed_core_save_without_model_or_optimizer_step(self):
         self.update()

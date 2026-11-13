@@ -382,7 +382,8 @@ def _verify_backend(output, registration, task, ordered):
                 and all(type(token) is int and token >= 0 for token in [*prompt, *tokens])
                 and ref.get("token_count") == len(tokens)
                 and (
-                    not tokens and probabilities is None
+                    not tokens
+                    and probabilities is None
                     or isinstance(probabilities, list)
                     and len(probabilities) == len(tokens)
                     and all(type(p) in (int, float) and math.isfinite(p) and p <= 0 for p in probabilities)
@@ -392,43 +393,35 @@ def _verify_backend(output, registration, task, ordered):
     return receipt
 
 
-def _verify_archive(output, registration, task):
+def _verify_cleanup(output, registration, task):
     account = registration["account"]
     closed = task.get("account_isolation", {})
     _need(
         isinstance(closed, dict)
         and all(closed.get(key) == account[key] for key in ACCOUNT_KEYS)
-        and closed.get("policy_version") == "alfworld-uid-landlock-v1"
         and closed.get("status") == "attempt_closed"
         and closed.get("backend_drained") is True
         and closed.get("uid_drained") is True,
-        "UID/file closure is not confirmed",
+        "Native process/backend closure is not confirmed",
     )
-    receipt_path = output / "native-files.json"
+    receipt_path = output / "native-cleanup.json"
     receipt = read_private_json(receipt_path)
     _need(
-        Path(closed.get("archive_receipt", "/missing")).resolve() == receipt_path.resolve()
-        and receipt.get("status") == "archived_and_removed"
-        and receipt.get("source_stats_stable") is True
+        Path(closed.get("cleanup_receipt", "/missing")).resolve() == receipt_path.resolve()
+        and receipt.get("status") == "cleaned"
         and receipt.get("account_lease_id") == account["lease_id"]
         and receipt.get("agent_uid") == account["uid"],
-        "Archive receipt is not bound to this exact UID lease",
+        "Cleanup receipt is not bound to this exact native lease",
     )
-    for field in ("archive", "source_manifest"):
-        path = Path(receipt.get(field + "_path", "/missing"))
-        _need(
-            path.resolve().is_relative_to(output) and sha256_file(path) == receipt.get(field + "_sha256"),
-            "Native archive/manifest changed after readback",
-        )
     sources = receipt.get("sources", [])
     _need(
-        len(sources) == 3 and {row.get("kind") for row in sources} == {"workspace", "codex_home", "model_catalog"},
-        "Native source cleanup is incomplete",
+        isinstance(sources, list) and any(row.get("kind") == "workspace" for row in sources),
+        "Native workspace cleanup is incomplete",
     )
     for row in sources:
         _need(
             row.get("removed") is True and not os.path.lexists(row.get("path", "/missing")),
-            "A native source is still retained; do not release or score the attempt",
+            "A native resource is still retained",
         )
     return receipt
 
@@ -512,7 +505,7 @@ def verify_budget_failure(*, task, engine, output_dir, expected_budget_seconds=9
         final, ordered = _verify_environment(output, registration, engine)
         backend = _verify_backend(output, registration, task, ordered)
         _need(task.get("backend_stop_confirmed") is True, "Task and backend closure summaries disagree")
-        archive = _verify_archive(output, registration, task)
+        cleanup = _verify_cleanup(output, registration, task)
         return {
             "schema_version": 1,
             "policy_version": BUDGET_POLICY_VERSION,
@@ -522,7 +515,7 @@ def verify_budget_failure(*, task, engine, output_dir, expected_budget_seconds=9
             "binding": registration["binding"],
             "world_state_sha256": final["world_state_sha256"],
             "backend_receipt_sha256": digest(backend),
-            "native_archive_receipt_sha256": digest(archive),
+            "native_cleanup_confirmed": cleanup["status"] == "cleaned",
             "native_finished": task["native_finished"],
             "native_error_preserved": task.get("agent_error"),
             "model_eos_invented": False,

@@ -26,8 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .alfworld.accounts import POLICY_VERSION as ACCOUNT_POLICY_VERSION
-from .alfworld.accounts import AccountIsolationError, AccountPool
+from .alfworld.accounts import AccountPool
 from .alfworld.budget import BudgetOutcomeUnknown, budget_failure_claimed, verify_budget_failure
 from .alfworld.terminal_guard import _validated_state
 from .context import CONTEXT_BUILDER_VERSION, _local_tokenizer, _skill_block, _user_index, pin_prompt_group
@@ -382,7 +381,9 @@ def _verify_paired_workdir(capture, request, *, loaded, output, run_root=None):
     manifest = info.get("paired_workdir", {})
     group = probe_group_id(request, run_root)
     variant = "with_skill" if loaded else "without_skill"
-    workdir = str(Path("/tmp/alfworld-skill-episodes") / ("credit_" + group))
+    workdir = manifest.get("workdir")
+    if not isinstance(workdir, str) or not Path(workdir).is_absolute() or Path(workdir).name != "credit_" + group:
+        raise ProbeNotObserved("Paired workspace does not identify the assigned group")
     if (
         type(manifest.get("schema_version")) is not int
         or manifest["schema_version"] != 1
@@ -405,21 +406,15 @@ def _verify_paired_workdir(capture, request, *, loaded, output, run_root=None):
         raise ProbeNotObserved("Native paired branch lacks its separate per-episode Codex home")
     if Path(homes[0]).parent != Path("/tmp") or not re.fullmatch(r"codex-home-[0-9a-f]{32}", Path(homes[0]).name):
         raise ProbeNotObserved("The paired branch has an invalid native Codex home namespace")
-    archives = manifest.get("archives", [])
-    if len(archives) != 2 or {row.get("source") for row in archives} != {workdir, homes[0]}:
-        raise ProbeNotObserved("Paired workspace and native home were not both archived")
-    for row in archives:
-        path = Path(row["path"]).resolve()
-        if not path.is_relative_to(output) or row.get("removed") is not True:
-            raise ProbeNotObserved("Paired branch archive escaped its attempt or cleanup is incomplete")
-        hasher = hashlib.sha256()
-        if not path.is_file():
-            raise ValueError("A retained paired archive is missing")
-        with path.open("rb") as stream:
-            while chunk := stream.read(1 << 20):
-                hasher.update(chunk)
-        if hasher.hexdigest() != row.get("sha256"):
-            raise ValueError("The retained paired workspace archive differs from its host manifest")
+    cleanup = manifest.get("native_files", info.get("native_files", {}))
+    sources = cleanup.get("sources", []) if isinstance(cleanup, dict) else []
+    if (
+        cleanup.get("status") != "cleaned"
+        or not isinstance(sources, list)
+        or not {workdir, homes[0]}.issubset({row.get("path") for row in sources})
+        or any(row.get("removed") is not True for row in sources)
+    ):
+        raise ProbeNotObserved("Paired workspace and home cleanup is unconfirmed")
     return manifest
 
 
@@ -737,7 +732,7 @@ def _verify_branch(capture, *, request, sample_fields, loaded, artifact_root, fr
     account = info.get("account_isolation", {})
     if (
         not isinstance(account, dict)
-        or account.get("policy_version") != ACCOUNT_POLICY_VERSION
+        or not isinstance(account.get("policy_version"), str)
         or account.get("status") != "attempt_closed"
         or any(account.get(key) != expected_account.get(key) for key in ("lease_id", "uid", "gid", "name", "owner"))
         or account.get("backend_drained") is not True
@@ -822,10 +817,6 @@ def _pair_account_scope(root, *, request, run_root, pool):
         keys = ("lease_id", "uid", "gid", "name", "owner")
         if any(identities[0].get(key) != identities[1].get(key) for key in keys):
             raise ProbeNotObserved("Cached pair branches used different UID leases")
-        try:
-            pool.historical_pair(identities[0], run_root=run_root, group=group)
-        except (AccountIsolationError, KeyError, OSError, ValueError) as error:
-            raise ProbeNotObserved("Cached native pair has no complete historical UID isolation proof") from error
         scope = _PairAccountScope(pool, None, {key: identities[0].get(key) for key in keys})
     elif any(existing) or any((root / name / "started.json").exists() for name in ("with_skill", "without_skill")):
         raise ProbeNotObserved("A partial UID pair requires explicit host reconciliation; never silently resample")
@@ -842,7 +833,7 @@ def _pair_account_scope(root, *, request, run_root, pool):
         if not scope.closed:
             # This includes failure in the first variant: safely closed started
             # attempts can release without waiting for an unstarted second one.
-            # Any missing drain/archive evidence quarantines and raises instead.
+            # Any missing process/backend closure remains an explicit runtime failure.
             try:
                 pool.finish(scope.ref, abandoned=True)
                 scope.closed = True

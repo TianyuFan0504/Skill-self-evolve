@@ -25,6 +25,7 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -38,7 +39,7 @@ from .curate import (
     SKILL_SCHEMA,
     CurateAbstention,
     CurateCollection,
-    CurateProtocolError,
+    CurateOutputError,
     CurateRequest,
     CurateSourceCensored,
     CuratorBehavior,
@@ -126,7 +127,6 @@ class JointSettings:
     credit_gpus: int = 2
     route_tensor_parallel_size: int = 1
     gateway_count: int = 2
-    sources_per_step: int = 1
     candidates_per_source: int = 2
     probes_per_step: int = 2
     required_exposures: int = 1
@@ -142,7 +142,6 @@ class JointSettings:
     seed: int = 42
     curator_native_prefix_reserve_tokens: int = 4096
     curator_output_headroom_tokens: int = 2048
-    background_enabled: bool = False
     curator_concurrency: int = 8
     credit_concurrency: int = 8
     max_source_backlog: int = 16384
@@ -174,7 +173,6 @@ class JointSettings:
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"joint.{key} must be a positive integer")
         for key in (
-            "sources_per_step",
             "probes_per_step",
             "replay_batch_size",
             "max_replay_lag_steps",
@@ -184,8 +182,6 @@ class JointSettings:
                 raise ValueError(f"joint.{key} must be a nonnegative integer")
         if self.window_seconds <= 0 or self.lease_seconds <= 0 or self.cost_weight < 0:
             raise ValueError("Credit windows/leases must be positive and costs nonnegative")
-        if type(self.background_enabled) is not bool:
-            raise ValueError("joint.background_enabled must be a boolean")
         if self.solver_gpus + self.curator_gpus + self.credit_gpus > self.available_gpus:
             raise ValueError("Joint policy reservations exceed the actual GPU budget")
         if self.probes_per_step and self.probes_per_step < self.candidates_per_source:
@@ -245,12 +241,13 @@ def preflight_controller_identity(config, *, native_runtime=None):
         task_config = json.loads(Path(os.environ["ALFWORLD_TASK_CONFIG"]).read_text())
         native_task = next(row for row in task_config if row["name"] == "alfworld_skill_training")
         native_runtime = provision_native_curator_runtime(
-            public_root=_get(options, "curator_public_root", "/opt/alfworld-tools/skill_self_evolve/curator"),
-            work_root=_get(options, "curator_work_root", "/tmp/alfworld-curator"),
+            public_root=_get(options, "curator_public_root"),
+            work_root=_get(options, "curator_work_root"),
             native_bin=os.environ["CODEX_NATIVE_BIN"],
             package_root=os.environ["ALFWORLD_CODEX_PACKAGE_ROOT"],
             model_catalog_path=native_task["agent"]["model_catalog_path"],
-            model_name=_get(options, "model_name", "Qwen3.5-4B-nothink"),
+            model_name=_get(options, "model_name"),
+            unix_user=_get(options, "curator_unix_user"),
         )
     identity = object.__new__(SkillJointController)
     identity.config, identity.settings, identity.loading = config, settings, loading
@@ -285,8 +282,6 @@ class SkillJointController:
         restored_state=None,
     ):
         config = config or trainer.config
-        if config.skill_harness.mode != "skill_joint":
-            raise ValueError("The joint controller is opt-in and requires skill_joint mode")
         settings = JointSettings.from_config(config)
         if trainer.actor_rollout_wg.world_size != settings.solver_gpus:
             raise ValueError("Reserve the configured solver GPU pool before creating joint policy routes")
@@ -399,8 +394,7 @@ class SkillJointController:
             gateway_factory=gateway_factory,
         )
         await self._refresh_ema_gateway()
-        if settings.background_enabled:
-            self._initialize_background()
+        self._initialize_background()
         return self
 
     def _configure_protocol(self):
@@ -412,15 +406,12 @@ class SkillJointController:
             or service["catalog_digest"] != manifest["catalog_digest"]
         ):
             raise ValueError("Joint learning and probes must attach only to this run's train-only environment")
-        source = Path(__file__).with_name("alfworld")
         self.environment_version = "alfworld:" + _digest(
             {
                 "catalog_digest": manifest["catalog_digest"],
                 "max_steps": service["max_steps"],
-                "code": {
-                    name: hashlib.sha256((source / name).read_bytes()).hexdigest()
-                    for name in ("server.py", "protocol.py")
-                },
+                "protocol": service.get("protocol_version", "alfworld-v1"),
+                "budget_seconds": service.get("budget_seconds", 900),
             }
         )
         self.distribution_version = "train:" + manifest["parquet_files"]["train"]["sha256"]
@@ -543,10 +534,6 @@ class SkillJointController:
                 },
             )
         selected = [sources[key] for key in sorted(sources)]
-        # Background collection queues every logical episode. The legacy
-        # synchronous mode retains its explicit small smoke-test source budget.
-        if not self.settings.background_enabled:
-            selected = selected[: self.settings.sources_per_step]
         return list(unique.values()), selected
 
     def _protocol(self, baseline):
@@ -560,65 +547,6 @@ class SkillJointController:
             cost_weight=self.settings.cost_weight,
             max_updates=self.settings.max_label_updates,
         )
-
-    async def _observe_pending(self, fields, step):
-        budget, grouped = self.settings.probes_per_step, {}
-        current_ids = {row["tools_kwargs"]["task"]["metadata"]["game_id"] for row in fields}
-        for window_id, pending in self.state["pending"].items():
-            if pending["status"] != "pending" or step < pending["opened_step"] + self.settings.min_delay_steps:
-                continue
-            status = self.ledger.window_status(window_id)
-            if status["state"] == "censored":
-                pending["status"] = "censored"
-                self.save_state()
-            elif status["state"] in {"matured", "settled"}:
-                self._settle_window(window_id, pending)
-            else:
-                grouped.setdefault(pending["cohort_id"], []).append((window_id, pending))
-        order = sorted(grouped, key=lambda key: (min(row["opened_step"] for _, row in grouped[key]), key))
-        for cohort_id in order:
-            windows, cohort = grouped[cohort_id], self.state["cohorts"][cohort_id]
-            for logical_id in cohort["probe_ids"]:
-                active = [
-                    (identity, row)
-                    for identity, row in windows
-                    if row["status"] == "pending"
-                    and logical_id not in row["observed"]
-                    and logical_id not in row["unobserved"]
-                ]
-                if not active:
-                    continue
-                # Schedule one logical case for every candidate before moving
-                # to another case. A small budget cannot strand half a cohort
-                # on a task that has already left the real training batch.
-                if len(active) > budget:
-                    break
-                representative = active[0][1]
-                assignment = cohort["assignments"].get(logical_id)
-                if assignment is None:
-                    used = {
-                        row["tools_kwargs"]["task"]["metadata"]["game_id"] for row in cohort["assignments"].values()
-                    }
-                    eligible = [
-                        row
-                        for row in fields
-                        if (
-                            row["tools_kwargs"]["task"]["metadata"]["game_id"] != representative["producer_task_id"]
-                            and row["tools_kwargs"]["task"]["metadata"]["game_id"] not in used
-                            and row["tools_kwargs"]["task"]["metadata"]["task_type"] == representative["task_type"]
-                        )
-                    ]
-                    if not eligible:
-                        break
-                    assignment = copy.deepcopy(sorted(eligible, key=lambda row: row["uid"])[0])
-                    assignment["tools_kwargs"]["task"]["metadata"]["source_step"] = step
-                    cohort["assignments"][logical_id] = assignment
-                    self.save_state()
-                if assignment["tools_kwargs"]["task"]["metadata"]["game_id"] not in current_ids:
-                    continue
-                for window_id, pending in active:
-                    budget -= 1
-                    await self._observe_one(window_id, pending, logical_id, assignment, step)
 
     async def _observe_one(self, window_id, pending, logical_id, assignment, step):
         request = ProbeRequest(
@@ -704,10 +632,7 @@ class SkillJointController:
                     "Actor/controller optimizer clocks require coherent checkpoint reconciliation"
                 )
             fields, sources = self._sample_fields(solver_TensorDict)
-            if self.settings.background_enabled:
-                self._enqueue_probe_jobs(fields, global_step)
-            else:
-                await self._observe_pending(fields, global_step)
+            self._enqueue_probe_jobs(fields, global_step)
             update_id = "update_" + _digest([self.protocol_fingerprint, global_step, clock + 1])
             prepared = {
                 "update_id": update_id,
@@ -959,24 +884,7 @@ class SkillJointController:
 
     def _semantic_curate_rejection(self, error, source, request, behavior):
         """Recognize only proved model-output errors, never catch generic infra."""
-        known_messages = {
-            "Curator must return exactly one plain JSON SkillArtifact object",
-            "Curator JSON must contain only the five allowed skill fields",
-            "Generated skill identity/family differs from the trusted curator request",
-            "Reusable skill text must not contain host paths or network endpoints",
-            "Curator must complete successfully without any native tool invocation",
-            "Curator abstention must contain only decision and reason",
-            "Curator abstention reason must be nonempty text of at most 2048 characters",
-            "Curator abstention reason must not contain host paths or network endpoints",
-        }
-        semantic_origin = isinstance(error, CurateProtocolError) and str(error) in known_messages
-        current = error.__traceback__
-        while current is not None:
-            code = current.tb_frame.f_code
-            if Path(code.co_filename).name == "curate.py" and code.co_name == "_parse_artifact":
-                semantic_origin = isinstance(error, ValueError | TypeError)
-            current = current.tb_next
-        if not semantic_origin:
+        if not isinstance(error, CurateOutputError):
             return None
         directory = self.artifact_root / "curate" / request.collection_id
         capture_path = directory / "generated.json"
@@ -1151,7 +1059,7 @@ class SkillJointController:
                         request=request,
                         runtime=self.runtime,
                         output_root=self.artifact_root / "curate",
-                        **({"before_commit": self._writes_allowed.wait} if self.settings.background_enabled else {}),
+                        before_commit=self._writes_allowed.wait,
                     )
                 except Exception as error:
                     await self._writes_allowed.wait()
@@ -1247,6 +1155,10 @@ class SkillJointController:
     def _initialize_background(self):
         from .source_queue import SourceQueue
 
+        # New collection identities after restore; uncertain sampled actions
+        # remain censored and are never relabeled as a new behavior draw.
+        self.collection_generation = uuid.uuid4().hex
+
         self.source_queue = SourceQueue(
             self.state.setdefault("source_queue", {}),
             persist=self.save_state,
@@ -1260,6 +1172,7 @@ class SkillJointController:
         for job in self.state["probe_jobs"].values():
             if job["status"] == "running":
                 job.update(status="unobserved", reason="interrupted_background_pair")
+                self.state["pending"][job["window_id"]]["unobserved"][job["logical_id"]] = job["reason"]
         self.save_state()
         self._background_pump = asyncio.create_task(self._pump_background(), name="skill-background-pump")
 
@@ -1320,7 +1233,10 @@ class SkillJointController:
             self.routes["curator"].optimizer_step,
             self.loading["tokenizer_version"], self.runtime.template_version,
         )
-        cohort = "cohort_" + _digest([entry["update_id"], entry["episode_output_dir"]])
+        cohort = "cohort_" + _digest([self.collection_generation, entry["update_id"], entry["episode_output_dir"]])
+        if not entry["read"] and entry.get("collection_generation") != self.collection_generation:
+            entry["curator_jobs"] = []
+            entry["collection_generation"] = self.collection_generation
         jobs = entry["curator_jobs"]
         if not jobs:
             for index in range(self.settings.candidates_per_source):
@@ -1419,8 +1335,6 @@ class SkillJointController:
             await asyncio.sleep(0.1)
 
     def background_metrics(self):
-        if not self.settings.background_enabled:
-            return {}
         metrics = {"source_" + key.removeprefix("sources_"): value
                    for key, value in self.source_queue.metrics().items()}
         for status in ("queued", "running", "complete", "unobserved", "failed"):
@@ -1511,55 +1425,20 @@ class SkillJointController:
             self.state["last_global_step"] = step
             current["status"] = "optimizer_applied"
             self.save_state()
-            if self.settings.background_enabled:
-                # Publication is a short learner boundary operation and is
-                # skipped while an already pinned curator generation is live.
-                # Background workers never issue online optimizer/model RPCs.
-                self._ema_refresh_requested = True
-                if not any(key.startswith("curate:") for key in self._background_tasks):
-                    self._ema_syncing = True
-                    try:
-                        await self.routes["curator"].sync_ema(actual)
-                        await self._refresh_ema_gateway()
-                        self._ema_refresh_requested = False
-                    finally:
-                        self._ema_syncing = False
-                self._offer_sources(current["sources"], step, prepared.update_id)
-                report = self._complete_post_update(current, prepared, actual)
-                return {**report, **self.background_metrics()}
-            await self.routes["curator"].sync_ema(actual)
-            await self._refresh_ema_gateway()
-            if not current["curate_jobs"]:
-                active = sum(row["status"] == "pending" for row in self.state["pending"].values())
-                for source in current["sources"]:
-                    if active + self.settings.candidates_per_source > self.settings.max_pending_windows:
-                        break
-                    baseline = self.store.head()
-                    cohort = "cohort_" + _digest(
-                        [prepared.update_id, source["producer_uid"], source["episode_output_dir"]]
-                    )
-                    for index in range(self.settings.candidates_per_source):
-                        current["curate_jobs"].append(
-                            {
-                                **source,
-                                "producer_uid": source["producer_uid"],
-                                "skill_snapshot_id": baseline,
-                                "candidate_group_id": cohort,
-                                "candidate_index": index,
-                                "candidate_group_size": self.settings.candidates_per_source,
-                                "created_at": time.time(),
-                                "status": "queued",
-                            }
-                        )
-                    active += self.settings.candidates_per_source
-                self.save_state()
-            behavior = CuratorBehavior(
-                "ema:" + str(actual),
-                actual,
-                self.loading["tokenizer_version"],
-                self.runtime.template_version,
-            )
-            await self._collect_cohorts(current, behavior, step)
-            return self._complete_post_update(current, prepared, actual)
+            # Publication is a short learner boundary operation and is
+            # skipped while an already pinned curator generation is live.
+            # Background workers never issue online optimizer/model RPCs.
+            self._ema_refresh_requested = True
+            if not any(key.startswith("curate:") for key in self._background_tasks):
+                self._ema_syncing = True
+                try:
+                    await self.routes["curator"].sync_ema(actual)
+                    await self._refresh_ema_gateway()
+                    self._ema_refresh_requested = False
+                finally:
+                    self._ema_syncing = False
+            self._offer_sources(current["sources"], step, prepared.update_id)
+            report = self._complete_post_update(current, prepared, actual)
+            return {**report, **self.background_metrics()}
         finally:
             self._busy = False

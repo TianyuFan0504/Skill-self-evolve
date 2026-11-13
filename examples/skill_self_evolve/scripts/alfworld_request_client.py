@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """Public agent tool with one stable request ID per logical environment action."""
 
 from __future__ import annotations

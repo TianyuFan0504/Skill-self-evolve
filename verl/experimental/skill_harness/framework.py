@@ -10,13 +10,10 @@ default disabled adapter delegates directly to the original framework factory.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
-import json
-import os
-import tempfile
-import time
-import uuid
+import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -31,53 +28,11 @@ TEXT_ONLY_MEDIA_FIELDS = (
     "multi_modal_inputs", "multi_modal_data", "pixel_values", "pixel_values_videos",
     "image_grid_thw", "video_grid_thw", "mm_token_type_ids",
 )
+logger = logging.getLogger(__name__)
 
 
 class NonTextAlfworldTrajectoryError(ValueError):
     """Media cannot be trained by this text-only ALFWorld joint harness."""
-
-
-def record_nontext_incident(artifact_root, *, source, context=None):
-    """Persist a host-owned run-wide failure before a per-case exception escapes."""
-    root = Path(artifact_root)
-    if not root.is_absolute():
-        raise ValueError("Unsupported-media incidents require the trusted absolute config artifact_root")
-    directory = root / "protocol_incidents" / "unsupported_media"
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Directory existence is sticky too: an interrupted/failed JSON write must
-    # not let a learner treat the remaining text cases as an acceptable batch.
-    payload = {"schema_version": 1, "kind": "unsupported_alfworld_media", "source": source,
-               "recorded_at": time.time(), "context": dict(context or {})}
-    descriptor, temporary = tempfile.mkstemp(prefix=".incident-", dir=directory)
-    try:
-        with os.fdopen(descriptor, "w") as stream:
-            json.dump(payload, stream, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        path = directory / (uuid.uuid4().hex + ".json")
-        os.replace(temporary, path)
-        for parent in (directory, directory.parent, root):
-            handle = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(handle)
-            finally:
-                os.close(handle)
-        return path
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def assert_no_nontext_incidents(artifact_root):
-    root = Path(artifact_root)
-    if not root.is_absolute():
-        raise ValueError("Unsupported-media checks require the trusted absolute config artifact_root")
-    directory = root / "protocol_incidents" / "unsupported_media"
-    if directory.exists() or directory.is_symlink():
-        raise NonTextAlfworldTrajectoryError(
-            "This run has an unsupported-media incident; refusing an optimizer update even if TQ kept only text cases"
-        )
 
 
 def _unwrap_media_carrier(value):
@@ -122,8 +77,6 @@ def _contains_media(value):
 
 def require_text_only_media(value, *, source, artifact_root=None, incident_context=None):
     if _contains_media(value):
-        if artifact_root is not None:
-            record_nontext_incident(artifact_root, source=source, context=incident_context)
         raise NonTextAlfworldTrajectoryError(
             f"ALFWorld joint training is text-only: nonempty media in {source}; refusing loss without image context"
         )
@@ -174,14 +127,6 @@ def _plain(value):
     return value
 
 
-def _core_import_guard():
-    import verl
-
-    source = Path(__file__).resolve().parents[3]
-    if Path(verl.__file__).resolve() != source / "verl/__init__.py" or verl.__version__ != "0.9.1":
-        raise RuntimeError("Skill-aware rollout requires this core verl 0.9.1 checkout before benchmark dependencies")
-
-
 def _tokenizer_version(path):
     root = Path(path)
     if not root.is_dir():
@@ -202,7 +147,7 @@ def _tokenizer_version(path):
 
 
 def loading_settings(config):
-    """Normalize trusted run settings; loading is opt-in and baseline-safe."""
+    """Normalize host-side skill loading settings."""
     harness = _get(config, "skill_harness", {})
     requested = _get(harness, "loading", {}) or {}
     enabled = _get(requested, "enabled", False)
@@ -210,8 +155,6 @@ def loading_settings(config):
         raise ValueError("skill_harness.loading.enabled must be a boolean")
     if not enabled:
         return {"enabled": False}
-    if _get(harness, "mode") == "solver_baseline":
-        raise ValueError("solver_baseline must keep host skill loading disabled")
     actor = _get(config, "actor_rollout_ref")
     rollout, model = _get(actor, "rollout"), _get(actor, "model")
     tokenizer_path = _get(requested, "tokenizer_path") or _get(model, "tokenizer_path") or _get(model, "path")
@@ -244,7 +187,6 @@ class SkillAwareRolloutAdapter(AgentFrameworkRolloutAdapter):
         loading = loading_settings(config)
         effective = config
         if loading["enabled"]:
-            _core_import_guard()
             from omegaconf import open_dict
 
             effective = copy.deepcopy(config)
@@ -263,7 +205,7 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
     @classmethod
     def from_config(cls, *, config, **kwargs):
         instance = super().from_config(config=config, **kwargs)
-        instance._skill_strict_train_groups = _get(config.skill_harness, "mode") == "skill_joint"
+        instance._skill_strict_train_groups = True
         instance._skill_loading = loading_settings(config)
         instance._skill_store_root = _get(config.skill_harness, "store_root")
         instance._skill_pin_directory = None
@@ -271,10 +213,9 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
         if artifact_root is not None and not Path(artifact_root).is_absolute():
             raise ValueError("Text-only joint training requires an absolute trusted config artifact_root")
         instance._text_protocol_artifact_root = Path(artifact_root).resolve() if artifact_root is not None else None
-        if _get(config.skill_harness, "mode") == "skill_joint" and instance._text_protocol_artifact_root is None:
+        if instance._text_protocol_artifact_root is None:
             raise ValueError("Text-only joint training requires a trusted config artifact_root")
         if instance._skill_loading["enabled"]:
-            _core_import_guard()
             instance._skill_pin_directory = Path(config.skill_harness.artifact_root) / "context_groups"
         return instance
 
@@ -295,29 +236,68 @@ class SkillAwareAgentFramework(GatewayAgentFramework):
             partition_id=partition_id,
             pin_directory=getattr(self, "_skill_pin_directory", None),
         )
-        stats = await super()._run_prompt_rollouts(
-            sample_fields=pinned,
-            sample_index=sample_index,
-            global_steps=global_steps,
-            partition_id=partition_id,
-            num_sessions=num_sessions,
-        )
-        if (
+        strict_group = (
             getattr(self, "_skill_strict_train_groups", False)
             and partition_id == "train"
             and pinned.get("tools_kwargs", {}).get("task", {}).get("name") == "alfworld_skill_training"
-            and isinstance(stats, Mapping)
-            and stats.get("num_failed_sessions", 0) > 0
-        ):
-            import transfer_queue as tq
+        )
+        if not strict_group:
+            return await super()._run_prompt_rollouts(
+                sample_fields=pinned, sample_index=sample_index, global_steps=global_steps,
+                partition_id=partition_id, num_sessions=num_sessions,
+            )
+        import transfer_queue as tq
 
-            # The parent has awaited every sibling. Preserve its actual session
-            # statistics, but never call an incomplete training group finished.
-            # The custom sampler also checks the pre-exception local archive
-            # registry, closing the parent's earlier provisional-finished gap.
-            await tq.async_kv_put(key=str(pinned["uid"]), partition_id=partition_id, tag={"status": "failure"})
-            stats = {**stats, "num_failed_uids": 1}
-        return stats
+        if pinned.get("uid") is None:
+            raise ValueError("ALFWorld prompt groups require a TransferQueue uid")
+        uid = str(pinned["uid"])
+        sampling = self._build_session_sampling_params(partition_id=partition_id, sample_fields=pinned)
+        await tq.async_kv_put(key=uid, partition_id=partition_id, tag={"status": "running"})
+        outcomes = await asyncio.gather(*(
+            self._run_agent_episode_with_concurrency_limit(
+                sample_fields=pinned, sample_index=sample_index, session_index=index,
+                global_steps=global_steps, sampling_params=sampling,
+            )
+            for index in range(num_sessions)
+        ), return_exceptions=True)
+        successful = failed = outputs = unfinished = 0
+        reasons = []
+        for index, outcome in enumerate(outcomes):
+            if isinstance(outcome, Exception):
+                failed += 1
+                reasons.append(f"{type(outcome).__name__}: {outcome}")
+                continue
+            if isinstance(outcome, BaseException):
+                raise outcome
+            trajectories, fields = outcome
+            if not trajectories:
+                failed += 1
+                reasons.append(f"empty trajectories for uid={uid} session_index={index}")
+                continue
+            try:
+                await self._write_session_trajectories_to_tq(
+                    uid=uid, session_index=index, trajectories=trajectories, sample_fields=fields,
+                    global_steps=global_steps, partition_id=partition_id,
+                )
+            except Exception as error:
+                logger.exception("ALFWorld group serialization failed for uid=%s session=%s", uid, index)
+                failed += 1
+                reasons.append(f"TQ write error: {error}")
+            else:
+                successful += 1
+                outputs += len(trajectories)
+                unfinished += int(any(trajectory.finished is False for trajectory in trajectories))
+        rejected = failed > 0 or successful == 0
+        # Publish one terminal state after every sibling serializer has settled.
+        # Incomplete groups never become briefly sampleable as finished.
+        await tq.async_kv_put(
+            key=uid, partition_id=partition_id, tag={"status": "failure" if rejected else "finished"},
+        )
+        return {
+            "num_success_sessions": successful, "num_failed_sessions": failed,
+            "num_success_outputs": outputs, "num_unfinished_episodes": unfinished,
+            "num_failed_uids": int(rejected), "failure_reasons": reasons,
+        }
 
     async def _run_agent_episode(
         self, *, sample_fields, sample_index, session_index, global_steps, runner_name, runner_config, sampling_params,

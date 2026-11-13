@@ -42,7 +42,6 @@ from .store import SkillArtifact, SkillCandidate, SkillStore
 
 COLLECTOR_VERSION = "native-codex-curate-v3"
 EVENT_CLASSIFIER_VERSION = "codex-startup-diagnostics-v1"
-NATIVE_CODEX_VERSION = "0.167.0"
 NATIVE_CONFIG_OVERRIDES = (
     "skills.include_instructions=false",
     'web_search="disabled"',
@@ -107,6 +106,10 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 class CurateProtocolError(ValueError):
     """The observed generation cannot safely enter the current curate objective."""
+
+
+class CurateOutputError(CurateProtocolError):
+    """The model output is invalid; infrastructure failures use other types."""
 
 
 class CurateSourceCensored(RuntimeError):
@@ -509,21 +512,11 @@ class NativeCuratorRuntime:
             "native_version": self.native_version,
             "template_version": self.template_version,
             "model_name": self.model_name,
-            "unix_user": self.unix_user,
             "disabled_features": list(DISABLED_FEATURES),
             "native_config_overrides": list(NATIVE_CONFIG_OVERRIDES),
             "native_output_schema_enabled": False,
             "isolation": "dedicated_nonroot_account; clean_environment; no_game_session_capability",
-            "files": {
-                key: _file_hash(getattr(self, key))
-                for key in (
-                    "codex_bin",
-                    "model_catalog_path",
-                    "instructions_path",
-                    "task_prompt_path",
-                    "schema_path",
-                )
-            },
+
         }
 
 
@@ -542,22 +535,15 @@ def _public_file(path, text, mode=0o644):
 
 
 def _runtime_directory(path, *, public):
-    """Repair traversal only inside explicit public/runtime roots, never NAS."""
-    path = Path(path).resolve()
-    anchors = (Path("/opt/alfworld-tools"), Path("/tmp").resolve())
-    anchor = next((root for root in anchors if path == root or root in path.parents), None)
-    if anchor is None or path == anchor:
-        raise CurateProtocolError("Native runtime trees must be children of /opt/alfworld-tools or /tmp")
-    path.mkdir(parents=True, exist_ok=True, mode=0o755 if public else 0o711)
-    nodes = [node for node in [path, *path.parents] if node != anchor and anchor in node.parents]
-    # /tmp retains its sticky permissions. /opt/alfworld-tools is the explicit
-    # public tooling root and may itself have been created under umask 077.
-    if anchor == Path("/opt/alfworld-tools"):
-        nodes.append(anchor)
-    for node in reversed(nodes):
-        node.chmod((node.stat().st_mode & 0o777) | (0o055 if public else 0o011))
-    path.chmod(0o755 if public else 0o711)
-    return path
+    """Prepare only the explicitly configured directory; never chmod ancestors."""
+    requested = Path(path)
+    if not requested.is_absolute() or requested.is_symlink() or requested == Path("/"):
+        raise CurateProtocolError("Native runtime needs an explicit absolute directory")
+    requested.mkdir(parents=True, exist_ok=True, mode=0o755 if public else 0o711)
+    if requested.stat().st_uid != os.geteuid():
+        raise CurateProtocolError("Native runtime directory must belong to the host owner")
+    requested.chmod(0o755 if public else 0o711)
+    return requested.resolve()
 
 
 def provision_native_curator_runtime(
@@ -568,7 +554,7 @@ def provision_native_curator_runtime(
     package_root,
     model_catalog_path,
     model_name,
-    unix_user="alfworld_curator",
+    unix_user,
     run_timeout=300.0,
     prompt_root=None,
 ):
@@ -581,22 +567,14 @@ def provision_native_curator_runtime(
     account = pwd.getpwnam(unix_user)
     if account.pw_uid == 0:
         raise CurateProtocolError("Native curator must never run as root")
-    try:
-        solver_uid = pwd.getpwnam("alfworld_eval").pw_uid
-    except KeyError:
-        solver_uid = None
-    if account.pw_uid == solver_uid:
-        raise CurateProtocolError("Curator requires an account distinct from the solver account")
     native_bin, package_root = Path(native_bin).resolve(), Path(package_root).resolve()
     if not native_bin.is_file() or not os.access(native_bin, os.X_OK) or not package_root.is_dir():
         raise FileNotFoundError("The managed native Codex installation is unavailable")
     native_version = (
         subprocess.check_output([str(native_bin), "--version"], text=True).strip().removeprefix("codex-cli ")
     )
-    if native_version != NATIVE_CODEX_VERSION:
-        raise CurateProtocolError(
-            "Inspect native feature compatibility before changing the pinned curator Codex version"
-        )
+    if not native_version:
+        raise CurateProtocolError("The native executable did not report a version")
     prompts = (
         Path(prompt_root) if prompt_root else Path(__file__).resolve().parents[3] / "examples/skill_self_evolve/prompts"
     )
@@ -622,7 +600,8 @@ def provision_native_curator_runtime(
             "native_config_overrides": NATIVE_CONFIG_OVERRIDES,
         }
     )
-    public = _runtime_directory(Path(public_root) / template_version.removeprefix("sha256:"), public=True)
+    configured_public = _runtime_directory(public_root, public=True)
+    public = _runtime_directory(configured_public / template_version.removeprefix("sha256:"), public=True)
     for parent in [public, *public.parents]:
         if not parent.stat().st_mode & 0o001:
             raise CurateProtocolError("Public curator runtime parents must permit account traversal")
@@ -713,11 +692,6 @@ class CuratorSandbox:
     def __init__(self, runtime, output_dir, collection_id):
         if runtime.uid == 0 or pwd.getpwnam(runtime.unix_user).pw_uid != runtime.uid:
             raise CurateProtocolError("The provisioned non-root curator account changed")
-        try:
-            if pwd.getpwnam("alfworld_eval").pw_uid == runtime.uid:
-                raise CurateProtocolError("The native curator must not reuse the solver account")
-        except KeyError:
-            pass
         self.runtime, self.output_dir = runtime, Path(output_dir)
         self.collection_id = collection_id
         self.workdir = Path(runtime.work_root) / collection_id
@@ -836,11 +810,11 @@ class CuratorSandbox:
 
     async def close(self):
         await self._terminate()
-        # Preserve logs/workspaces, but prevent later curator sessions reusing
-        # another episode's files as external memory.
-        from .alfworld.native_files import archive_native_files
+        # Raw events and sampled tokens live in output_dir. A debug HOME tar
+        # is optional; cleanup must always prevent cross-episode memory.
+        from .alfworld.native_files import cleanup_native_files
 
-        archive_native_files(
+        cleanup_native_files(
             self.output_dir, codex_homes=getattr(self, "native_bootstrap_homes", ()),
             model_catalogs=self.created_files, agent_uid=self.runtime.uid,
             curator_workdir=self.workdir, curator_root=self.runtime.work_root, curator_collection_id=self.collection_id,
@@ -944,12 +918,12 @@ def _parse_abstention(content):
     if not isinstance(value, dict) or value.get("decision") != "abstain":
         return None
     if set(value) != {"decision", "reason"}:
-        raise CurateProtocolError("Curator abstention must contain only decision and reason")
+        raise CurateOutputError("Curator abstention must contain only decision and reason")
     reason = value["reason"]
     if not isinstance(reason, str) or not reason.strip() or len(reason) > ABSTENTION_REASON_MAX_CHARS:
-        raise CurateProtocolError("Curator abstention reason must be nonempty text of at most 2048 characters")
+        raise CurateOutputError("Curator abstention reason must be nonempty text of at most 2048 characters")
     if re.search(r"https?://|(?<!\w)/(?:\w+/)+", reason):
-        raise CurateProtocolError("Curator abstention reason must not contain host paths or network endpoints")
+        raise CurateOutputError("Curator abstention reason must not contain host paths or network endpoints")
     return reason
 
 
@@ -957,14 +931,19 @@ def _parse_artifact(content, *, request, family, provenance):
     try:
         value = json.loads(content)
     except ValueError as error:
-        raise CurateProtocolError("Curator must return exactly one plain JSON SkillArtifact object") from error
+        raise CurateOutputError("Curator must return exactly one plain JSON SkillArtifact object") from error
     if not isinstance(value, dict) or set(value) != SKILL_FIELDS:
-        raise CurateProtocolError("Curator JSON must contain only the five allowed skill fields")
+        raise CurateOutputError("Curator JSON must contain only the five allowed skill fields")
     if value["skill_id"] != request.skill_id or value["task_families"] != [family]:
-        raise CurateProtocolError("Generated skill identity/family differs from the trusted curator request")
+        raise CurateOutputError("Generated skill identity/family differs from the trusted curator request")
+    if any(not isinstance(value[key], str) for key in ("title", "principle", "when_to_apply")):
+        raise CurateOutputError("Skill text fields must be strings")
     if any(re.search(r"https?://|(?<!\w)/(?:\w+/)+", value[key]) for key in ("title", "principle", "when_to_apply")):
-        raise CurateProtocolError("Reusable skill text must not contain host paths or network endpoints")
-    return SkillArtifact(**value, provenance=provenance)
+        raise CurateOutputError("Reusable skill text must not contain host paths or network endpoints")
+    try:
+        return SkillArtifact(**value, provenance=provenance)
+    except (TypeError, ValueError) as error:
+        raise CurateOutputError(str(error)) from error
 
 
 def _find_or_stage(store, artifact, branch, baseline):
@@ -1183,7 +1162,7 @@ async def collect_curate_candidate(
                 "Native Codex emitted an unknown execution error; see retained event classification"
             )
         if captured["agent_ok"] is not True or captured["agent_finished"] is not True or captured["tool_events_seen"]:
-            raise CurateProtocolError("Curator must complete successfully without any native tool invocation")
+            raise CurateOutputError("Curator must complete successfully without any native tool invocation")
         if len(captured["trajectories"]) != 1:
             raise CurateProtocolError(
                 "Initial role loss requires exactly one complete nonempty TITO trajectory per candidate"

@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """ALFWorld HTTP service with sticky process shards and asynchronous durable I/O.
 
-This examples-only entry preserves the core budget protocol and public state
-allowlist. Each TextWorld process handles one engine call at a time; session
-locks also order durable journals. No TextWorld object crosses a process.
+Each TextWorld process handles one engine call at a time; session locks order
+durable journals. This backend is provisioned separately from the trainer.
+No TextWorld object crosses a process.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import importlib.util
 import json
 import multiprocessing
@@ -28,7 +27,7 @@ from aiohttp import web
 CORE_DIR = Path(__file__).resolve().parents[3] / "verl/experimental/skill_harness/alfworld"
 if str(CORE_DIR) not in sys.path:
     sys.path.insert(0, str(CORE_DIR))
-_spec = importlib.util.spec_from_file_location("_frozen_alfworld_server", CORE_DIR / "server.py")
+_spec = importlib.util.spec_from_file_location("_alfworld_backend_core", CORE_DIR / "server.py")
 core = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(core)
 
@@ -159,12 +158,6 @@ class ParallelGameService(core.GameService):
         super().__init__(*args, **kwargs)
         self.engines = engine_pool or StickyEnginePool(process_count)
         self.io_workers = int(io_workers)
-        source = Path(__file__).resolve()
-        self.extension_identity = {
-            "source_path": str(source),
-            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-            "policy": POLICY,
-        }
         self.io = ThreadPoolExecutor(max_workers=io_workers, thread_name_prefix="alfworld-durable-io")
         self.telemetry = ThreadPoolExecutor(max_workers=1, thread_name_prefix="alfworld-http-timing")
         self.operations, self.telemetry_pending, self.telemetry_errors = {}, set(), []
@@ -251,7 +244,6 @@ class ParallelGameService(core.GameService):
                 "environment_processes": len(self.engines.executors),
                 "environment_worker_pids": self.engines.pids,
                 "io_concurrency": self.io_workers,
-                "environment_extension": self.extension_identity,
                 "timing_writes_pending": len(self.telemetry_pending),
                 "timing_write_errors": len(self.telemetry_errors),
                 "action_request_ids": True,
@@ -646,7 +638,6 @@ async def serve(args):
         "io_workers": args.io_workers,
         "environment_worker_pids": service.engines.pids,
         "io_concurrency": args.io_workers,
-        "environment_extension": service.extension_identity,
         "action_request_ids": True,
         "action_request_protocol": "alfworld-step-request-id-v1",
         "server_instance_id": service.server_instance_id,

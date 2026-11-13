@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
+import importlib
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
-from verl.experimental.skill_harness.bootstrap import configure_runtime
-
-configure_runtime(register_tasks=False)
+try:
+    importlib.import_module("uni_agent")
+except ModuleNotFoundError:
+    entry, framework = ModuleType("uni_agent.framework.entry"), ModuleType("uni_agent.framework.framework")
+    entry.AgentFrameworkRolloutAdapter, framework.GatewayAgentFramework = object, object
+    sys.modules.update({entry.__name__: entry, framework.__name__: framework})
+    try:
+        importlib.import_module("verl.experimental.skill_harness.framework")
+    finally:
+        sys.modules.pop(entry.__name__)
+        sys.modules.pop(framework.__name__)
 
 import torch  # noqa: E402
 from tensordict import TensorDict  # noqa: E402
 from tensordict.tensorclass import NonTensorData, NonTensorStack  # noqa: E402
 
-from verl.experimental.skill_harness.trainer import SkillSyncTrainer  # noqa: E402
+from verl.experimental.skill_harness.joint_trainer import SkillJointSyncTrainer  # noqa: E402
 from verl.utils import tensordict_utils as tu  # noqa: E402
 
 
@@ -45,13 +55,13 @@ class EpisodeMetricsAdapterTest(unittest.TestCase):
         # the NonTensorStack wrapper understood by the supported verl helper.
         self.assertEqual(type(data["uid"]).__name__, "LinkedList")
         with tempfile.TemporaryDirectory() as directory:
-            trainer = object.__new__(SkillSyncTrainer)
+            trainer = object.__new__(SkillJointSyncTrainer)
             trainer.artifact_root = Path(directory)
             batch = SimpleNamespace(keys=["a_0_0", "a_0_1", "b_0_0"], partition_id="train", tags=[{}, {}, {}])
             metrics = {"actor/grad_norm": 1.25, "actor/pg_loss": 0.0}
             with (
-                patch("verl.experimental.skill_harness.trainer.PPOTrainerSync._compute_metrics"),
-                patch("verl.experimental.skill_harness.trainer.tq.kv_batch_get", return_value=data),
+                patch("verl.experimental.skill_harness.joint_trainer.PPOTrainerSync._compute_metrics"),
+                patch("verl.experimental.skill_harness.joint_trainer.tq.kv_batch_get", return_value=data),
             ):
                 trainer._compute_metrics(batch, metrics, {}, global_steps=1, epoch=0)
             self.assertEqual(metrics["train/episodes"], 2)
