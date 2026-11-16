@@ -1,4 +1,5 @@
 """Use installed packages and Ray configuration without modifying imports."""
+
 from __future__ import annotations
 
 import importlib
@@ -27,13 +28,32 @@ def configure_worker():
 
 def runtime_env_config():
     names = (
-        "ALFWORLD_RUNTIME_CONFIG", "ALFWORLD_SERVER_CONFIG", "ALFWORLD_TASK_CONFIG",
-        "ALFWORLD_ENV_PYTHON", "ALFWORLD_ENV_SERVER", "ALFWORLD_BENCHMARK_ROOT",
-        "ALFWORLD_CODEX_PACKAGE_ROOT", "CODEX_NATIVE_BIN", "ALFWORLD_SOLVER_INSTRUCTIONS_FILE",
-        "SKILL_RUN_DIR", "SKILL_DATA_DIR", "ALFWORLD_DATA_DIR", "MODEL_PATH", "MODEL_NAME",
-        "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE", "UV_OFFLINE",
-        "PIP_NO_INDEX", "WANDB_MODE", "VLLM_NO_USAGE_STATS", "DO_NOT_TRACK",
-        "TOKENIZERS_PARALLELISM", "VLLM_WORKER_MULTIPROC_METHOD",
+        "ALFWORLD_RUNTIME_CONFIG",
+        "ALFWORLD_SERVER_CONFIG",
+        "ALFWORLD_TASK_CONFIG",
+        "ALFWORLD_ENV_PYTHON",
+        "ALFWORLD_ENV_SERVER",
+        "ALFWORLD_BENCHMARK_ROOT",
+        "ALFWORLD_CODEX_PACKAGE_ROOT",
+        "CODEX_NATIVE_BIN",
+        "ALFWORLD_SOLVER_INSTRUCTIONS_FILE",
+        "SKILL_RUN_DIR",
+        "SKILL_DATA_DIR",
+        "ALFWORLD_DATA_DIR",
+        "MODEL_PATH",
+        "MODEL_NAME",
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
+        "HF_DATASETS_OFFLINE",
+        "UV_OFFLINE",
+        "PIP_NO_INDEX",
+        "WANDB_MODE",
+        "VLLM_NO_USAGE_STATS",
+        "DO_NOT_TRACK",
+        "TOKENIZERS_PARALLELISM",
+        "VLLM_WORKER_MULTIPROC_METHOD",
+        "TMPDIR",
+        "RAY_TMPDIR",
     )
     return {
         "env_vars": {name: os.environ[name] for name in names if name in os.environ},

@@ -279,6 +279,16 @@ def publish_assets(profile):
     command.chmod(0o755)
 
 
+def prepare_temporary_directories(environment):
+    """Create explicitly configured scratch roots before child interpreters start."""
+    for name in ("TMPDIR", "RAY_TMPDIR"):
+        if environment.get(name):
+            path = absolute_path(environment[name], name)
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if not path.is_dir():
+                raise ValueError(f"{name} must identify a directory")
+
+
 def training_arguments(profile, *, smoke=False, recipe_overrides=(), overrides=()):
     """Compose configuration once, with explicit CLI values taking priority."""
     declared = profile.get("hydra_overrides", [])
@@ -322,6 +332,7 @@ def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), 
     # A fresh run never overwrites previous data, capabilities or account state.
     run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
     (run_dir / "config").mkdir(mode=0o700)
+    prepare_temporary_directories(environment)
     write_private_json(Path(environment["ALFWORLD_RUNTIME_CONFIG"]), runtime)
     if "task_config" in profile:
         task_path = run_dir / "config/task.json"

@@ -118,6 +118,15 @@ sets fresh run-local data, runtime, service and generated task paths. The
 optional `ALFWORLD_ENV_SERVER` selects the existing request-ID backend protocol;
 its default is this recipe's `scripts/parallel_environment_server.py`.
 
+Optional `environment.TMPDIR` and `environment.RAY_TMPDIR` select absolute
+scratch locations. The launcher creates them before starting child interpreters
+and forwards them to Ray workers. Keep the Ray path short enough for Unix
+sockets, and place durable logs and checkpoints in `--run-dir`. The environment
+backend reuses idle legacy TextWorld planners within each engine process;
+planner mappings are bounded by peak simultaneous sessions rather than the
+number of completed episodes. Every acquisition gets fresh ALFWorld wrappers
+and reloads its game, and closed sessions reject further actions.
+
 The task configuration selects `alfworld_skill_training`, the actual native
 Codex executable, a public model catalog and local sandbox settings. Native
 policy is applied directly by the task. `alfworld-step` is only the public

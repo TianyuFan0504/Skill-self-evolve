@@ -16,6 +16,7 @@ import secrets
 import signal
 import time
 import uuid
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -29,6 +30,106 @@ else:
     from budget import BUDGET_POLICY_VERSION, BudgetOutcomeUnknown, digest, make_registration, write_private_json
     from data import OFFICIAL_SPLITS, build_catalog, catalog_digest, load_catalog, sha256_file
     from protocol import public_state, validate_game_reference
+
+
+_IDLE_TEXTWORLD_ENVIRONMENTS = []
+_CLOSED_TEXTWORLD_ENVIRONMENTS = weakref.WeakSet()
+
+
+class _TextWorldSession:
+    """A session cannot call an engine after returning it to the idle pool."""
+
+    def __init__(self, environment):
+        self._environment = environment
+        self._closed = False
+
+    @property
+    def unwrapped(self):
+        return getattr(self._environment, "unwrapped", self._environment)
+
+    def _call(self, operation, *args, **kwargs):
+        if self._closed:
+            raise RuntimeError("The TextWorld session is closed")
+        return getattr(self._environment, operation)(*args, **kwargs)
+
+    def load(self, *args, **kwargs):
+        return self._call("load", *args, **kwargs)
+
+    def seed(self, *args, **kwargs):
+        return self._call("seed", *args, **kwargs)
+
+    def reset(self, *args, **kwargs):
+        return self._call("reset", *args, **kwargs)
+
+    def step(self, *args, **kwargs):
+        return self._call("step", *args, **kwargs)
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            self._environment.close()
+
+
+def start_textworld_environment(game_path):
+    """Load an ALFWorld game, reusing an idle legacy planner in this engine process."""
+    import textworld
+    from alfworld.agents.environment.alfred_tw_env import AlfredDemangler, AlfredInfos
+
+    infos = textworld.EnvInfos(won=True, admissible_commands=True, extras=["gamefile"])
+    if _IDLE_TEXTWORLD_ENVIRONMENTS:
+        root = _IDLE_TEXTWORLD_ENVIRONMENTS.pop()
+        root.request_infos = infos
+        env = _TextWorldSession(AlfredInfos(AlfredDemangler(root, shuffle=False)))
+        try:
+            env.load(str(game_path))
+        except BaseException as error:
+            try:
+                close_textworld_environment(env)
+            except BaseException as cleanup_error:
+                if hasattr(error, "add_note"):
+                    error.add_note("Environment cleanup also failed: " + repr(cleanup_error))
+            raise
+        return env
+
+    return _TextWorldSession(
+        textworld.start(str(game_path), request_infos=infos, wrappers=[AlfredDemangler(shuffle=False), AlfredInfos])
+    )
+
+
+def close_textworld_environment(env):
+    """Close an ALFWorld environment and retain reusable legacy planner mappings."""
+    if env in _CLOSED_TEXTWORLD_ENVIRONMENTS:
+        return
+    root = getattr(env, "unwrapped", env)
+
+    def release_planner():
+        if getattr(root, "downward_lib", None) is None:
+            return
+
+        import textworld
+        from textworld.envs.pddl.pddl import PddlEnv
+
+        # Upstream implementations with their own close own the library lifetime.
+        if isinstance(root, PddlEnv) and type(root).close is textworld.Environment.close:
+            # Never retry a partially failed native cleanup. An idle environment
+            # is acquired only after a successful cleanup and a fresh public load.
+            _CLOSED_TEXTWORLD_ENVIRONMENTS.add(env)
+            root._pddl_state = None
+            root.downward_lib.cleanup()
+            # dlclose is unsafe with this planner's shared C++ registries.
+            # Retaining and reusing mappings bounds storage by peak live sessions.
+            _IDLE_TEXTWORLD_ENVIRONMENTS.append(root)
+
+    try:
+        env.close()
+    except BaseException as error:
+        try:
+            release_planner()
+        except BaseException as cleanup_error:
+            if hasattr(error, "add_note"):
+                error.add_note("Planner cleanup also failed: " + repr(cleanup_error))
+        raise
+    release_planner()
 
 
 class GameService:
@@ -93,15 +194,17 @@ class GameService:
             raise web.HTTPConflict(text="The game file changed after catalog preparation")
 
         def initialize():
-            import textworld
-            from alfworld.agents.environment.alfred_tw_env import AlfredDemangler, AlfredInfos
-
-            infos = textworld.EnvInfos(won=True, admissible_commands=True, extras=["gamefile"])
-            env = textworld.start(
-                str(game_path), request_infos=infos, wrappers=[AlfredDemangler(shuffle=False), AlfredInfos]
-            )
-            env.seed(42)
-            return env, env.reset()
+            env = start_textworld_environment(game_path)
+            try:
+                env.seed(42)
+                return env, env.reset()
+            except BaseException as error:
+                try:
+                    close_textworld_environment(env)
+                except BaseException as cleanup_error:
+                    if hasattr(error, "add_note"):
+                        error.add_note("Environment cleanup also failed: " + repr(cleanup_error))
+                raise
 
         env, state = await asyncio.to_thread(initialize)
         session_id = uuid.uuid4().hex
@@ -348,7 +451,7 @@ class GameService:
             result["episode_budget"] = self._budget_snapshot(session, closed=True, close_reason=termination_reason)
             write_private_json(session["output"] / "budget-environment.json", result["episode_budget"])
         (session["output"] / "engine-result.json").write_text(json.dumps(result, indent=2) + "\n")
-        await asyncio.to_thread(session["env"].close)
+        await asyncio.to_thread(close_textworld_environment, session["env"])
         self.sessions.pop(session["id"], None)
         return result
 

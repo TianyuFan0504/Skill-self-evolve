@@ -149,6 +149,22 @@ class LaunchTests(unittest.TestCase):
             self.mocked_launch()
         self.assertEqual(marker.read_text(), "old state\n")
 
+    def test_declared_scratch_directories_exist_before_child_interpreters(self):
+        temporary = self.root / "scratch/{run_id}"
+        ray = self.root / "ray-scratch"
+        self.profile["environment"].update(TMPDIR=str(temporary), RAY_TMPDIR=str(ray))
+        original = FakeSupervisor.spawn
+
+        def spawn(supervisor, name, command):
+            self.assertTrue(Path(supervisor.environment["TMPDIR"]).is_dir())
+            self.assertTrue(Path(supervisor.environment["RAY_TMPDIR"]).is_dir())
+            return original(supervisor, name, command)
+
+        with patch.object(FakeSupervisor, "spawn", spawn):
+            supervisor, _ = self.mocked_launch()
+        self.assertEqual(supervisor.environment["TMPDIR"], str(self.root / "scratch/run-one"))
+        self.assertTrue(ray.is_dir())
+
     def test_recipe_overrides_follow_smoke_and_precede_cli_for_both_checks_and_training(self):
         recipe = ["trainer.total_training_steps=3", "data.train_batch_size=8"]
         cli = ["trainer.total_training_steps=5", "data.train_batch_size=4"]

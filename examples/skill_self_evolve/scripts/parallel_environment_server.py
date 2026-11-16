@@ -50,18 +50,16 @@ def _engine_operation(operation, payload):
     if operation == "ping":
         result = {"pid": os.getpid()}
     elif operation == "create":
-        import textworld
-        from alfworld.agents.environment.alfred_tw_env import AlfredDemangler, AlfredInfos
-
-        infos = textworld.EnvInfos(won=True, admissible_commands=True, extras=["gamefile"])
-        env = textworld.start(
-            payload["game_path"], request_infos=infos, wrappers=[AlfredDemangler(shuffle=False), AlfredInfos]
-        )
+        env = core.start_textworld_environment(payload["game_path"])
         try:
             env.seed(42)
             state = env.reset()
-        except BaseException:
-            env.close()
+        except BaseException as error:
+            try:
+                core.close_textworld_environment(env)
+            except BaseException as cleanup_error:
+                if hasattr(error, "add_note"):
+                    error.add_note("Environment cleanup also failed: " + repr(cleanup_error))
             raise
         _ENGINES[session_id] = env
         result = {"state": _state_projection(state)}
@@ -79,7 +77,7 @@ def _engine_operation(operation, payload):
                 "done": bool(done),
             }
     elif operation == "close":
-        _ENGINES.pop(session_id).close()
+        core.close_textworld_environment(_ENGINES.pop(session_id))
         result = {}
     else:
         raise ValueError("Unknown engine operation")

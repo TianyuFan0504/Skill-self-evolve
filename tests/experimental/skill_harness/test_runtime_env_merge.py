@@ -3,6 +3,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from omegaconf import OmegaConf
 
@@ -32,6 +33,12 @@ class RuntimeEnvironmentMergeTest(unittest.TestCase):
         config = OmegaConf.create({"ray_kwargs": {"ray_init": {"runtime_env": {"pip": ["external-package"]}}}})
         with self.assertRaises(ValueError):
             bootstrap.apply_runtime_environment(config, {})
+
+    def test_explicit_scratch_configuration_reaches_ray_workers(self):
+        with patch.dict("os.environ", {"TMPDIR": "/explicit/scratch", "RAY_TMPDIR": "/explicit/ray"}):
+            environment = bootstrap.runtime_env_config()["env_vars"]
+        self.assertEqual(environment["TMPDIR"], "/explicit/scratch")
+        self.assertEqual(environment["RAY_TMPDIR"], "/explicit/ray")
 
 
 if __name__ == "__main__":
