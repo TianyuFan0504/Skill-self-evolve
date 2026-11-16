@@ -65,6 +65,27 @@ async def _resolve(value):
     return await value if inspect.isawaitable(value) else value
 
 
+def _consume_observation(task):
+    if not task.cancelled():
+        task.exception()
+
+
+async def _observe_with_timeout(value, timeout):
+    observation = asyncio.create_task(_resolve(value))
+    try:
+        # Unlike wait_for on Python 3.10/3.11, wait preserves owner cancellation
+        # even when the observation completes in the same event-loop turn.
+        done, _ = await asyncio.wait((observation,), timeout=timeout)
+        if not done:
+            raise asyncio.TimeoutError()
+        return observation.result()
+    finally:
+        if not observation.done():
+            observation.cancel()
+        # Observer cleanup must not delay or replace the owner's cancellation.
+        observation.add_done_callback(_consume_observation)
+
+
 def _validated_state(value):
     """Return None for UNKNOWN, not a fabricated nonterminal/terminal state."""
     if not isinstance(value, Mapping) or any(type(value.get(key)) is not bool for key in ("done", "won")):
@@ -185,7 +206,7 @@ async def monitor_terminal_process(
             phase = "observation"
             observations += 1
             try:
-                value = await asyncio.wait_for(_resolve(observe()), timeout=observation_timeout_seconds)
+                value = await _observe_with_timeout(observe(), observation_timeout_seconds)
             except Exception as error:
                 error_count += 1
                 if type(error).__name__ not in error_types and len(error_types) < 8:

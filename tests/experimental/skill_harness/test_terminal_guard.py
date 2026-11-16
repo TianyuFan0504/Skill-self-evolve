@@ -54,6 +54,20 @@ class TerminalGuardTests(unittest.IsolatedAsyncioTestCase):
                 "process_id": proc.pid, "poll_seconds": 0.005, "observation_timeout_seconds": 0.02,
                 "on_evidence": received.append}, signals, received
 
+    def start_monitor(self, callbacks):
+        cancellations = []
+
+        async def run():
+            try:
+                return await guard.monitor_terminal_process(**callbacks)
+            except asyncio.CancelledError as error:
+                # Python 3.10 replaces this exception when another task awaits
+                # the cancelled owner. Inspect the guard's original at its boundary.
+                cancellations.append(error)
+                raise
+
+        return asyncio.create_task(run()), cancellations
+
     async def test_proven_terminal_stops_only_the_owned_group_after_grace(self):
         proc = await self.spawn()
         callbacks, signals, received = self.callbacks(proc, {"done": True, "won": False, "steps": 50, "max_steps": 50})
@@ -142,18 +156,57 @@ class TerminalGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(signals, [])
 
     async def test_owner_cancellation_propagates_without_stealing_cleanup(self):
-        proc = await self.spawn()
+        proc = await self.spawn(1)
         callbacks, signals, received = self.callbacks(proc, {"done": False, "won": False})
-        task = asyncio.create_task(guard.monitor_terminal_process(**callbacks))
-        await asyncio.sleep(0.02)
-        task.cancel("owner cancellation")
-        with self.assertRaises(asyncio.CancelledError) as raised:
+
+        async def observe():
+            # Deliver cancellation after this observer completes, before its
+            # waiting owner resumes: wait_for swallowed this race on Python 3.10/3.11.
+            asyncio.get_running_loop().call_soon(task.cancel, "owner cancellation")
+            return {"done": False, "won": False}
+
+        callbacks["observe"] = observe
+        task, cancellations = self.start_monitor(callbacks)
+        with self.assertRaises(asyncio.CancelledError):
             await task
-        self.assertEqual(str(raised.exception), "owner cancellation")
-        self.assertEqual(raised.exception.terminal_stop_evidence.status, "cancelled")
+        self.assertEqual(str(cancellations[0]), "owner cancellation")
+        self.assertEqual(cancellations[0].terminal_stop_evidence.status, "cancelled")
         self.assertEqual(received[0].status, "cancelled")
         self.assertEqual(signals, [])
         self.assertIsNone(proc.returncode)  # Owner/test cleanup remains responsible.
+
+    async def test_cancelled_observer_cleanup_error_is_consumed(self):
+        proc = await self.spawn(1)
+        callbacks, signals, _ = self.callbacks(proc, None)
+        started, cleaned = asyncio.Event(), asyncio.Event()
+        loop = asyncio.get_running_loop()
+        loop_errors = []
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+        async def observe():
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cleaned.set()
+                raise OSError("observer cleanup failed")
+
+        callbacks.update(observe=observe, observation_timeout_seconds=1)
+        task, cancellations = self.start_monitor(callbacks)
+        try:
+            await started.wait()
+            task.cancel("owner")
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertEqual(str(cancellations[0]), "owner")
+            await cleaned.wait()
+            await asyncio.sleep(0)  # Let the completed observer's outcome callback run.
+            self.assertEqual(loop_errors, [])
+            self.assertEqual(signals, [])
+            self.assertIsNone(proc.returncode)
+        finally:
+            loop.set_exception_handler(previous_handler)
 
     async def test_termination_error_propagates_same_exception_with_evidence(self):
         proc = await self.spawn()
@@ -197,21 +250,24 @@ class TerminalGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.alive_after_termination)
 
     async def test_evidence_sink_error_cannot_mask_original_cancellation(self):
-        proc = await self.spawn()
+        proc = await self.spawn(1)
         callbacks, signals, _ = self.callbacks(proc, {"done": False, "won": False})
         delivery_error = OSError("evidence filesystem unavailable")
 
         def sink(_evidence):
             raise delivery_error
 
+        async def observe():
+            asyncio.get_running_loop().call_soon(task.cancel, "owner")
+            return {"done": False, "won": False}
+
+        callbacks["observe"] = observe
         callbacks["on_evidence"] = sink
-        task = asyncio.create_task(guard.monitor_terminal_process(**callbacks))
-        await asyncio.sleep(0.02)
-        task.cancel("owner")
-        with self.assertRaises(asyncio.CancelledError) as raised:
+        task, cancellations = self.start_monitor(callbacks)
+        with self.assertRaises(asyncio.CancelledError):
             await task
-        self.assertIs(raised.exception.terminal_stop_evidence_delivery_error, delivery_error)
-        self.assertEqual(str(raised.exception), "owner")
+        self.assertIs(cancellations[0].terminal_stop_evidence_delivery_error, delivery_error)
+        self.assertEqual(str(cancellations[0]), "owner")
         self.assertEqual(signals, [])
 
     async def test_normal_evidence_sink_error_is_not_silently_swallowed(self):
