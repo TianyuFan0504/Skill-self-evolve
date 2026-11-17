@@ -27,6 +27,13 @@ ACTION_REQUEST_PROTOCOL = "alfworld-step-request-id-v1"
 _MISSING = object()
 
 
+def spawn_owned_service(argv, *, stdout, env=None, cwd=None):
+    """Load the stdlib launcher without importing the training package."""
+    from .alfworld.native_process import spawn_owned_service as spawn
+
+    return spawn(argv, stdout=stdout, env=env, cwd=cwd)
+
+
 def _get(value, key, default=None):
     return value.get(key, default) if isinstance(value, Mapping) else getattr(value, key, default)
 
@@ -157,7 +164,7 @@ def _health(settings, *, digest, max_steps, budget_seconds):
 
 
 def _stop_owned_service(process):
-    """Operate only on our Popen handle; never signal the training config PID."""
+    """Operate only on our service handle; never signal the training config PID."""
     if process.poll() is None:
         process.terminate()
         try:
@@ -236,14 +243,7 @@ def official_test_service(
             *map(str, environment_args),
         ]
         with (runtime / "server.log").open("ab") as output:
-            process = subprocess.Popen(
-                argv,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                close_fds=True,
-            )
+            process = spawn_owned_service(argv, stdout=output)
         deadline = time.monotonic() + startup_timeout
         while True:
             if process.poll() is not None:

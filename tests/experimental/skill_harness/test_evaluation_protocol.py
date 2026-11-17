@@ -168,8 +168,8 @@ class EvaluationProtocolTest(unittest.TestCase):
             self.assertEqual(argv[0:2], ["ENV-PYTHON", str(self.backend)])
             self.assertIn("--budget-seconds", argv)
             self.assertEqual(argv[-4:], ["--environment-processes", "2", "--io-workers", "1"])
-            self.assertTrue(kwargs["start_new_session"])
-            self.assertTrue(kwargs["close_fds"])
+            self.assertEqual(set(kwargs), {"stdout"})
+            self.assertTrue(kwargs["stdout"].writable())
             process = Mock(pid=456, returncode=0)
             process.poll.return_value = None
             process.terminate.side_effect = lambda: setattr(process.poll, "return_value", 0)
@@ -237,7 +237,7 @@ class EvaluationProtocolTest(unittest.TestCase):
         before = self.config.read_bytes()
         start, processes = self.fake_process_factory(ready=True)
         with (
-            patch.object(evaluation.subprocess, "Popen", side_effect=start),
+            patch.object(evaluation, "spawn_owned_service", side_effect=start),
             patch.object(evaluation, "_health", return_value=True),
         ):
             with self.assertRaisesRegex(RuntimeError, "episode failure"):
@@ -254,7 +254,7 @@ class EvaluationProtocolTest(unittest.TestCase):
         before = self.config.read_bytes()
         start, processes = self.fake_process_factory(ready=False)
         with (
-            patch.object(evaluation.subprocess, "Popen", side_effect=start),
+            patch.object(evaluation, "spawn_owned_service", side_effect=start),
             patch.object(evaluation, "_atomic_bytes") as replace,
         ):
             with self.assertRaises(TimeoutError):
@@ -264,6 +264,7 @@ class EvaluationProtocolTest(unittest.TestCase):
         processes[0].terminate.assert_called_once()
         self.assertEqual(self.config.read_bytes(), before)
 
+    @unittest.skipUnless(sys.platform == "linux", "Owned evaluation services require Linux")
     def test_real_configured_backend_routes_final_tests_and_preserves_provider(self):
         self.backend.write_text('''
 import argparse, json, os
@@ -307,7 +308,14 @@ server.serve_forever()
         original = self.config.read_bytes()
         kwargs = self.service_kwargs()
         kwargs["environment_python"] = sys.executable
-        with evaluation.official_test_service(**kwargs, startup_timeout=5):
+        native_path = PATH.with_name("alfworld") / "native_process.py"
+        native_spec = importlib.util.spec_from_file_location("_evaluation_test_native_process", native_path)
+        native = importlib.util.module_from_spec(native_spec)
+        native_spec.loader.exec_module(native)
+        with (
+            patch.object(evaluation, "spawn_owned_service", native.spawn_owned_service),
+            evaluation.official_test_service(**kwargs, startup_timeout=5),
+        ):
             routed = json.loads(self.config.read_bytes())
             self.assertEqual(set(routed["allowed_splits"]), set(evaluation.TEST_SPLITS.values()))
             self.assertEqual(routed["budget_seconds"], 900)

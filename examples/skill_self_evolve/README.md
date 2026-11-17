@@ -39,9 +39,9 @@ and restores model, optimizer, EMA, dataloader and delayed-credit state. The
 checkpoint is validated once; actor and EMA tensors load directly from it,
 while mutable skill/replay/ledger state restores into a fresh directory.
 
-Native solver and curator processes start through `posix_spawn` and a fresh
-standard-library bootstrap, avoiding a Python fork from multithreaded Ray
-workers. The bootstrap closes inherited descriptors, establishes the working
+Native solver, curator and final evaluation service processes start through
+`posix_spawn` and a fresh standard-library bootstrap, avoiding a Python fork
+from multithreaded Ray workers. The bootstrap closes inherited descriptors, establishes the working
 directory and executes the existing account launcher. The task runner also
 applies a 1,200-second runner timeout, including setup and cleanup,
 separate from the 900-second Native execution budget. Override it with

@@ -12,8 +12,11 @@ import errno
 import fcntl
 import json
 import os
+import select
 import signal
+import subprocess
 import sys
+import time
 
 
 def _require_linux():
@@ -240,13 +243,19 @@ class NativeProcess:
                 transport.close()
 
 
-async def spawn_native_process(argv, *, env, cwd, pass_fds=()):
-    """Spawn a new Linux session with captured output and explicit inherited FDs.
+def _wait_owned_pid(pid, timeout):
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        child, status = os.waitpid(pid, os.WNOHANG)
+        if child:
+            return os.waitstatus_to_exitcode(status)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired("owned native process", timeout)
+        time.sleep(0.01)
 
-    ``argv`` and ``env`` are delivered unchanged to execvpe. ``wait`` observes
-    direct-child exit, even while descendants still hold its output pipes open.
-    A failure or cancellation before return kills and reaps the owned group.
-    """
+
+def _spawn_bootstrap(argv, *, env, cwd, stdout_fd, stderr_fd, pass_fds=(), close_fds=()):
+    """The shared descriptor/signal/session boundary for both process APIs."""
     _require_linux()
     arguments = [os.fspath(value) for value in argv]
     if not arguments or any(not isinstance(value, str) for value in arguments):
@@ -256,12 +265,11 @@ async def spawn_native_process(argv, *, env, cwd, pass_fds=()):
         raise ValueError("Pass descriptors must be integers greater than two")
     for descriptor in inherited:
         os.fstat(descriptor)
-    directory = os.path.abspath(os.fspath(cwd))
+    directory = os.getcwd() if cwd is None else os.path.abspath(os.fspath(cwd))
     executable = os.path.abspath(sys.executable)
     helper = os.path.abspath(__file__)
     bootstrap = [executable, "-I", "-S", helper, "--exec", directory, json.dumps(inherited), *arguments]
     owned = set()
-    process = None
     pid = None
     try:
         stdin = os.open(os.devnull, os.O_RDONLY | os.O_CLOEXEC)
@@ -272,26 +280,139 @@ async def spawn_native_process(argv, *, env, cwd, pass_fds=()):
             os.close(stdin)
             owned.remove(stdin)
             stdin = replacement
-        stdout_read, stdout_write = _pipe()
-        owned.update((stdout_read, stdout_write))
-        stderr_read, stderr_write = _pipe()
-        owned.update((stderr_read, stderr_write))
         ready_read, ready_write = _pipe()
         owned.update((ready_read, ready_write))
         bootstrap.insert(7, str(ready_write))
         actions = [
             (os.POSIX_SPAWN_DUP2, stdin, 0),
-            (os.POSIX_SPAWN_DUP2, stdout_write, 1),
-            (os.POSIX_SPAWN_DUP2, stderr_write, 2),
+            (os.POSIX_SPAWN_DUP2, stdout_fd, 1),
+            (os.POSIX_SPAWN_DUP2, stderr_fd, 2),
             (os.POSIX_SPAWN_DUP2, ready_write, ready_write),
             *((os.POSIX_SPAWN_DUP2, descriptor, descriptor) for descriptor in inherited),
-            *((os.POSIX_SPAWN_CLOSE, descriptor) for descriptor in sorted(owned) if descriptor != ready_write),
+            *(
+                (os.POSIX_SPAWN_CLOSE, descriptor)
+                for descriptor in sorted(owned | set(close_fds) | {stdout_fd, stderr_fd})
+                if descriptor > 2 and descriptor != ready_write and descriptor not in inherited
+            ),
         ]
         defaults = tuple(getattr(signal, name) for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ") if hasattr(signal, name))
-        pid = os.posix_spawn(executable, bootstrap, dict(env), file_actions=actions, setsigmask=(), setsigdef=defaults)
+        pid = os.posix_spawn(
+            executable,
+            bootstrap,
+            dict(os.environ if env is None else env),
+            file_actions=actions,
+            setsigmask=(),
+            setsigdef=defaults,
+        )
+        _close_fds((stdin, ready_write))
+        owned.difference_update((stdin, ready_write, ready_read))
+        return pid, ready_read
+    except BaseException as error:
+        if pid is not None:
+            try:
+                _kill_owned_process(pid)
+                _wait_owned_pid(pid, 5)
+            except BaseException as cleanup_error:
+                if hasattr(error, "add_note"):
+                    error.add_note("Native bootstrap cleanup failed: " + repr(cleanup_error))
+        raise
+    finally:
+        _close_fds(owned)
+
+
+class OwnedServiceProcess:
+    """Synchronous, exact-child ownership for the evaluation environment service."""
+
+    def __init__(self, pid):
+        self.pid, self.returncode = pid, None
+        self._session_ready = False
+
+    def poll(self):
+        if self.returncode is None:
+            child, status = os.waitpid(self.pid, os.WNOHANG)
+            if child:
+                self.returncode = os.waitstatus_to_exitcode(status)
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            self.returncode = _wait_owned_pid(self.pid, timeout)
+        return self.returncode
+
+    def terminate(self):
+        if self.returncode is None:
+            try:
+                os.kill(self.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    def kill(self):
+        if self.returncode is None:
+            _kill_owned_process(self.pid, group_owned=self._session_ready)
+
+
+def spawn_owned_service(argv, *, stdout, env=None, cwd=None):
+    """Launch an owned service with merged file output, without a Python fork."""
+    pid = ready_read = process = None
+    try:
+        descriptor = stdout if isinstance(stdout, int) else stdout.fileno()
+        pid, ready_read = _spawn_bootstrap(
+            argv,
+            env=env,
+            cwd=cwd,
+            stdout_fd=descriptor,
+            stderr_fd=descriptor,
+        )
+        process = OwnedServiceProcess(pid)
+        readable, _, _ = select.select((ready_read,), (), (), 10)
+        if not readable:
+            raise TimeoutError("Native bootstrap did not acknowledge its session")
+        if os.read(ready_read, 1) != b"\x01":
+            raise RuntimeError("Native bootstrap exited before session acknowledgement")
+        process._session_ready = True
+        return process
+    except BaseException as error:
+        if pid is not None:
+            try:
+                if process is None:
+                    _kill_owned_process(pid)
+                    _wait_owned_pid(pid, 5)
+                elif process.returncode is None:
+                    process.kill()
+                    process.wait(timeout=5)
+            except BaseException as cleanup_error:
+                if hasattr(error, "add_note"):
+                    error.add_note("Owned service cleanup failed: " + repr(cleanup_error))
+        raise
+    finally:
+        if ready_read is not None:
+            _close_fds((ready_read,))
+
+
+async def spawn_native_process(argv, *, env, cwd, pass_fds=()):
+    """Spawn an owned native session with async output and direct-child exit proof."""
+    _require_linux()
+    owned = set()
+    process = None
+    pid = None
+    try:
+        stdout_read, stdout_write = _pipe()
+        owned.update((stdout_read, stdout_write))
+        stderr_read, stderr_write = _pipe()
+        owned.update((stderr_read, stderr_write))
+        pid, ready_read = _spawn_bootstrap(
+            argv,
+            env=env,
+            cwd=cwd,
+            stdout_fd=stdout_write,
+            stderr_fd=stderr_write,
+            pass_fds=pass_fds,
+            close_fds=owned,
+        )
+        owned.add(ready_read)
         process = NativeProcess(pid, asyncio.get_running_loop())
-        _close_fds((stdin, stdout_write, stderr_write, ready_write))
-        owned.difference_update((stdin, stdout_write, stderr_write, ready_write))
+        _close_fds((stdout_write, stderr_write))
+        owned.difference_update((stdout_write, stderr_write))
         process.stdout, transport = await _attach_reader(stdout_read)
         owned.remove(stdout_read)
         process._transports.append(transport)
