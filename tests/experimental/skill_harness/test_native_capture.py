@@ -95,13 +95,65 @@ class NativeLaunchCancellationTest(unittest.IsolatedAsyncioTestCase):
 
             argv = ["bash", "-c", f"env CODEX_HOME={home} /native/codex exec --json"]
             with patch.object(task.os, "pipe", side_effect=owned_pipe):
-                with patch.object(task.asyncio, "create_subprocess_exec", new_callable=AsyncMock) as launch:
+                with patch.object(task, "spawn_native_process", new_callable=AsyncMock) as launch:
                     with self.assertRaises(asyncio.CancelledError) as caught:
                         await sandbox._exec(argv, timeout=900, workdir=directory)
                     self.assertIs(caught.exception, cancelled)
                     launch.assert_not_called()
             self.assertFalse(sandbox.native_started)
             self.assertEqual(len(pipe_fds), 2)
+            for descriptor in pipe_fds:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+    async def test_spawn_failure_preserves_isolation_plan_and_closes_ready_pipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path("/tmp") / ("codex-home-" + uuid.uuid4().hex)
+            self.addCleanup(shutil.rmtree, home, True)
+            pool = Mock()
+            pool.prepare_resource.side_effect = lambda path, **kwargs: Path(path).mkdir(mode=0o700)
+            pool.command_environment.return_value = {"PATH": os.defpath}
+            child = ["/usr/bin/setpriv", "--clear-groups", "/isolated/launcher"]
+            pool.launch_arguments.return_value = (child, {"TMPDIR": directory}, None)
+            sandbox = Sandbox(
+                "http://127.0.0.1",
+                Path(directory),
+                account=types.SimpleNamespace(pw_uid=os.geteuid(), pw_gid=os.getegid()),
+                account_pool=pool,
+                account_lease={"lease_id": "unit"},
+                attempt_id="unit",
+            )
+            sandbox.native_binary = "/native/codex"
+            sandbox.solver_instructions = "/policy/solver.md"
+            sandbox.disabled_native_features = []
+            sandbox.register_native_budget = AsyncMock(return_value={"deadline_ns": 2**63})
+            pipe_fds = []
+            open_pipe = os.pipe
+
+            def owned_pipe():
+                descriptors = open_pipe()
+                pipe_fds.extend(descriptors)
+                return descriptors
+
+            failure = OSError("spawn setup failed")
+            with (
+                patch.object(task.os, "pipe", side_effect=owned_pipe),
+                patch.object(task, "spawn_native_process", new_callable=AsyncMock, side_effect=failure) as launch,
+                patch.object(task.asyncio, "create_subprocess_exec", side_effect=AssertionError("fork path used")),
+            ):
+                with self.assertRaises(accounts.AccountIsolationError) as caught:
+                    await sandbox._exec(
+                        ["bash", "-c", f"env CODEX_HOME={home} /native/codex exec --json"],
+                        timeout=900,
+                        workdir=directory,
+                    )
+            self.assertIs(caught.exception.__cause__, failure)
+            launch.assert_awaited_once()
+            self.assertEqual(launch.call_args.args, (child,))
+            self.assertEqual(launch.call_args.kwargs["cwd"], directory)
+            self.assertEqual(launch.call_args.kwargs["pass_fds"], (pipe_fds[1],))
+            self.assertEqual(launch.call_args.kwargs["env"]["TMPDIR"], directory)
+            self.assertFalse(sandbox.native_started)
             for descriptor in pipe_fds:
                 with self.assertRaises(OSError):
                     os.fstat(descriptor)

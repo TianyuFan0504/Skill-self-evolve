@@ -22,6 +22,7 @@ from uni_agent.tasks.registry import register_task
 
 from .accounts import AccountIsolationError, AccountPool, TaskExecutionError, TaskSetupError
 from .data import TASK_NAME
+from .native_process import spawn_native_process
 from .protocol import (
     agent_messages,
     authoritative_reward,
@@ -572,15 +573,10 @@ class AlfworldUserSandbox(LocalSandbox):
             ):
                 raise AccountIsolationError("The registered budget expired or is invalid before native launch")
             native_started_ns = time.monotonic_ns()
-            proc = await asyncio.create_subprocess_exec(
-                *child,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            proc = await spawn_native_process(
+                child,
                 cwd=workdir,
                 env=process_env,
-                start_new_session=True,
-                close_fds=True,
                 pass_fds=(ready_write,),
             )
             self.native_started = True

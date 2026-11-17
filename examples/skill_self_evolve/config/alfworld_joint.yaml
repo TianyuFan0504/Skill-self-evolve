@@ -119,6 +119,7 @@ actor_rollout_ref:
             runner_fqn: verl.experimental.skill_harness.alfworld.runner.run_task
             dispatch_mode: ray_task
             max_concurrent_sessions: ${oc.decode:${oc.env:ROLLOUT_CONCURRENCY,64}}
+            session_timeout_seconds: ${oc.decode:${oc.env:SESSION_TIMEOUT_SECONDS,1200}}
             trajectory_selection: all
             runner_kwargs:
               task_config_path: ${oc.env:ALFWORLD_TASK_CONFIG}

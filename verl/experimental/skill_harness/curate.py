@@ -745,6 +745,8 @@ class CuratorSandbox:
     async def exec_shell(self, script, *, timeout=None, workdir=None, env=None):
         from uni_agent.sandbox.base import ExecResult
 
+        from .alfworld.native_process import spawn_native_process
+
         if env or Path(workdir).resolve() != self.workdir:
             raise CurateProtocolError("Native curator transport cannot inherit caller environment or other workspaces")
         for token in shlex.split(script):
@@ -753,20 +755,10 @@ class CuratorSandbox:
                 if Path(home).exists() or Path(home).is_symlink():
                     raise CurateProtocolError("Native curator must start with a fresh bootstrap Codex home")
                 self.native_bootstrap_homes.append(home)
-        self.process = await asyncio.create_subprocess_exec(
-            "/usr/sbin/runuser",
-            "-u",
-            self.runtime.unix_user,
-            "--",
-            "/bin/bash",
-            "-c",
-            script,
+        self.process = await spawn_native_process(
+            ["/usr/sbin/runuser", "-u", self.runtime.unix_user, "--", "/bin/bash", "-c", script],
             cwd=self.workdir,
             env=self.process_environment(),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
         )
 
         async def capture(reader, name):

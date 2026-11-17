@@ -36,6 +36,9 @@ ENVIRONMENT_KEYS = {
     "ROLLOUT_CONCURRENCY": (
         "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.max_concurrent_sessions"
     ),
+    "SESSION_TIMEOUT_SECONDS": (
+        "actor_rollout_ref.rollout.custom.agent_framework.agent_runners.task.session_timeout_seconds"
+    ),
     "MAX_NUM_SEQS": "actor_rollout_ref.rollout.max_num_seqs",
     "TRAINING_GPUS": "trainer.n_gpus_per_node",
     "CURATOR_GPUS": "skill_harness.joint.curator_gpus",
