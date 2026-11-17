@@ -182,8 +182,19 @@ class LaunchTests(unittest.TestCase):
     def test_resume_keeps_original_data_and_skips_account_initialization(self):
         checkpoint = self.resume_fixture()
         before = {p.name: p.read_bytes() for p in (self.run_dir / "data").iterdir()}
-        supervisor, _ = self.mocked_launch(resume_from=checkpoint)
+        service_config = self.run_dir / "config/environment.json"
+        service_config.write_text("previous service configuration")
+        original = FakeSupervisor.spawn
+
+        def spawn(supervisor, name, command):
+            if name == "environment":
+                self.assertFalse(service_config.exists())
+            return original(supervisor, name, command)
+
+        with patch.object(FakeSupervisor, "spawn", spawn):
+            supervisor, _ = self.mocked_launch(resume_from=checkpoint)
         self.assertEqual([name for name, _ in supervisor.commands], ["environment", "preflight", "training"])
+        self.assertEqual(json.loads(service_config.read_text())["pid"], 123)
         self.assertEqual({p.name: p.read_bytes() for p in (self.run_dir / "data").iterdir()}, before)
         for name in ("preflight", "training"):
             command = dict(supervisor.commands)[name]

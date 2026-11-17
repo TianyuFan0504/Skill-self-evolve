@@ -364,6 +364,8 @@ def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), 
     if min(processes, io_workers) < 1:
         raise ValueError("Environment process and I/O counts must be positive")
     prepare_run_directory(run_dir, resume_from)
+    if resume_from is not None:
+        Path(environment["ALFWORLD_SERVER_CONFIG"]).unlink(missing_ok=True)
     prepare_temporary_directories(environment)
     write_private_json(Path(environment["ALFWORLD_RUNTIME_CONFIG"]), runtime)
     if "task_config" in profile:
