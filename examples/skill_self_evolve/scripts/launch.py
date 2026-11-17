@@ -310,10 +310,44 @@ def training_command(environment, arguments):
     ]
 
 
-def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), dry_run=False):
+def prepare_run_directory(run_dir, resume_from):
+    if resume_from is None:
+        run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        (run_dir / "config").mkdir(mode=0o700)
+        return
+    if resume_from.parent.resolve() != (run_dir / "checkpoints").resolve():
+        raise ValueError("Resume must use a checkpoint from the same logical run directory")
+    if not (resume_from / "joint_manifest.json").is_file():
+        raise ValueError("Resume requires a joint checkpoint manifest")
+    for name in (
+        "train.parquet",
+        "dev.parquet",
+        "test_seen.parquet",
+        "test_unseen.parquet",
+        "catalog.json",
+        "split_manifest.json",
+    ):
+        if not (run_dir / "data" / name).is_file():
+            raise ValueError(f"Resume requires the original prepared data: {name}")
+    manifest = json.loads((run_dir / "data/split_manifest.json").read_text())
+    if Path(manifest["run_dir"]).resolve() != run_dir.resolve():
+        raise ValueError("Prepared data belongs to another logical run directory")
+    record = run_dir / "launch-processes.json"
+    if record.exists():
+        previous = json.loads(record.read_text())
+        owners = [(previous["launcher_pid"], previous["launcher_start_ticks"])]
+        owners.extend((child["pid"], child["start_ticks"]) for child in previous["children"])
+        if any(ticks is not None and process_start_ticks(pid) == ticks for pid, ticks in owners):
+            raise RuntimeError("The previous launcher or one of its children is still running")
+
+
+def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), dry_run=False, resume_from=None):
     profile = substitute_paths(profile, run_dir)
     environment = deployment_environment(profile, run_dir)
     arguments = training_arguments(profile, smoke=smoke, recipe_overrides=recipe_overrides, overrides=overrides)
+    if resume_from is not None:
+        resume_from = absolute_path(resume_from, "resume checkpoint")
+        arguments.extend(["trainer.resume_mode=resume_path", f"trainer.resume_from_path={resume_from}"])
     if dry_run:
         print(f"Run directory: {run_dir}")
         print("Planned training command:")
@@ -329,9 +363,7 @@ def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), 
     processes, io_workers = int(profile.get("environment_processes", 4)), int(profile.get("io_workers", 4))
     if min(processes, io_workers) < 1:
         raise ValueError("Environment process and I/O counts must be positive")
-    # A fresh run never overwrites previous data, capabilities or account state.
-    run_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
-    (run_dir / "config").mkdir(mode=0o700)
+    prepare_run_directory(run_dir, resume_from)
     prepare_temporary_directories(environment)
     write_private_json(Path(environment["ALFWORLD_RUNTIME_CONFIG"]), runtime)
     if "task_config" in profile:
@@ -343,7 +375,7 @@ def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), 
     publish_assets(profile)
     python = environment["TRAINING_PYTHON"]
     with Supervisor(run_dir, environment) as supervisor:
-        if initialize:
+        if initialize and resume_from is None:
             registry = absolute_path(provider["kwargs"]["root"], "account pool root")
             if not registry.exists():
                 supervisor.run(
@@ -357,21 +389,22 @@ def launch(profile, run_dir, *, smoke=False, recipe_overrides=(), overrides=(), 
                         ),
                     ],
                 )
-        supervisor.run(
-            "prepare-data",
-            [
-                python,
-                str(ROOT / "verl/experimental/skill_harness/alfworld/prepare_data.py"),
-                "--benchmark-root",
-                environment["ALFWORLD_BENCHMARK_ROOT"],
-                "--output-dir",
-                environment["SKILL_DATA_DIR"],
-                "--run-dir",
-                str(run_dir),
-                "--prompt-file",
-                str(RECIPE / "prompts/solver_task.txt"),
-            ],
-        )
+        if resume_from is None:
+            supervisor.run(
+                "prepare-data",
+                [
+                    python,
+                    str(ROOT / "verl/experimental/skill_harness/alfworld/prepare_data.py"),
+                    "--benchmark-root",
+                    environment["ALFWORLD_BENCHMARK_ROOT"],
+                    "--output-dir",
+                    environment["SKILL_DATA_DIR"],
+                    "--run-dir",
+                    str(run_dir),
+                    "--prompt-file",
+                    str(RECIPE / "prompts/solver_task.txt"),
+                ],
+            )
         manifest = json.loads((run_dir / "data/split_manifest.json").read_text())
         backend = supervisor.spawn(
             "environment",
@@ -428,7 +461,10 @@ def main():
         "--deployment", type=Path, required=True, help="Explicit host deployment JSON (keep outside Git)"
     )
     parser.add_argument(
-        "--run-dir", type=Path, help="Fresh absolute output directory; otherwise deployment.environment.SKILL_RUN_DIR"
+        "--run-dir", type=Path, help="Absolute output directory; existing runs require --resume-from"
+    )
+    parser.add_argument(
+        "--resume-from", type=Path, help="Resume a complete joint checkpoint in the existing run; retain prepared data"
     )
     parser.add_argument(
         "--smoke", action="store_true", help="Six real joint updates with delayed credit and replay enabled"
@@ -456,6 +492,7 @@ def main():
             recipe_overrides=args.recipe_override,
             overrides=overrides,
             dry_run=args.dry_run,
+            resume_from=args.resume_from,
         )
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, RuntimeError) as error:
         print(f"Launch failed: {error}", file=sys.stderr, flush=True)

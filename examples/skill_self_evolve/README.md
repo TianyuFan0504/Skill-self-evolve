@@ -22,7 +22,30 @@ parquet files and catalog, starts the parallel training environment, checks its
 loopback HTTP health, checks the resolved joint configuration, and runs
 `python -m verl.experimental.skill_harness.train` with `config/alfworld_joint.yaml`.
 The default remains 64 joint updates with four environment processes and four
-I/O workers. Existing run directories are rejected.
+I/O workers. Existing run directories require an explicit resume checkpoint.
+
+Resume a complete joint checkpoint in the same logical run directory:
+
+```bash
+bash examples/skill_self_evolve/run.sh \
+  --deployment /absolute/path/deployment.json \
+  --run-dir /absolute/path/existing-run \
+  --resume-from /absolute/path/existing-run/checkpoints/global_step_10
+```
+
+The previous invocation must have stopped. Resume preserves the original
+parquet files, catalog and account registry, refreshes service configuration,
+and restores model, optimizer, EMA, dataloader and delayed-credit state. The
+checkpoint is validated once; actor and EMA tensors load directly from it,
+while mutable skill/replay/ledger state restores into a fresh directory.
+
+Native solver and curator processes start through `posix_spawn` and a fresh
+standard-library bootstrap, avoiding a Python fork from multithreaded Ray
+workers. The bootstrap closes inherited descriptors, establishes the working
+directory and executes the existing account launcher. The task runner also
+applies a 1,200-second runner timeout, including setup and cleanup,
+separate from the 900-second Native execution budget. Override it with
+`SESSION_TIMEOUT_SECONDS` when the deployment needs a different limit.
 
 For a short real joint run:
 

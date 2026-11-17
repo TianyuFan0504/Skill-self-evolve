@@ -467,8 +467,13 @@ class JointTrainerTests(unittest.TestCase):
         checkpoint = self.save_native_then_callback()
         resumed = self.make_trainer(self.root / "resume-run")
         resumed.config.trainer.resume_mode, resumed.config.trainer.resume_from_path = "resume_path", str(checkpoint)
-        with patch.object(torch.distributed, "get_world_size", return_value=1):
+        with (
+            patch.object(torch.distributed, "get_world_size", return_value=1),
+            patch.object(resumed._joint_coordinator, "validate",
+                         wraps=resumed._joint_coordinator.validate) as validate,
+        ):
             resumed._load_checkpoint()
+        validate.assert_called_once_with(str(checkpoint), expected=resumed._compatibility())
         resumed.on_init_end()
         self.assertEqual(resumed.global_steps, 1)
         self.assertEqual(resumed.actor_rollout_wg.loads, 1)

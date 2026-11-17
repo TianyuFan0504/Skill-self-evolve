@@ -447,6 +447,7 @@ class SkillJointSyncTrainer(PPOTrainerSync):
         if mode == "disable":
             return
         expected = self._compatibility()
+        destination_name = uuid.uuid4().hex
         if mode == "auto":
             root = Path(self.config.trainer.default_local_dir).resolve()
             if not (root / "latest_joint_checkpoint.json").exists():
@@ -454,13 +455,15 @@ class SkillJointSyncTrainer(PPOTrainerSync):
                     raise JointCheckpointError("Existing checkpoints lack a COMPLETE joint resume pointer")
                 return
             checkpoint = self._joint_coordinator.latest(root, expected=expected)
+            checkpoint_dir = checkpoint.checkpoint_dir
+            destination_name = f"step_{checkpoint.payload['spec']['global_step']}_" + destination_name
         elif mode == "resume_path":
-            checkpoint = self._joint_coordinator.validate(self.config.trainer.resume_from_path, expected=expected)
+            # restore owns full validation before any live loads. Do not hash
+            # every tensor twice merely to name its fresh mutable destination.
+            checkpoint_dir = self.config.trainer.resume_from_path
         else:
             raise ValueError("Unknown joint checkpoint resume mode")
-        destination = Path(self.config.skill_harness.artifact_root) / "restored_state" / (
-            f"step_{checkpoint.payload['spec']['global_step']}_" + uuid.uuid4().hex
-        )
+        destination = Path(self.config.skill_harness.artifact_root) / "restored_state" / destination_name
 
         def load_online(path, _spec):
             return self._await(self.actor_rollout_wg.load_checkpoint(local_path=str(path), del_local_after_load=False))
@@ -476,7 +479,7 @@ class SkillJointSyncTrainer(PPOTrainerSync):
             self.train_dataloader.load_state_dict(torch.load(paths[0], weights_only=False, map_location="cpu"))
 
         restored = self._joint_coordinator.restore(
-            checkpoint.checkpoint_dir, expected=expected, destination_root=destination,
+            checkpoint_dir, expected=expected, destination_root=destination,
             load_online=load_online, load_ema=load_ema, load_training_state=load_training,
             fence=lambda: self._joint_lock,
         )

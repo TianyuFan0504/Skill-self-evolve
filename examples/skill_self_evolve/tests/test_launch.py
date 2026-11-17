@@ -165,6 +165,51 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(supervisor.environment["TMPDIR"], str(self.root / "scratch/run-one"))
         self.assertTrue(ray.is_dir())
 
+    def resume_fixture(self):
+        data = self.run_dir / "data"
+        data.mkdir(parents=True)
+        (self.run_dir / "config").mkdir()
+        for name in ("train.parquet", "dev.parquet", "test_seen.parquet", "test_unseen.parquet", "catalog.json"):
+            (data / name).write_bytes(b"original data " + name.encode())
+        (data / "split_manifest.json").write_text(
+            json.dumps({"catalog_digest": "catalog-fixture", "run_dir": str(self.run_dir)})
+        )
+        checkpoint = self.run_dir / "checkpoints/global_step_40"
+        checkpoint.mkdir(parents=True)
+        (checkpoint / "joint_manifest.json").write_text(json.dumps({"payload": {"state": "complete"}}))
+        return checkpoint
+
+    def test_resume_keeps_original_data_and_skips_account_initialization(self):
+        checkpoint = self.resume_fixture()
+        before = {p.name: p.read_bytes() for p in (self.run_dir / "data").iterdir()}
+        supervisor, _ = self.mocked_launch(resume_from=checkpoint)
+        self.assertEqual([name for name, _ in supervisor.commands], ["environment", "preflight", "training"])
+        self.assertEqual({p.name: p.read_bytes() for p in (self.run_dir / "data").iterdir()}, before)
+        for name in ("preflight", "training"):
+            command = dict(supervisor.commands)[name]
+            self.assertEqual(
+                command[-2:], ["trainer.resume_mode=resume_path", f"trainer.resume_from_path={checkpoint}"]
+            )
+
+    def test_resume_rejects_missing_data_before_rewriting_configuration(self):
+        checkpoint = self.resume_fixture()
+        runtime = self.run_dir / "config/runtime.json"
+        runtime.write_text("original runtime")
+        (self.run_dir / "data/train.parquet").unlink()
+        with self.assertRaisesRegex(ValueError, "original prepared data"):
+            self.mocked_launch(resume_from=checkpoint)
+        self.assertEqual(runtime.read_text(), "original runtime")
+        self.assertEqual(FakeSupervisor.instances, [])
+
+    def test_resume_rejects_a_live_previous_invocation(self):
+        checkpoint = self.resume_fixture()
+        (self.run_dir / "launch-processes.json").write_text(
+            json.dumps({"launcher_pid": 987, "launcher_start_ticks": 456, "children": []})
+        )
+        with self.assertRaisesRegex(RuntimeError, "still running"):
+            self.mocked_launch(resume_from=checkpoint)
+        self.assertEqual(FakeSupervisor.instances, [])
+
     def test_recipe_overrides_follow_smoke_and_precede_cli_for_both_checks_and_training(self):
         recipe = ["trainer.total_training_steps=3", "data.train_batch_size=8"]
         cli = ["trainer.total_training_steps=5", "data.train_batch_size=4"]
