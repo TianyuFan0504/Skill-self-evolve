@@ -98,6 +98,18 @@ class OwnedServiceHandleTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "linux", "Real owned service execution requires Linux")
 class LinuxOwnedServiceTests(unittest.TestCase):
+    def test_explicit_stderr_file_keeps_version_stdout_exact(self):
+        code = "import os; os.write(1,b'codex-cli 0.167.0\\n'); os.write(2,b'PATH warning\\n')"
+        with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+            process = native.spawn_owned_service(
+                [sys.executable, "-I", "-S", "-c", code], stdout=output, stderr=errors
+            )
+            self.assertEqual(process.wait(timeout=5), 0)
+            output.seek(0)
+            errors.seek(0)
+            self.assertEqual(output.read(), b"codex-cli 0.167.0\n")
+            self.assertEqual(errors.read(), b"PATH warning\n")
+
     def test_logs_cwd_session_stdin_inherited_env_and_strict_fd_closure(self):
         descriptor = os.open(os.devnull, os.O_RDONLY)
         os.set_inheritable(descriptor, True)

@@ -766,10 +766,12 @@ class CurateTest(unittest.TestCase):
 
 
 class NativeVersionProbeTest(unittest.TestCase):
-    def spawn(self, process, text):
-        def start(argv, *, stdout):
+    def spawn(self, process, text, diagnostics=""):
+        def start(argv, *, stdout, stderr):
             stdout.write(text.encode())
             stdout.flush()
+            stderr.write(diagnostics.encode())
+            stderr.flush()
             return process
         return patch.object(curate, "spawn_owned_service", side_effect=start)
 
@@ -783,18 +785,27 @@ class NativeVersionProbeTest(unittest.TestCase):
         process.wait.assert_called_once_with(timeout=10)
         process.kill.assert_not_called()
 
+    def test_stderr_warning_does_not_contaminate_version_stdout(self):
+        process = Mock()
+        process.wait.return_value = 0
+        warning = "WARNING: PATH aliases unavailable\n"
+        with self.spawn(process, "codex-cli 0.167.0\n", warning):
+            self.assertEqual(curate._bounded_command_output(["/native/codex", "--version"]),
+                             "codex-cli 0.167.0\n")
+
     def test_nonzero_native_version_probe_preserves_exit_and_output(self):
         process = Mock()
         process.wait.return_value = 78
         argv = ["/native/codex", "--version"]
         with (
-            self.spawn(process, "unreadable native package"),
+            self.spawn(process, "version failure", "unreadable native package"),
             self.assertRaises(curate.subprocess.CalledProcessError) as caught,
         ):
             curate._bounded_command_output(argv)
         self.assertEqual(caught.exception.returncode, 78)
         self.assertEqual(caught.exception.cmd, argv)
-        self.assertEqual(caught.exception.output, "unreadable native package")
+        self.assertEqual(caught.exception.output, "version failure")
+        self.assertEqual(caught.exception.stderr, "unreadable native package")
         process.kill.assert_not_called()
 
     def test_timed_out_probe_kills_reaps_and_preserves_timeout(self):
@@ -803,13 +814,14 @@ class NativeVersionProbeTest(unittest.TestCase):
         timeout = curate.subprocess.TimeoutExpired(argv, 10)
         process.wait.side_effect = [timeout, -9]
         with (
-            self.spawn(process, "partial version output"),
+            self.spawn(process, "partial version output", "partial diagnostic"),
             self.assertRaises(curate.subprocess.TimeoutExpired) as caught,
         ):
             curate._bounded_command_output(argv)
         self.assertIs(caught.exception, timeout)
         self.assertEqual(caught.exception.output, "partial version output")
         self.assertEqual(caught.exception.cmd, argv)
+        self.assertEqual(caught.exception.stderr, "partial diagnostic")
         process.kill.assert_called_once_with()
         self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 10}, {"timeout": 5}])
 

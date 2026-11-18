@@ -351,17 +351,18 @@ class OwnedServiceProcess:
             _kill_owned_process(self.pid, group_owned=self._session_ready)
 
 
-def spawn_owned_service(argv, *, stdout, env=None, cwd=None):
-    """Launch an owned service with merged file output, without a Python fork."""
+def spawn_owned_service(argv, *, stdout, stderr=None, env=None, cwd=None):
+    """Launch an owned service; stderr defaults to the stdout file."""
     pid = ready_read = process = None
     try:
         descriptor = stdout if isinstance(stdout, int) else stdout.fileno()
+        error_descriptor = descriptor if stderr is None else stderr if isinstance(stderr, int) else stderr.fileno()
         pid, ready_read = _spawn_bootstrap(
             argv,
             env=env,
             cwd=cwd,
             stdout_fd=descriptor,
-            stderr_fd=descriptor,
+            stderr_fd=error_descriptor,
         )
         process = OwnedServiceProcess(pid)
         readable, _, _ = select.select((ready_read,), (), (), 10)

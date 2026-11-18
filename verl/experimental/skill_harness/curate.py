@@ -549,8 +549,8 @@ def _runtime_directory(path, *, public):
 
 def _bounded_command_output(argv, *, timeout=10):
     """Capture a short native probe without forking the Ray worker."""
-    with tempfile.TemporaryFile(mode="w+b") as output:
-        process = spawn_owned_service(argv, stdout=output)
+    with tempfile.TemporaryFile(mode="w+b") as output, tempfile.TemporaryFile(mode="w+b") as errors:
+        process = spawn_owned_service(argv, stdout=output, stderr=errors)
         try:
             returncode = process.wait(timeout=timeout)
         except BaseException as error:
@@ -562,13 +562,17 @@ def _bounded_command_output(argv, *, timeout=10):
                     error.add_note("Native version probe cleanup failed: " + repr(cleanup_error))
             if isinstance(error, subprocess.TimeoutExpired):
                 output.seek(0)
+                errors.seek(0)
                 error.cmd = argv
                 error.output = output.read().decode(errors="replace")
+                error.stderr = errors.read().decode(errors="replace")
             raise
         output.seek(0)
         captured = output.read().decode(errors="replace")
         if returncode:
-            raise subprocess.CalledProcessError(returncode, argv, output=captured)
+            errors.seek(0)
+            raise subprocess.CalledProcessError(returncode, argv, output=captured,
+                                                stderr=errors.read().decode(errors="replace"))
         return captured
 
 
