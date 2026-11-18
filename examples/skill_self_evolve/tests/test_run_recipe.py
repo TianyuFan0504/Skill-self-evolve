@@ -46,6 +46,8 @@ ENVIRONMENT_KEYS = {
     "PHYSICAL_GPU_COUNT": "skill_harness.joint.available_gpus",
     "EMA_DECAY": "skill_harness.ema.decay",
     "CURATE_LOSS_COEFFICIENT": "skill_harness.curate_loss.coefficient",
+    "UPDATE_PARAMETERS": "skill_harness.learning.update_parameters",
+    "UPDATE_SKILLS": "skill_harness.learning.update_skills",
     "CURATOR_CONCURRENCY": "skill_harness.joint.curator_concurrency",
     "CREDIT_CONCURRENCY": "skill_harness.joint.credit_concurrency",
     "PROBES_PER_STEP": "skill_harness.joint.probes_per_step",

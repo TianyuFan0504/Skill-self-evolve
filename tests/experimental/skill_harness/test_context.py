@@ -225,6 +225,78 @@ class ContextTest(unittest.TestCase):
         self.assertEqual([ref["skill_id"] for ref in result.manifest["injected_refs"]], ["b-short"])
         self.assertNotIn("Oversized cleaning", result.messages[-1]["content"])
 
+    def paired_fixture(self):
+        for name in ("a", "b", "c", "d"):
+            self.publish(name)
+        baseline = self.store.head()
+        self.store.create_branch("paired", from_snapshot=baseline)
+        target = store_module.SkillArtifact(
+            "z-target", "Specific clean mug skill", "Clean the mug and check the feedback.",
+            "When the goal requires a clean object.", ("clean",),
+        )
+        candidate = self.store.stage_candidate(target, branch="paired")
+        self.store.admit(candidate.candidate_id)
+        treated = self.store.publish([candidate.candidate_id], branch="paired", expected_parent=baseline)
+        return baseline, treated.snapshot_id, target
+
+    def paired_build(self, baseline, treated, target, *, loaded, plan_id="pair", **kwargs):
+        snapshot = treated if loaded else baseline
+        return self.build(
+            store=self.store.read_only_view(snapshot), snapshot_id=snapshot,
+            paired_context={"version": context.PAIRED_CONTEXT_VERSION, "plan_id": plan_id,
+                            "directory": str(self.root / "paired-plans"), "target_ref": target.ref.to_dict(),
+                            "with_snapshot_id": treated, "without_snapshot_id": baseline, "loaded": loaded},
+            **kwargs,
+        )
+
+    def test_paired_target_reserves_top_k_even_when_control_runs_first(self):
+        baseline, treated, target = self.paired_fixture()
+        # In the old independent retrieval, z-target loses all four positions.
+        old = self.build(snapshot_id=treated, top_k=4, query="clean")
+        self.assertNotIn(target.ref.to_dict(), old.manifest["injected_refs"])
+        for first in (False, True):
+            with self.subTest(first_loaded=first):
+                builds = {}
+                for loaded in (first, not first):
+                    builds[loaded] = self.paired_build(
+                        baseline, treated, target, loaded=loaded, plan_id="first-" + str(first),
+                        top_k=4, query="clean",
+                    )
+                without, with_target = builds[False], builds[True]
+                self.assertEqual(with_target.manifest["injected_refs"],
+                                 [*without.manifest["injected_refs"], target.ref.to_dict()])
+                self.assertEqual(len(with_target.manifest["injected_refs"]), 4)
+                self.assertNotIn(target.title, without.messages[-1]["content"])
+
+    def test_paired_budget_keeps_background_identical_instead_of_displacing_a_skill(self):
+        baseline, treated, target = self.paired_fixture()
+        background = [self.store.load_artifact(ref) for ref in self.store.get_snapshot(baseline).skills]
+        budget = max(len(context._skill_block(background)[0].encode()),
+                     len(context._skill_block([*background[:3], target])[0].encode()))
+        old_without = self.build(snapshot_id=baseline, skill_token_budget=budget)
+        old_with = self.build(snapshot_id=treated, skill_token_budget=budget)
+        self.assertNotEqual([ref for ref in old_with.manifest["injected_refs"] if ref != target.ref.to_dict()],
+                            old_without.manifest["injected_refs"])
+        results = {loaded: self.paired_build(baseline, treated, target, loaded=loaded,
+                                            skill_token_budget=budget) for loaded in (False, True)}
+        self.assertEqual(results[True].manifest["injected_refs"],
+                         [*results[False].manifest["injected_refs"], target.ref.to_dict()])
+        self.assertLessEqual(results[True].manifest["skill_tokens"], budget)
+        self.assertLessEqual(results[False].manifest["skill_tokens"], budget)
+
+    def test_paired_unloadable_target_has_no_silent_empty_intervention(self):
+        baseline, treated, target = self.paired_fixture()
+        with self.assertRaisesRegex(context.PairedContextUnavailable, "target alone"):
+            self.paired_build(baseline, treated, target, loaded=False, skill_token_budget=1)
+        self.assertFalse((self.root / "paired-plans/pair.json").exists())
+
+    def test_second_branch_must_have_the_same_actual_task_base(self):
+        baseline, treated, target = self.paired_fixture()
+        self.paired_build(baseline, treated, target, loaded=False)
+        self.messages[-1]["content"] += " Different initial observation."
+        with self.assertRaisesRegex(context.PairedContextUnavailable, "consistency validation"):
+            self.paired_build(baseline, treated, target, loaded=True)
+
     def test_snapshot_is_read_only_and_cannot_load_newly_published_notes(self):
         old = self.publish()
         self.publish("new")
@@ -379,6 +451,20 @@ class ContextTest(unittest.TestCase):
             adapter = framework.SkillAwareRolloutAdapter.create(config=config, llm_client="native-client")
         self.assertIs(adapter.native_create_kwargs["config"], config)
         self.assertEqual(adapter.native_create_kwargs["llm_client"], "native-client")
+
+    def test_parameter_only_keeps_the_framework_group_protocol_without_skill_loading(self):
+        from omegaconf import OmegaConf
+
+        config = OmegaConf.create({
+            "skill_harness": {"loading": {"enabled": False}, "learning": {"update_skills": False}},
+            "actor_rollout_ref": {"rollout": {"custom": {"agent_framework": {}}}},
+        })
+        with patch.object(framework, "_tokenizer_version", side_effect=AssertionError("No skill tokenizer")):
+            adapter = framework.SkillAwareRolloutAdapter.create(config=config)
+        effective = adapter.native_create_kwargs["config"]
+        self.assertEqual(effective.actor_rollout_ref.rollout.custom.agent_framework.framework_class_fqn,
+                         framework.FRAMEWORK_FQN)
+        self.assertNotIn("framework_class_fqn", config.actor_rollout_ref.rollout.custom.agent_framework)
 
     def test_token_callback_estimates_and_non_integer_ids_are_rejected(self):
         self.publish()

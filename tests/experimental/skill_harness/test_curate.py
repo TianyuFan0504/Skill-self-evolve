@@ -15,7 +15,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = "_curate_offline_contract"
@@ -634,7 +634,7 @@ class CurateTest(unittest.TestCase):
 
         with (
             patch.object(curate.pwd, "getpwnam", side_effect=account),
-            patch.object(curate.subprocess, "check_output", return_value="codex-cli 0.167.0\n"),
+            patch.object(curate, "_bounded_command_output", return_value="codex-cli 0.167.0\n"),
         ):
             previous_umask = os.umask(0o077)
             try:
@@ -763,6 +763,55 @@ class CurateTest(unittest.TestCase):
         self.assertFalse((self.replay.root / "records").exists())
         template = Path(self.runtime.task_prompt_path).read_text()
         self.assertGreater(template.rfind('"task_families"'), template.index("{{EPISODE_JSON}}"))
+
+
+class NativeVersionProbeTest(unittest.TestCase):
+    def spawn(self, process, text):
+        def start(argv, *, stdout):
+            stdout.write(text.encode())
+            stdout.flush()
+            return process
+        return patch.object(curate, "spawn_owned_service", side_effect=start)
+
+    def test_version_output_uses_owned_spawn_and_bounded_wait(self):
+        process = Mock()
+        process.wait.return_value = 0
+        with self.spawn(process, "codex-cli 0.167.0\n") as start:
+            result = curate._bounded_command_output(["/native/codex", "--version"])
+        self.assertEqual(result, "codex-cli 0.167.0\n")
+        self.assertEqual(start.call_args.args[0], ["/native/codex", "--version"])
+        process.wait.assert_called_once_with(timeout=10)
+        process.kill.assert_not_called()
+
+    def test_nonzero_native_version_probe_preserves_exit_and_output(self):
+        process = Mock()
+        process.wait.return_value = 78
+        argv = ["/native/codex", "--version"]
+        with (
+            self.spawn(process, "unreadable native package"),
+            self.assertRaises(curate.subprocess.CalledProcessError) as caught,
+        ):
+            curate._bounded_command_output(argv)
+        self.assertEqual(caught.exception.returncode, 78)
+        self.assertEqual(caught.exception.cmd, argv)
+        self.assertEqual(caught.exception.output, "unreadable native package")
+        process.kill.assert_not_called()
+
+    def test_timed_out_probe_kills_reaps_and_preserves_timeout(self):
+        process = Mock()
+        argv = ["/native/codex", "--version"]
+        timeout = curate.subprocess.TimeoutExpired(argv, 10)
+        process.wait.side_effect = [timeout, -9]
+        with (
+            self.spawn(process, "partial version output"),
+            self.assertRaises(curate.subprocess.TimeoutExpired) as caught,
+        ):
+            curate._bounded_command_output(argv)
+        self.assertIs(caught.exception, timeout)
+        self.assertEqual(caught.exception.output, "partial version output")
+        self.assertEqual(caught.exception.cmd, argv)
+        process.kill.assert_called_once_with()
+        self.assertEqual([call.kwargs for call in process.wait.call_args_list], [{"timeout": 10}, {"timeout": 5}])
 
 
 class CuratorCatalogCleanupTest(unittest.IsolatedAsyncioTestCase):

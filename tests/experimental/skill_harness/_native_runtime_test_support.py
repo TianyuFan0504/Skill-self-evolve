@@ -11,7 +11,11 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 DIRECTORY = ROOT / "verl/experimental/skill_harness/alfworld"
-PACKAGE = "_native_runtime_unit"
+PARENT = "_native_runtime_unit"
+parent = types.ModuleType(PARENT)
+parent.__path__ = [str(DIRECTORY.parent)]
+sys.modules.setdefault(PARENT, parent)
+PACKAGE = PARENT + ".alfworld"
 package = types.ModuleType(PACKAGE)
 package.__path__ = [str(DIRECTORY)]
 sys.modules.setdefault(PACKAGE, package)

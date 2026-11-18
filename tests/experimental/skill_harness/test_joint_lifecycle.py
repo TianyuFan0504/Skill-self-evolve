@@ -89,6 +89,9 @@ class FinalLifecycleTests(unittest.TestCase):
         driver._joint_restored = None
         driver._await = lambda value: value
         driver._ema_clock = lambda: self.clock
+        driver._learning_mode = lambda: {"update_parameters": True, "update_skills": True}
+        driver._assert_frozen_parameters = Mock()
+        driver._assert_fixed_skills = Mock()
         driver.global_steps = driver.total_training_steps = 2
         driver._joint_loop = SimpleNamespace(is_running=lambda: False, close=Mock())
         driver._background_stopped = False
@@ -163,10 +166,19 @@ class FinalLifecycleTests(unittest.TestCase):
 
     def test_final_eval_rejects_a_fresh_untrained_checkpoint(self):
         self.clock = 0
-        with self.assertRaisesRegex(RuntimeError, "completed trained"):
+        with self.assertRaisesRegex(RuntimeError, "completed checkpoint"):
             self.driver.fit("training-manager")
         self.evaluation.assert_not_called()
         self.assertNotIn("pinned_manager", self.events)
+
+    def test_skill_only_final_eval_accepts_completed_round_with_frozen_policy_zero(self):
+        self.clock = 0
+        self.driver._learning_mode = lambda: {"update_parameters": False, "update_skills": True}
+        self.driver.fit("training-manager")
+        self.evaluation.assert_called_once()
+        lifecycle = json.loads((self.root / "evaluation/final/complete.json").read_text())
+        self.assertEqual(lifecycle["optimizer_step"], 0)
+        self.assertEqual(lifecycle["checkpoint_step"], 2)
 
     def test_restored_checkpoint_is_evaluated_without_another_model_save(self):
         self.driver.skip_training = True

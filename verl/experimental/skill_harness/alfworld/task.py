@@ -20,6 +20,7 @@ from uni_agent.sandbox.local import LocalSandbox
 from uni_agent.tasks.base import Task, TaskConfig, TaskResult
 from uni_agent.tasks.registry import register_task
 
+from ..context import PairedContextUnavailable
 from .accounts import AccountIsolationError, AccountPool, TaskExecutionError, TaskSetupError
 from .data import TASK_NAME
 from .native_process import spawn_native_process
@@ -1017,7 +1018,7 @@ class AlfworldSkillTrainingTask(Task):
                 except Exception as stop_error:
                     cancelled_error.add_note("Backend stop fence failed: " + str(stop_error))
                 raise
-            except TaskSetupError as exc:
+            except (TaskSetupError, PairedContextUnavailable) as exc:
                 task_error = exc
                 error = f"{type(exc).__name__}: {exc}"
                 try:

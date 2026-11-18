@@ -12,6 +12,7 @@ import asyncio
 import copy
 import importlib
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -199,6 +200,12 @@ class ActorService:
     def get_ema_metadata(self):
         return [self.worker._ready().metadata()]
 
+    def configure_parameter_updates(self, enabled):
+        return [self.worker.configure_parameter_updates(enabled)]
+
+    def get_parameter_update_state(self):
+        return [self.worker.parameter_update_state()]
+
     def update_actor(self, data):
         self.events.append("actor_update")
         self.updates += 1
@@ -329,9 +336,10 @@ class JointTrainerTests(unittest.TestCase):
     def make_controller(self, trainer):
         controller = object.__new__(SkillJointController)
         controller.trainer, controller.config, controller.actor = trainer, trainer.config, trainer.actor_rollout_wg
+        controller.learning = joint.learning_settings(trainer.config)
         controller.settings = JointSettings(solver_gpus=1, available_gpus=3, curator_gpus=1, credit_gpus=1,
                                              candidates_per_source=1, probes_per_step=0, replay_batch_size=0)
-        controller.artifact_root = trainer.artifact_root
+        controller.artifact_root = trainer.artifact_root.resolve()
         controller.state_path = trainer.artifact_root / "controller/state.json"
         controller.store = SkillStore(trainer.config.skill_harness.store_root)
         controller.replay = CurateReplay(trainer.artifact_root / "curate_replay")
@@ -374,8 +382,8 @@ class JointTrainerTests(unittest.TestCase):
         controller.prepare_update, controller.after_update_and_sync = observed_prepare, observed_after
         return controller
 
-    def update(self):
-        self.trainer.global_steps = 1
+    def update(self, round_index=1):
+        self.trainer.global_steps = round_index
         fake_tq = SimpleNamespace(kv_clear=Mock(), kv_batch_get=Mock(
             side_effect=lambda **kwargs: self.source.select(*kwargs["select_fields"]).clone()
         ), kv_describe=Mock(side_effect=lambda **kwargs: {
@@ -429,6 +437,90 @@ class JointTrainerTests(unittest.TestCase):
         self.assertEqual(self.controller.state["optimizer_step"], 0)
         self.assertIsNotNone(self.controller.state["prepared_update"])
         self.assertNotIn("after", self.events)
+
+    def configure_ablation(self, *, parameters, skills):
+        self.trainer = self.make_trainer(self.root / "ablation")
+        self.trainer.config.skill_harness.learning = {
+            "update_parameters": parameters, "update_skills": skills,
+        }
+        self.trainer.config.skill_harness.loading = {"enabled": skills}
+        self.trainer.on_init_end()
+        self.controller = self.make_controller(self.trainer)
+        self.trainer._joint_controller = self.controller
+
+    def test_skill_only_advances_experience_without_backward_optimizer_or_ema(self):
+        self.configure_ablation(parameters=False, skills=True)
+        worker = self.trainer.actor_rollout_wg.worker
+        initial = worker.parameter_update_state()
+        self.trainer.timing_raw = {}
+        for round_index in (1, 2):
+            tu.assign_non_tensor_stack(self.source, "extra_fields", [
+                {"runner_reward_info": {"reward_context": {"episode_output_dir": str(
+                    self.trainer.artifact_root / "episodes" / f"round-{round_index}-case-{index}" / "attempt-native"
+                )}}} for index in range(2)
+            ])
+            _, metrics, _ = self.update(round_index)
+            self.trainer.on_step_end()
+            proof = json.loads((self.trainer.artifact_root / "frozen-parameter-proof.json").read_text())
+            self.assertEqual(proof["checked_at_global_step"], 1)
+            self.assertEqual(proof["experience_round"], 1)
+            self.assertEqual(proof["ranks"], [initial])
+        self.assertEqual(self.controller.state["experience_round"], 2)
+        self.assertEqual(self.controller.state["optimizer_step"], 0)
+        self.assertEqual(self.controller.state["applied_update_ids"], {})
+        self.assertEqual(self.trainer.actor_rollout_wg.updates, 0)
+        self.assertEqual(worker.engine.steps, 0)
+        self.assertEqual(worker.parameter_ema.num_updates, 0)
+        self.assertEqual(worker.parameter_update_state(), initial)
+        self.assertEqual(metrics["skill/experience_round"], 2)
+        self.assertEqual(metrics["skill/optimizer_step"], 0)
+        self.assertEqual(self.controller.source_queue.metrics()["sources_opportunities"], 4)
+
+    def test_skill_only_checkpoint_and_resume_retain_zero_optimizer_and_parameter_proof(self):
+        self.configure_ablation(parameters=False, skills=True)
+        self.update(1)
+        checkpoint = self.root / "ablation/checkpoints/global_step_1"
+        with patch.object(torch.distributed, "get_world_size", return_value=1):
+            self.trainer._save_checkpoint()
+        saved = self.trainer._last_joint_checkpoint
+        self.assertEqual(saved.payload["spec"]["optimizer_step"], 0)
+        self.trainer._final_checkpoint_seal = self.trainer._checkpoint_seal(saved)
+        self.trainer._assert_final_seal()
+        resumed = self.make_trainer(self.root / "ablation-resumed")
+        resumed.config.skill_harness.learning = {"update_parameters": False, "update_skills": True}
+        resumed.config.trainer.resume_mode, resumed.config.trainer.resume_from_path = "resume_path", str(checkpoint)
+        with patch.object(torch.distributed, "get_world_size", return_value=1):
+            resumed._load_checkpoint()
+            resumed.on_init_end()
+        self.assertEqual(resumed.global_steps, 1)
+        self.assertEqual(resumed._ema_clock(), 0)
+        self.assertEqual(resumed._frozen_parameter_reference, self.trainer._frozen_parameter_reference)
+        self.assertFalse(resumed.actor_rollout_wg.worker.engine.module.log_probability.requires_grad)
+
+    def test_frozen_parameter_proof_distinguishes_final_evaluation_cursor_from_round_count(self):
+        self.configure_ablation(parameters=False, skills=True)
+        self.update(1)
+        self.update(2)
+        self.trainer.global_steps = self.trainer.total_training_steps + 1
+        self.trainer._assert_frozen_parameters()
+        proof = json.loads((self.trainer.artifact_root / "frozen-parameter-proof.json").read_text())
+        self.assertEqual(proof["experience_round"], 2)
+        self.assertEqual(proof["checked_at_global_step"], 3)
+        self.assertEqual(proof["optimizer_step"], 0)
+        self.assertTrue(proof["parameters_unchanged"])
+
+    def test_parameter_only_updates_solver_and_retains_empty_skill_snapshot(self):
+        self.configure_ablation(parameters=True, skills=False)
+        before = self.trainer._joint_store.head()
+        self.update(1)
+        self.assertEqual(self.trainer.actor_rollout_wg.worker.engine.steps, 1)
+        self.assertEqual(self.controller.state["optimizer_step"], 1)
+        self.assertEqual(self.controller.state["pending"], {})
+        self.assertEqual(self.controller.state["probe_jobs"], {})
+        self.assertEqual(self.controller.source_queue.metrics()["sources_opportunities"], 0)
+        self.assertEqual(self.trainer._joint_store.head(), before)
+        self.assertEqual(self.trainer._joint_store.get_snapshot().skills, ())
+        self.assertEqual(self.controller.ledger._state()["settlements"], {})
 
     def test_fresh_store_loss_and_ema_precede_parent_online_sync(self):
         self.assertTrue(Path(self.trainer.config.skill_harness.store_root).is_dir())

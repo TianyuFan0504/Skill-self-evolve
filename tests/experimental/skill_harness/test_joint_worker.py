@@ -215,6 +215,36 @@ class JointWorkerTests(unittest.TestCase):
         self.assertEqual(self.worker.engine.optimizer_calls, 0)
         self.assertEqual(self.worker.parameter_ema.num_updates, 0)
 
+    def test_frozen_actor_blocks_training_and_preserves_values_and_clocks(self):
+        original = self.worker.engine.module.log_probability.detach().clone()
+        initial = self.worker.configure_parameter_updates(False)
+        self.assertFalse(self.worker.engine.module.log_probability.requires_grad)
+        with self.assertRaisesRegex(RuntimeError, "Parameter updates are disabled"):
+            self.run_update(mixed_data())
+        current = self.worker.parameter_update_state()
+        self.assertEqual(current, initial)
+        self.assertEqual(self.worker.engine.calls, 0)
+        self.assertEqual(self.worker.engine.optimizer_calls, 0)
+        self.assertEqual(self.worker.parameter_ema.num_updates, 0)
+        torch.testing.assert_close(self.worker.engine.module.log_probability, original)
+
+    def test_frozen_parameter_proof_detects_unexpected_value_changes(self):
+        self.worker.configure_parameter_updates(False)
+        with torch.no_grad():
+            self.worker.engine.module.log_probability.add_(1)
+        with self.assertRaisesRegex(RuntimeError, "parameter values changed"):
+            self.worker.parameter_update_state()
+
+    def test_frozen_mode_cannot_reenable_or_adopt_an_already_updated_model(self):
+        self.worker.configure_parameter_updates(False)
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-enabled"):
+            self.worker.configure_parameter_updates(True)
+        self.worker._parameter_updates_enabled = True
+        self.worker.engine.module.requires_grad_(True)
+        self.run_update(mixed_data())
+        with self.assertRaisesRegex(RuntimeError, "unchanged initial model"):
+            self.worker.configure_parameter_updates(False)
+
     def test_skipped_optimizer_does_not_advance_ema_or_fake_a_clock(self):
         self.worker.engine.step_behavior = "skip"
         with self.assertRaisesRegex(RuntimeError, "Optimizer skipped"):

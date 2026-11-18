@@ -37,6 +37,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .alfworld.data import TASK_TYPES, validate_relative_game_path
+from .alfworld.native_process import spawn_owned_service
 from .replay import CurateReplay, CurateReplayRecord, ReplayRef
 from .store import SkillArtifact, SkillCandidate, SkillStore
 
@@ -546,6 +547,31 @@ def _runtime_directory(path, *, public):
     return requested.resolve()
 
 
+def _bounded_command_output(argv, *, timeout=10):
+    """Capture a short native probe without forking the Ray worker."""
+    with tempfile.TemporaryFile(mode="w+b") as output:
+        process = spawn_owned_service(argv, stdout=output)
+        try:
+            returncode = process.wait(timeout=timeout)
+        except BaseException as error:
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except BaseException as cleanup_error:
+                if hasattr(error, "add_note"):
+                    error.add_note("Native version probe cleanup failed: " + repr(cleanup_error))
+            if isinstance(error, subprocess.TimeoutExpired):
+                output.seek(0)
+                error.cmd = argv
+                error.output = output.read().decode(errors="replace")
+            raise
+        output.seek(0)
+        captured = output.read().decode(errors="replace")
+        if returncode:
+            raise subprocess.CalledProcessError(returncode, argv, output=captured)
+        return captured
+
+
 def provision_native_curator_runtime(
     *,
     public_root,
@@ -570,9 +596,7 @@ def provision_native_curator_runtime(
     native_bin, package_root = Path(native_bin).resolve(), Path(package_root).resolve()
     if not native_bin.is_file() or not os.access(native_bin, os.X_OK) or not package_root.is_dir():
         raise FileNotFoundError("The managed native Codex installation is unavailable")
-    native_version = (
-        subprocess.check_output([str(native_bin), "--version"], text=True).strip().removeprefix("codex-cli ")
-    )
+    native_version = _bounded_command_output([str(native_bin), "--version"]).strip().removeprefix("codex-cli ")
     if not native_version:
         raise CurateProtocolError("The native executable did not report a version")
     prompts = (
@@ -644,7 +668,7 @@ def provision_native_curator_runtime(
     _public_file(wrapper_path, wrapper, mode=0o755)
     work_root = _runtime_directory(work_root, public=False)
     probe_version = (
-        subprocess.check_output(
+        _bounded_command_output(
             [
                 "/usr/sbin/runuser",
                 "-u",
@@ -656,7 +680,6 @@ def provision_native_curator_runtime(
                 str(wrapper_path),
                 "--version",
             ],
-            text=True,
         )
         .strip()
         .removeprefix("codex-cli ")

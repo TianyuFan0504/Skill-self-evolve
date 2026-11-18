@@ -186,7 +186,8 @@ class SkillAwareRolloutAdapter(AgentFrameworkRolloutAdapter):
     def create(cls, *, config, **kwargs):
         loading = loading_settings(config)
         effective = config
-        if loading["enabled"]:
+        learning = _get(config.skill_harness, "learning", {})
+        if loading["enabled"] or _get(learning, "update_skills", True) is False:
             from omegaconf import open_dict
 
             effective = copy.deepcopy(config)

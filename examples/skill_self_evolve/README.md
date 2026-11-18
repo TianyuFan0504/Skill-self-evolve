@@ -7,6 +7,37 @@ delayed credit through paired with-skill/without-skill episodes. Read the
 
 ## One-command launch
 
+The same entry supports two component ablations from the original model and an
+empty library. Both use the same original task stream and experience-round
+budget. In skill-only mode the optimizer/EMA clock remains zero; in
+parameter-only mode the empty library stays fixed and no curator or credit
+models are allocated.
+
+```bash
+UPDATE_PARAMETERS=false UPDATE_SKILLS=true \
+bash examples/skill_self_evolve/run.sh \
+  --deployment /absolute/path/skill-only-deployment.json \
+  --run-dir /absolute/path/new-skill-only-run
+
+UPDATE_PARAMETERS=true UPDATE_SKILLS=false CURATOR_GPUS=0 CREDIT_GPUS=0 \
+bash examples/skill_self_evolve/run.sh \
+  --deployment /absolute/path/parameter-only-deployment.json \
+  --run-dir /absolute/path/new-parameter-only-run \
+  skill_harness.loading.enabled=false
+```
+
+Supply disjoint GPU masks, Ray temporary roots and native account rosters for
+concurrent deployments. The checked frozen-parameter proof is written to
+`frozen-parameter-proof.json`; the parameter-only snapshot is checked for
+unexpected publication. Checkpoints preserve experience rounds separately from
+the actual optimizer version.
+
+Counterfactual evaluation now pins a shared background and reserves the target
+skill's token budget before Native generation. The control branch keeps the
+same background without filling the reserved slot. Invalid pairs are censored
+without creating zero-valued rewards. Comparisons with an older run using
+independent branch retrieval must identify that protocol change.
+
 On a provisioned Linux GPU host, run from the installed repository:
 
 ```bash

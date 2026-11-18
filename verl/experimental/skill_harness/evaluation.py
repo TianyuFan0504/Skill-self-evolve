@@ -514,7 +514,8 @@ def evaluate_official_splits(trainer):
             "schema_version": 1,
             "stage": phase_prefix,
             "global_step": trainer.global_steps,
-            "policy": "final_trained_policy",
+            "policy": ("final_trained_policy" if _get(_get(harness, "learning", {}), "update_parameters", True)
+                       else "final_frozen_policy"),
             "agent": "native_uni_agent_codex",
             "optimizer_updates": False,
             "curation": False,

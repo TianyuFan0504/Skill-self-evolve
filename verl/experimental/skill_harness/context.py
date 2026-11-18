@@ -23,10 +23,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .store import SkillStore
+from .store import SkillRef, SkillStore
 
 CONTEXT_SCHEMA_VERSION = 1
 CONTEXT_BUILDER_VERSION = "host-skill-context-v2"
+PAIRED_CONTEXT_VERSION = "paired-reserved-target-v1"
 HOST_BUDGET_SCOPE = "complete_task_chat_template; native_codex_prefix_and_tools_excluded"
 SKILL_METADATA_KEYS = (
     "skill_store_root",
@@ -39,6 +40,10 @@ SKILL_METADATA_KEYS = (
 
 class ContextBudgetError(ValueError):
     """The original rendered Task prompt already exceeds its explicit budget."""
+
+
+class PairedContextUnavailable(ContextBudgetError):
+    """A paired intervention cannot fit; it supplies no observed reward."""
 
 
 def _canonical(value):
@@ -185,6 +190,81 @@ def _token_range(rendered, start, end):
     return [overlaps[0], overlaps[-1] + 1] if overlaps else None
 
 
+def _paired_context_refs(
+    pair, *, messages, store, snapshot_id, task_family, render_prompt, encode_text,
+    max_prompt_tokens, skill_token_budget, top_k, query,
+):
+    required = {"version", "plan_id", "directory", "target_ref", "with_snapshot_id", "without_snapshot_id", "loaded"}
+    if not isinstance(pair, Mapping) or set(pair) != required or pair["version"] != PAIRED_CONTEXT_VERSION:
+        raise ValueError("A paired context requires a complete host-pinned plan descriptor")
+    if type(pair["loaded"]) is not bool:
+        raise ValueError("A paired context requires its exact branch assignment")
+    expected = pair["with_snapshot_id"] if pair["loaded"] else pair["without_snapshot_id"]
+    if snapshot_id != expected:
+        raise ValueError("The paired context branch differs from its pinned snapshot")
+    pair_store = SkillStore(store.root, read_only=True)
+    target = pair_store.read_only_view(pair["with_snapshot_id"]).load_artifact(SkillRef(**pair["target_ref"]))
+    before = pair_store.get_snapshot(pair["without_snapshot_id"])
+    after = pair_store.get_snapshot(pair["with_snapshot_id"])
+    baseline = {ref.skill_id: ref.to_dict() for ref in before.skills}
+    if target.skill_id in baseline or {ref.skill_id: ref.to_dict() for ref in after.skills} != {
+        **baseline, target.skill_id: target.ref.to_dict(),
+    }:
+        raise ValueError("Paired context snapshots must differ only by the exact target")
+    if task_family not in target.task_families and not {"*", "general"}.intersection(target.task_families):
+        raise PairedContextUnavailable("The target does not apply to this paired task family")
+    if top_k < 1:
+        raise PairedContextUnavailable("The paired skill limit leaves no position for its target")
+    user_index = _user_index(messages)
+
+    def fits(artifacts):
+        block, _ = _skill_block(artifacts)
+        trial = copy.deepcopy(messages)
+        trial[user_index]["content"] += block
+        rendered = render_prompt(trial)
+        if not isinstance(rendered, RenderedPrompt):
+            raise TypeError("A paired prompt requires the actual complete Task renderer")
+        return len(_ids(encode_text(block))) <= skill_token_budget and len(rendered.token_ids) <= max_prompt_tokens
+
+    def make_plan():
+        if not fits([target]):
+            raise PairedContextUnavailable("The target alone exceeds the paired skill or complete-prompt budget")
+        view = pair_store.read_only_view(pair["without_snapshot_id"])
+        retrieved = view.retrieve(
+            task_family, snapshot_id=pair["without_snapshot_id"], query=query,
+            top_k=max(0, top_k - 1), token_budget=2**63 - 1,
+            token_counter=lambda text: len(_ids(encode_text(text))),
+        )
+        background, excluded = [], []
+        for ref in retrieved.skills:
+            artifact = view.load_artifact(ref)
+            trial = [*background, artifact]
+            if fits(trial) and fits([*trial, target]):
+                background.append(artifact)
+            else:
+                excluded.append({"ref": ref.to_dict(), "reasons": ["paired_reserved_target_budget"]})
+        return {"version": PAIRED_CONTEXT_VERSION, "target_ref": target.ref.to_dict(),
+                "background_refs": [artifact.ref.to_dict() for artifact in background], "budget_excluded": excluded}
+
+    shared = {key: value for key, value in pair.items() if key != "loaded"}
+    input_hash = _hash(_canonical({"messages": messages, "pair": shared, "task_family": task_family,
+                                  "max_prompt_tokens": max_prompt_tokens, "skill_token_budget": skill_token_budget,
+                                  "top_k": top_k, "query": query}))
+    try:
+        plan = _immutable_group_pin(pair["directory"], pair["plan_id"], input_hash, make_plan)
+    except PairedContextUnavailable:
+        raise
+    except ValueError as error:
+        raise PairedContextUnavailable(
+            "The actual paired Task inputs or saved plan failed consistency validation"
+        ) from error
+    refs = plan["background_refs"] + ([plan["target_ref"]] if pair["loaded"] else [])
+    artifacts = [store.read_only_view(snapshot_id).load_artifact(SkillRef(**ref)) for ref in refs]
+    if not fits(artifacts):
+        raise PairedContextUnavailable("The persisted paired plan no longer fits its exact Task inputs")
+    return refs, plan
+
+
 def build_skill_context(
     messages,
     *,
@@ -201,6 +281,7 @@ def build_skill_context(
     context_version: str | None = None,
     tokenizer_version: str = "caller_supplied_actual_tokenizer",
     budget_scope: str = HOST_BUDGET_SCOPE,
+    paired_context: Mapping | None = None,
 ) -> SkillContext:
     """Fit whole skills against both real skill and complete-prompt token counts.
 
@@ -225,18 +306,25 @@ def build_skill_context(
     if len(base.token_ids) > max_prompt_tokens:
         raise ContextBudgetError("The complete original Task prompt exceeds max_prompt_tokens")
     view = store.read_only_view(snapshot_id)
-    retrieved = view.retrieve(
-        task_family,
-        snapshot_id=snapshot_id,
-        query=query,
-        top_k=top_k,
-        token_budget=2**63 - 1,
-        token_counter=lambda text: len(_ids(encode_text(text))),
-    )
+    pair_plan = None
+    if paired_context is not None:
+        selected_refs, pair_plan = _paired_context_refs(
+            paired_context, messages=original, store=store, snapshot_id=snapshot_id, task_family=task_family,
+            render_prompt=render_prompt, encode_text=encode_text, max_prompt_tokens=max_prompt_tokens,
+            skill_token_budget=skill_token_budget, top_k=top_k, query=query,
+        )
+        selected_refs = [SkillRef(**ref) for ref in selected_refs]
+        retriever_version = PAIRED_CONTEXT_VERSION
+    else:
+        retrieved = view.retrieve(
+            task_family, snapshot_id=snapshot_id, query=query, top_k=top_k, token_budget=2**63 - 1,
+            token_counter=lambda text: len(_ids(encode_text(text))),
+        )
+        selected_refs, retriever_version = retrieved.skills, retrieved.retriever_version
     chosen, excluded = [], []
     final_messages, rendered = original, base
     block, spans, block_tokens = "", [], ()
-    for ref in retrieved.skills:
+    for ref in selected_refs:
         artifact = view.load_artifact(ref)
         proposed, proposed_spans = _skill_block([*chosen, artifact])
         proposed_tokens = _ids(encode_text(proposed))
@@ -251,6 +339,8 @@ def build_skill_context(
         if len(trial_rendered.token_ids) > max_prompt_tokens:
             reasons.append("complete_prompt_token_budget")
         if reasons:
+            if pair_plan is not None:
+                raise PairedContextUnavailable("A fixed paired intervention exceeded its declared budget")
             excluded.append({"ref": ref.to_dict(), "reasons": reasons})
             continue
         chosen.append(artifact)
@@ -275,9 +365,9 @@ def build_skill_context(
         "context_version": context_version or CONTEXT_BUILDER_VERSION,
         "group_id": group_id,
         "snapshot_id": snapshot_id,
-        "retriever_version": retrieved.retriever_version,
+        "retriever_version": retriever_version,
         "query_sha256": _hash(query),
-        "selected_refs": [ref.to_dict() for ref in retrieved.skills],
+        "selected_refs": [ref.to_dict() for ref in selected_refs],
         "injected_refs": [artifact.ref.to_dict() for artifact in chosen],
         "budget_excluded": excluded,
         "skill_text_sha256": _hash(block),
@@ -297,6 +387,11 @@ def build_skill_context(
         "character_range_unit": "unicode_codepoints",
         "ranges": spans,
     }
+    if pair_plan is not None:
+        manifest["paired_plan"] = {"version": PAIRED_CONTEXT_VERSION, "plan_id": paired_context["plan_id"],
+                                   "background_refs": pair_plan["background_refs"],
+                                   "target_ref": pair_plan["target_ref"], "loaded": paired_context["loaded"]}
+        manifest["budget_excluded"] = pair_plan["budget_excluded"]
     manifest["context_id"] = _hash(_canonical(manifest))
     return SkillContext(final_messages, manifest)
 
@@ -334,6 +429,7 @@ def enrich_task_messages(messages, metadata, *, renderer=None):
         group_id=metadata["skill_context_group_id"],
         context_version=metadata["skill_context_version"],
         tokenizer_version=options["tokenizer_version"],
+        paired_context=options.get("paired_context"),
     )
     return result
 
@@ -412,6 +508,8 @@ def pin_prompt_group(sample_fields, *, loading, store_root, global_step, partiti
     options.update(
         enabled=True, authority="SkillAwareRolloutAdapter", builder_version=CONTEXT_BUILDER_VERSION, query=query
     )
+    if loading.get("paired_context") is not None:
+        options["paired_context"] = copy.deepcopy(loading["paired_context"])
     group_id = _hash(_canonical({"uid": str(uid), "global_step": global_step, "partition": partition_id}))
     root = str(Path(store_root).resolve())
     input_hash = _hash(

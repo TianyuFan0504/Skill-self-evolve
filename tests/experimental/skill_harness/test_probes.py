@@ -179,7 +179,9 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             render_prompt=render,
             encode_text=lambda text: list(text.encode()),
             max_prompt_tokens=4096,
-            skill_token_budget=1024,
+            skill_token_budget=metadata["skill_context_options"]["skill_token_budget"],
+            top_k=metadata["skill_context_options"]["top_k"],
+            paired_context=metadata["skill_context_options"].get("paired_context"),
         )
         (output / "agent-messages.json").write_text(json.dumps(built.messages))
         (output / "skill-context.json").write_text(json.dumps(built.manifest))
@@ -268,9 +270,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
                 },
                 "skill_context": {
                     **built.manifest,
-                    "injected_refs": [self.request.skill_ref.to_dict()]
-                    if loaded and not self.missing_injection
-                    else [],
+                    "injected_refs": [] if loaded and self.missing_injection else built.manifest["injected_refs"],
                 },
             },
         }
@@ -288,6 +288,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
             run_branch=self.branch,
             decode_prompt_ids=lambda ids: bytes(ids).decode(),
             _account_pool=self.account_pool,
+            context_renderer=types.SimpleNamespace(encode=lambda text: list(text.encode())),
         )
         kwargs.update(changes)
         return await probes.collect_counterfactual_probe(**kwargs)
@@ -337,6 +338,52 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(probes.ProbeNotObserved):
             await self.collect()
         self.assertFalse((self.probe_root() / "paired-event.json").exists())
+
+    async def test_target_over_budget_is_rejected_before_account_or_native_execution(self):
+        self.loading["skill_token_budget"] = 1
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "target alone"):
+            await self.collect()
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.account_pool.leases, {})
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+        self.assertEqual(probes._read_payload(self.probe_root() / "context-preflight.json")["status"], "unobserved")
+
+    async def test_actual_task_budget_failure_stays_unobserved_after_task_cleanup(self):
+        async def unavailable(**kwargs):
+            raise context.PairedContextUnavailable("Actual initial Task plus target cannot fit")
+
+        with self.assertRaisesRegex(probes.ProbeNotObserved, "cannot fit"):
+            await self.collect(run_branch=unavailable)
+        self.assertFalse((self.probe_root() / "paired-event.json").exists())
+
+    async def test_reserved_target_and_background_pass_the_exact_native_input_verifier(self):
+        background = []
+        for index in range(4):
+            artifact = store_module.SkillArtifact(
+                "background_" + str(index), "Heat potato method", "Take, heat, and place the potato.",
+                "When a task requests a heated object", ("pick_heat_then_place_in_recep",),
+            )
+            candidate = self.store.stage_candidate(artifact)
+            self.store.admit(candidate.candidate_id)
+            self.store.publish([candidate.candidate_id], expected_parent=self.store.head())
+            background.append(artifact)
+        baseline = self.store.head()
+        self.store.create_branch("crowded", from_snapshot=baseline)
+        target = self.store.load_artifact(self.request.skill_ref)
+        candidate = self.store.stage_candidate(target, branch="crowded")
+        self.store.admit(candidate.candidate_id)
+        treated = self.store.publish([candidate.candidate_id], branch="crowded", expected_parent=baseline)
+        protocol = replace(self.protocol, baseline_snapshot_id=baseline)
+        self.request = replace(self.request, protocol=protocol, without_snapshot_id=baseline,
+                               with_snapshot_id=treated.snapshot_id)
+        self.loading["skill_token_budget"] = max(len(context._skill_block(background)[0].encode()),
+                                                 len(context._skill_block([*background[:3], target])[0].encode()))
+        event = await self.collect()
+        self.assertEqual(event.with_skill.score - event.without_skill.score, 1)
+        audit = probes._read_payload(self.probe_root() / "paired-input-audit.json")
+        self.assertTrue(audit["retained_refs_and_order_preserved"])
+        self.assertEqual(audit["branches"]["with_skill"]["injected_refs"],
+                         [*audit["branches"]["without_skill"]["injected_refs"], target.ref.to_dict()])
 
     async def test_different_environment_initialization_does_not_settle(self):
         self.changed_state = True

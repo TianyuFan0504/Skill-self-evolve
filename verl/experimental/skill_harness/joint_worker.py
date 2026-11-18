@@ -26,15 +26,20 @@ Importing this file starts no workers, process groups, models or GPU jobs.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 from contextlib import contextmanager
 from dataclasses import asdict
 from functools import partial
 
+import torch
+
 from verl.single_controller.base.decorator import Dispatch, make_nd_compute_dataproto_dispatch_fn, register
 from verl.workers.config import ActorConfig
 from verl.workers.utils.losses import ppo_loss
 
+from .ema import local_tensor
 from .ema_worker import EMAActorRolloutRefWorker, EMATrainingWorker
 from .losses import CurateLossConfig, prepare_role_batch_metadata, skill_harness_loss
 
@@ -127,12 +132,70 @@ class JointEMATrainingWorker(EMATrainingWorker):
             "single_optimizer_step_per_rpc": True,
             "complete_tito_trajectories_per_candidate": 1,
             "ema_initialized": getattr(self, "parameter_ema", None) is not None,
+            "parameter_updates_enabled": getattr(self, "_parameter_updates_enabled", True),
         }
+
+    def _parameter_fingerprint(self):
+        """Hash only local parameter values; no full-model gather or source hash."""
+        digest = hashlib.sha256()
+        elements = 0
+        for name, parameter in self.engine.module.named_parameters():
+            value = local_tensor(parameter).contiguous()
+            digest.update(json.dumps([name, str(value.dtype), list(value.shape)], separators=(",", ":")).encode())
+            raw = value.reshape(-1).view(torch.uint8).cpu().numpy()
+            digest.update(memoryview(raw))
+            elements += value.numel()
+        return digest.hexdigest(), elements
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def configure_parameter_updates(self, enabled: bool):
+        """Freeze a fresh/restored zero-update actor for the skill-only ablation."""
+        if type(enabled) is not bool:
+            raise TypeError("Parameter update mode must be a strict bool")
+        with self._joint_control():
+            ema = self._ready()
+            if enabled:
+                if getattr(self, "_parameter_updates_enabled", True) is False:
+                    raise RuntimeError("A frozen ablation actor cannot be re-enabled in place")
+                self._parameter_updates_enabled = True
+                return {"parameter_updates_enabled": True}
+            if ema.last_optimizer_step != 0 or self._observed_optimizer_step != 0:
+                raise RuntimeError("Skill-only evolution requires the unchanged initial model")
+            self.engine.module.requires_grad_(False)
+            self._parameter_updates_enabled = False
+            fingerprint, elements = self._parameter_fingerprint()
+            if getattr(self, "_frozen_parameter_fingerprint", fingerprint) != fingerprint:
+                raise RuntimeError("Frozen actor parameters changed before reconfiguration")
+            self._frozen_parameter_fingerprint = fingerprint
+            return self._parameter_update_metadata(fingerprint, elements)
+
+    def _parameter_update_metadata(self, fingerprint, elements):
+        return {"worker_rank": self.rank,
+                "parameter_updates_enabled": getattr(self, "_parameter_updates_enabled", True),
+                "optimizer_step": self._observed_optimizer_step,
+                "ema_updates": self._ready().num_updates,
+                "parameter_fingerprint": fingerprint, "local_parameter_elements": elements}
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def parameter_update_state(self):
+        ema = self._ready()
+        enabled = getattr(self, "_parameter_updates_enabled", True)
+        fingerprint, elements = self._parameter_fingerprint()
+        if not enabled:
+            if ema.last_optimizer_step != 0 or self._observed_optimizer_step != 0:
+                raise RuntimeError("The frozen actor observed an optimizer or EMA update")
+            if any(parameter.requires_grad for parameter in self.engine.module.parameters()):
+                raise RuntimeError("A frozen actor parameter became trainable")
+            if fingerprint != self._frozen_parameter_fingerprint:
+                raise RuntimeError("Frozen actor parameter values changed")
+        return self._parameter_update_metadata(fingerprint, elements)
 
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="train"), blocking=False)
     def train_batch(self, data):
         """Exact stock optimizer-minibatch boundary; preserve every native field."""
         with self._joint_control(training=True):
+            if getattr(self, "_parameter_updates_enabled", True) is False:
+                raise RuntimeError("Parameter updates are disabled for this ablation")
             self._ready()
             loss_fn = getattr(self, "loss_fn", None)
             if not isinstance(loss_fn, partial) or loss_fn.func is not skill_harness_loss:
@@ -158,3 +221,15 @@ class JointEMAActorRolloutRefWorker(EMAActorRolloutRefWorker):
         if not self._is_actor or self.actor is None:
             raise RuntimeError("Joint training metadata requires an initialized actor")
         return self.actor.joint_training_metadata()
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def configure_parameter_updates(self, enabled: bool):
+        if not self._is_actor or self.actor is None:
+            raise RuntimeError("Parameter update mode requires an initialized actor")
+        return self.actor.configure_parameter_updates(enabled)
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def get_parameter_update_state(self):
+        if not self._is_actor or self.actor is None:
+            raise RuntimeError("Parameter inspection requires an initialized actor")
+        return self.actor.parameter_update_state()

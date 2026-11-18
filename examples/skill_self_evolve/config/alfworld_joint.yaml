@@ -134,6 +134,9 @@ transfer_queue:
   enable: true
 
 skill_harness:
+  learning:
+    update_parameters: ${oc.decode:${oc.env:UPDATE_PARAMETERS,true}}
+    update_skills: ${oc.decode:${oc.env:UPDATE_SKILLS,true}}
   artifact_root: ${oc.env:SKILL_RUN_DIR}
   store_root: ${skill_harness.artifact_root}/skill_store
   split_manifest: ${oc.env:ALFWORLD_DATA_DIR}/split_manifest.json

@@ -355,6 +355,8 @@ class CreditLedger:
         required = window["protocol"]["required_exposures"]
         if item["settlement_id"] is not None:
             phase = "settled"
+        elif item.get("censor_reason") is not None:
+            phase = "censored"
         elif count >= required:
             phase = "matured"
         elif now > window["deadline_at"]:
@@ -368,6 +370,7 @@ class CreditLedger:
             "required_exposures": required,
             "deadline_at": window["deadline_at"],
             "settlement_id": item["settlement_id"],
+            **({"reason": item["censor_reason"]} if item.get("censor_reason") is not None else {}),
         }
 
     def window_status(self, window_id: str, *, now: float | None = None):
@@ -375,6 +378,24 @@ class CreditLedger:
 
     def get_window(self, window_id: str):
         return self._window(self._state(), window_id)
+
+    def censor_window(self, window_id: str, *, reason: str):
+        """Close an invalid attribution attempt without inventing a utility."""
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("A censored attribution window requires its observed reason")
+        with _writer_lock(self.root):
+            state = self._state()
+            window = self._window(state, window_id)
+            item = state["windows"][window_id]
+            if item["settlement_id"] is not None or len(item["event_ids"]) >= window["protocol"]["required_exposures"]:
+                raise CreditError("Mature or settled credit cannot be replaced by censorship")
+            previous = item.get("censor_reason")
+            if previous is not None and previous != reason:
+                raise CreditError("A terminal censor reason cannot be rewritten")
+            if previous is None:
+                item["censor_reason"] = reason
+                self._save_state(state)
+            return self._status(state, window_id, time.time())
 
     def add_usage(self, event: UsageEvent, *, now: float | None = None) -> dict[str, Any]:
         payload = event.to_dict()
@@ -390,6 +411,8 @@ class CreditLedger:
                 return self._status(state, event.window_id, timestamp)
             if item["settlement_id"] is not None:
                 raise CreditError("This immutable window is settled; register a new attribution window")
+            if item.get("censor_reason") is not None:
+                raise CreditError("This attribution window is censored; no additional usage may be attached")
             protocol = CreditProtocol(**window["protocol"])
             record = self.replay.get(event.curate_record_id)
             if (

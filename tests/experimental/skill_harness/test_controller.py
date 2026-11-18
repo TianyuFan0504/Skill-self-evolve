@@ -413,8 +413,11 @@ class ControllerFixture(unittest.IsolatedAsyncioTestCase):
                 render_prompt=render,
                 encode_text=lambda text: list(text.encode()),
                 max_prompt_tokens=100000,
-                skill_token_budget=10000,
-                top_k=1 if loaded and self.cf_input_attack == "displaced" else 6,
+                skill_token_budget=metadata["skill_context_options"]["skill_token_budget"],
+                top_k=(1 if loaded and self.cf_input_attack == "displaced"
+                       else metadata["skill_context_options"]["top_k"]),
+                paired_context=(metadata["skill_context_options"].get("paired_context")
+                                if self.cf_input_attack != "displaced" else None),
             )
             (output / "agent-messages.json").write_text(json.dumps(built.messages))
             (output / "skill-context.json").write_text(json.dumps(built.manifest))
@@ -505,6 +508,7 @@ class ControllerFixture(unittest.IsolatedAsyncioTestCase):
             run_branch=branch,
             decode_prompt_ids=lambda ids: bytes(ids).decode(),
             _account_pool=self.account_pool,
+            context_renderer=SimpleNamespace(encode=lambda text: list(text.encode())),
         )
 
     async def update(self, controller, data, step):

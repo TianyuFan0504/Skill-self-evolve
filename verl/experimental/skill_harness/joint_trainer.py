@@ -38,11 +38,12 @@ from verl.trainer.ppo.checkpoint_callback import CheckpointCallback
 from verl.trainer.ppo.utils import Role
 from verl.trainer.ppo.v1.trainer_sync import PPOTrainerSync
 from verl.utils import tensordict_utils as tu
+from verl.utils.debug import marked_timer
 from verl.utils.import_utils import load_class_from_fqn
 from verl.utils.metric import Metric
 from verl.utils.transferqueue_utils import tq
 
-from .controller import SkillJointController, preflight_controller_identity
+from .controller import SkillJointController, learning_settings, preflight_controller_identity
 from .framework import (
     TEXT_ONLY_MEDIA_FIELDS,
     guard_text_only_tq_batch,
@@ -155,6 +156,7 @@ class SkillJointSyncTrainer(PPOTrainerSync):
 
     @staticmethod
     def _validate_joint_config(config):
+        mode = learning_settings(config)
         if config.trainer.v1.trainer_mode != "sync" or config.algorithm.adv_estimator != "grpo":
             raise ValueError("Joint training requires synchronous solver GRPO")
         ema = config.skill_harness.ema
@@ -168,6 +170,46 @@ class SkillJointSyncTrainer(PPOTrainerSync):
             raise ValueError("Disable native actor pruning until COMPLETE joint checkpoint publication")
         if config.trainer.get("del_local_ckpt_after_load", False):
             raise ValueError("Joint checkpoint files must remain available for complete verification")
+        if not mode["update_skills"] and config.skill_harness.get("loading", {}).get("enabled", False):
+            raise ValueError("Parameter-only ablation must disable skill loading and retain an empty library")
+
+    def _learning_mode(self):
+        return learning_settings(self.config)
+
+    def _assert_frozen_parameters(self, rows=None):
+        if self._learning_mode()["update_parameters"]:
+            return None
+        if rows is None:
+            rows = self._await(self.actor_rollout_wg.get_parameter_update_state())
+        if not isinstance(rows, list) or len(rows) != self.actor_rollout_wg.world_size:
+            raise RuntimeError("Frozen parameter proof must cover every actor shard")
+        ordered = sorted(rows, key=lambda row: row["worker_rank"])
+        if [row["worker_rank"] for row in ordered] != list(range(len(rows))):
+            raise RuntimeError("Frozen parameter proof has missing or duplicate actor ranks")
+        if any(row["parameter_updates_enabled"] or row["optimizer_step"] != 0 or row["ema_updates"] != 0
+               for row in ordered):
+            raise RuntimeError("The skill-only ablation changed an optimizer or EMA clock")
+        expected = getattr(self, "_frozen_parameter_reference", None)
+        if expected is not None and expected != ordered:
+            raise RuntimeError("The skill-only ablation changed parameter values")
+        if expected is not None:
+            self._write_frozen_parameter_proof(ordered)
+        return ordered
+
+    def _write_frozen_parameter_proof(self, rows):
+        (self.artifact_root / "frozen-parameter-proof.json").write_text(json.dumps({
+            "schema_version": 1, "experience_round": min(self.global_steps, self.total_training_steps),
+            "checked_at_global_step": self.global_steps, "optimizer_step": 0,
+            "parameters_unchanged": True, "ranks": rows,
+        }, indent=2) + "\n")
+
+    def _assert_fixed_skills(self):
+        if self._learning_mode()["update_skills"]:
+            return
+        if self._joint_store.get_snapshot().skills:
+            raise RuntimeError("Parameter-only ablation requires an empty skill library")
+        if self._joint_store.head() != self._fixed_skill_snapshot:
+            raise RuntimeError("The parameter-only ablation changed its fixed skill snapshot")
 
     def _await(self, value):
         if self._joint_loop.is_closed():
@@ -206,14 +248,24 @@ class SkillJointSyncTrainer(PPOTrainerSync):
         return solver + controller.settings.curator_gpus + controller.settings.credit_gpus
 
     def on_sample_end(self):
-        if self._joint_controller is not None:
+        if self._joint_controller is not None and self._learning_mode()["update_parameters"]:
             self._await(self._joint_controller.enter_learner())
         return super().on_sample_end()
 
     def on_step_end(self):
-        result = super().on_step_end()
-        if self._joint_controller is not None:
+        if self._learning_mode()["update_parameters"]:
+            result = super().on_step_end()
+        else:
+            # Sampling released the replica weights. Reload the unchanged policy
+            # while keeping its weight version separate from experience rounds.
+            with marked_timer("update_weights", self.timing_raw, color="red"):
+                self.checkpoint_manager.update_weights(0)
+            if self.global_steps == 1:
+                self._assert_frozen_parameters()
+            result = None
+        if self._joint_controller is not None and self._learning_mode()["update_parameters"]:
             self._await(self._joint_controller.leave_learner())
+        self._assert_fixed_skills()
         return result
 
     def _identity(self):
@@ -270,7 +322,20 @@ class SkillJointSyncTrainer(PPOTrainerSync):
                         else self._joint_restored.checkpoint.payload["spec"]["optimizer_step"])
             if self._ema_clock() != expected:
                 raise RuntimeError("Restored/fresh EMA clock does not match its online checkpoint")
-            super().on_init_end()
+            if not self._learning_mode()["update_skills"]:
+                self._fixed_skill_snapshot = self._joint_store.head()
+                self._assert_fixed_skills()
+            if not self._learning_mode()["update_parameters"]:
+                rows = self._await(self.actor_rollout_wg.configure_parameter_updates(False))
+                self._frozen_parameter_reference = self._assert_frozen_parameters(rows)
+                if self._joint_restored is not None:
+                    saved = self._joint_restored.evaluation_state.get("frozen_parameters")
+                    if saved != self._frozen_parameter_reference:
+                        raise RuntimeError("Restored frozen parameters differ from their original invariant proof")
+                self._write_frozen_parameter_proof(self._frozen_parameter_reference)
+                self.checkpoint_manager.update_weights(0)
+            else:
+                super().on_init_end()
 
     def on_train_begin(self):
         with self._joint_lock:
@@ -378,6 +443,23 @@ class SkillJointSyncTrainer(PPOTrainerSync):
             if self._joint_controller is None:
                 raise RuntimeError("Joint controller must be initialized before any optimizer update")
             source = self._materialize_solver(batch)
+            if not self._learning_mode()["update_parameters"]:
+                actual = self._ema_clock()
+                if actual != 0:
+                    raise RuntimeError("Skill-only evolution must retain optimizer clock zero")
+                completed = self._await(self._joint_controller.advance_experience(source, self.global_steps))
+                metrics.update({"skill/optimizer_step": 0, "skill/experience_round": self.global_steps,
+                                "skill/parameter_updates_enabled": 0, "skill/replay_candidates": 0,
+                                "skill/curate_loss": 0.0, "skill/joint_loss": 0.0,
+                                "skill/solver_gpu_count": self.actor_rollout_wg.world_size,
+                                "skill/total_reserved_gpu_count": (
+                                    self.actor_rollout_wg.world_size + self._joint_controller.settings.curator_gpus
+                                    + self._joint_controller.settings.credit_gpus)})
+                if isinstance(completed, Mapping):
+                    prefixes = ("source_", "probe_", "curator_weight_", "curate_", "new_curate_")
+                    metrics.update({"skill/" + key: value for key, value in completed.items()
+                                    if key.startswith(prefixes)})
+                return batch
             prepared = self._await(self._joint_controller.prepare_update(source, self.global_steps))
             output = self._await(self.actor_rollout_wg.update_actor(prepared.data))
             actual = self._ema_clock()
@@ -388,6 +470,8 @@ class SkillJointSyncTrainer(PPOTrainerSync):
             ))
             metrics.update(normalize_actor_metrics(output))
             metrics["skill/optimizer_step"] = actual
+            metrics["skill/experience_round"] = self.global_steps
+            metrics["skill/parameter_updates_enabled"] = 1
             metrics["skill/replay_candidates"] = len(prepared.acknowledgments)
             metrics["skill/solver_gpu_count"] = self.actor_rollout_wg.world_size
             metrics["skill/total_reserved_gpu_count"] = (
@@ -423,6 +507,8 @@ class SkillJointSyncTrainer(PPOTrainerSync):
     def _save_checkpoint(self):
         # The native model/optimizer save and joint state share the learner fence.
         with self._joint_lock:
+            self._assert_frozen_parameters()
+            self._assert_fixed_skills()
             final = (getattr(self, "_final_evaluation_enabled", False)
                      and self.global_steps >= self.total_training_steps)
             if final:
@@ -492,10 +578,13 @@ class SkillJointSyncTrainer(PPOTrainerSync):
 
     def _assert_final_seal(self):
         seal = self._final_checkpoint_seal
-        if seal is None or seal["optimizer_step"] <= 0:
-            raise RuntimeError("Final evaluation requires a completed trained joint checkpoint")
+        minimum_clock = 1 if self._learning_mode()["update_parameters"] else 0
+        if seal is None or seal["optimizer_step"] < minimum_clock or seal["checkpoint_step"] <= 0:
+            raise RuntimeError("Final evaluation requires a completed checkpoint for the configured learning mode")
         if self._ema_clock() != seal["optimizer_step"] or self._joint_store.head() != seal["snapshot_id"]:
             raise RuntimeError("The policy or library changed after the final joint checkpoint")
+        self._assert_frozen_parameters()
+        self._assert_fixed_skills()
 
     def _pinned_validation_manager(self, snapshot_id):
         config = copy.deepcopy(self.config)
@@ -609,6 +698,8 @@ class SkillJointCheckpointCallback(CheckpointCallback):
 
             evaluation = {**identity.manifest(), "evaluator_fingerprint": identity.frozen_version,
                           "protocol_fingerprint": identity.protocol_fingerprint}
+            if not trainer._learning_mode()["update_parameters"]:
+                evaluation["frozen_parameters"] = trainer._frozen_parameter_reference
             trainer._last_joint_checkpoint = trainer._joint_coordinator.save(
                 checkpoint_dir, spec=spec, save_online=completed_online,
                 save_ema=lambda path: trainer._await(trainer.actor_rollout_wg.save_ema(str(path))),

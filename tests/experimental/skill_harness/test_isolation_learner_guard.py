@@ -37,6 +37,7 @@ class LearnerBoundaryTests(unittest.TestCase):
             config=SimpleNamespace(skill_harness=SimpleNamespace(artifact_root=str(self.root))),
             _joint_controller=self.controller,
             _materialize_solver=Mock(return_value={"input_ids": [101, 102]}),
+            _learning_mode=lambda: {"update_parameters": True, "update_skills": True},
             _await=lambda value: value,
             _ema_clock=lambda: 1,
             global_steps=1,

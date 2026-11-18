@@ -83,6 +83,14 @@ def _get(value, key, default=None):
     return value.get(key, default) if isinstance(value, Mapping) else getattr(value, key, default)
 
 
+def learning_settings(config):
+    requested = _get(config.skill_harness, "learning", {}) or {}
+    result = {name: _get(requested, name, True) for name in ("update_parameters", "update_skills")}
+    if any(type(value) is not bool for value in result.values()):
+        raise ValueError("skill_harness.learning switches must be booleans")
+    return result
+
+
 def _write_state(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix=".controller-", dir=path.parent)
@@ -156,8 +164,6 @@ class JointSettings:
         for key in (
             "solver_gpus",
             "available_gpus",
-            "curator_gpus",
-            "credit_gpus",
             "route_tensor_parallel_size",
             "gateway_count",
             "candidates_per_source",
@@ -173,6 +179,8 @@ class JointSettings:
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"joint.{key} must be a positive integer")
         for key in (
+            "curator_gpus",
+            "credit_gpus",
             "probes_per_step",
             "replay_batch_size",
             "max_replay_lag_steps",
@@ -231,9 +239,19 @@ class ControllerIdentity:
 def preflight_controller_identity(config, *, native_runtime=None):
     """Compute current compatibility before any extra GPU/model allocation."""
     settings = JointSettings.from_config(config)
+    learning = learning_settings(config)
     loading = loading_settings(config)
-    if not loading["enabled"]:
+    if learning["update_skills"] and (not settings.curator_gpus or not settings.credit_gpus):
+        raise ValueError("Skill evolution requires curator and credit GPU reservations")
+    if learning["update_skills"] and not loading["enabled"]:
         raise ValueError("Joint training requires the host skill loading path")
+    if not loading["enabled"]:
+        from omegaconf import open_dict
+
+        metadata_config = copy.deepcopy(config)
+        with open_dict(metadata_config.skill_harness.loading):
+            metadata_config.skill_harness.loading.enabled = True
+        loading = {**loading_settings(metadata_config), "enabled": False}
     options = _get(config.skill_harness, "joint", {})
     frozen_path = Path(_get(options, "frozen_model_path", str(config.actor_rollout_ref.model.path))).resolve()
     frozen_version = fingerprint_model(frozen_path)["fingerprint"]
@@ -251,6 +269,7 @@ def preflight_controller_identity(config, *, native_runtime=None):
         )
     identity = object.__new__(SkillJointController)
     identity.config, identity.settings, identity.loading = config, settings, loading
+    identity.learning = learning
     identity.runtime, identity.frozen_version = native_runtime, frozen_version
     identity._configure_protocol()
     return ControllerIdentity(
@@ -287,6 +306,7 @@ class SkillJointController:
             raise ValueError("Reserve the configured solver GPU pool before creating joint policy routes")
         self = cls()
         self.trainer, self.config, self.settings = trainer, config, settings
+        self.learning = learning_settings(config)
         self.actor = trainer.actor_rollout_wg
         self.artifact_root = Path(config.skill_harness.artifact_root).resolve()
         self.state_path = self.artifact_root / "controller/state.json"
@@ -355,7 +375,7 @@ class SkillJointController:
                 tensor_parallel_size=settings.route_tensor_parallel_size,
                 reference_seed=settings.seed,
             ),
-        ]
+        ] if self.learning["update_skills"] else []
         self.routes = await _resolve(
             (route_factory or create_policy_routes)(
                 config,
@@ -364,9 +384,10 @@ class SkillJointController:
                 solver_gpus=settings.solver_gpus,
                 available_gpus=settings.available_gpus,
             )
-        )
+        ) if specifications else {}
         clock = await self._optimizer_clock()
-        await self.routes["curator"].sync_ema(clock)
+        if self.learning["update_skills"]:
+            await self.routes["curator"].sync_ema(clock)
         self.task_config_path = os.environ["ALFWORLD_TASK_CONFIG"]
         if restored_state is not None:
             self.restore_state(restored_state, expected_optimizer_step=clock)
@@ -382,18 +403,21 @@ class SkillJointController:
                 "prepared_update": None,
                 "applied_update_ids": {},
                 "last_global_step": 0,
+                "experience_round": 0,
                 "collections": {},
                 "configuration": asdict(settings),
             }
             self.save_state()
         from .probes import create_frozen_probe_gateway
 
-        self.frozen_gateway = await create_frozen_probe_gateway(
-            self._gateway_config(self.routes["credit"].config),
-            self.routes["credit"],
-            gateway_factory=gateway_factory,
-        )
-        await self._refresh_ema_gateway()
+        self.frozen_gateway = None
+        if self.learning["update_skills"]:
+            self.frozen_gateway = await create_frozen_probe_gateway(
+                self._gateway_config(self.routes["credit"].config),
+                self.routes["credit"],
+                gateway_factory=gateway_factory,
+            )
+            await self._refresh_ema_gateway()
         self._initialize_background()
         return self
 
@@ -415,8 +439,7 @@ class SkillJointController:
             }
         )
         self.distribution_version = "train:" + manifest["parquet_files"]["train"]["sha256"]
-        self.protocol_fingerprint = _digest(
-            {
+        protocol = {
                 "schema_version": 1,
                 "settings": asdict(self.settings),
                 "frozen_version": self.frozen_version,
@@ -429,8 +452,11 @@ class SkillJointController:
                 "frozen_generation_policy": {
                     "temperature": 0.0, "seed": self.settings.seed, "batch_invariant": False,
                 },
-            }
-        )
+        }
+        # Default joint runs retain their existing protocol identity.
+        if not all(self.learning.values()):
+            protocol["learning"] = self.learning
+        self.protocol_fingerprint = _digest(protocol)
 
     def _gateway_config(self, config):
         from omegaconf import open_dict
@@ -484,6 +510,7 @@ class SkillJointController:
             if not isinstance(payload.get(key), dict):
                 raise ControllerRecoveryRequired("Incomplete joint controller checkpoint state")
         self.state = payload
+        self.state.setdefault("experience_round", self.state.get("last_global_step", 0))
         self.save_state()
 
     def _sample_fields(self, data):
@@ -573,15 +600,63 @@ class SkillJointController:
             )
         except ProbeNotObserved as error:
             await self._writes_allowed.wait()
-            pending["unobserved"][logical_id] = type(error).__name__
+            pending["unobserved"][logical_id] = str(error)
+            self._censor_window(window_id, str(error))
             self.save_state()
             return
         await self._writes_allowed.wait()
+        if pending["status"] != "pending":
+            return
         self.ledger.add_usage(event)
         pending["observed"].append(logical_id)
         self.save_state()
         if self.ledger.window_status(window_id)["state"] == "matured":
             self._settle_window(window_id, pending)
+
+    def _censor_window(self, window_id, reason):
+        pending = self.state["pending"][window_id]
+        if pending["status"] != "pending":
+            return
+        self.ledger.censor_window(window_id, reason=reason)
+        self.store.reject(pending["candidate_id"], reason="Unobserved counterfactual; no utility label: " + reason)
+        pending.update(status="censored", reason=reason)
+        for job in self.state.get("probe_jobs", {}).values():
+            if job["window_id"] == window_id and job["status"] == "queued":
+                job.update(status="censored", reason="attribution_window_censored")
+        self.save_state()
+
+    async def advance_experience(self, solver_data, global_step):
+        """Advance a skill-learning round without an optimizer transaction."""
+        if self.learning["update_parameters"]:
+            raise RuntimeError("Parameter-learning rounds require a real optimizer update")
+        if self._busy:
+            raise RuntimeError("Controller operations cannot overlap")
+        self._busy = True
+        try:
+            await self._writes_allowed.wait()
+            clock = await self._optimizer_clock()
+            if clock != self.state["optimizer_step"]:
+                raise ControllerRecoveryRequired("Frozen parameters observed an optimizer-clock change")
+            previous = self.state.get("experience_round", self.state.get("last_global_step", 0))
+            if global_step == previous:
+                return {"experience_round": previous, "optimizer_step": clock, **self.background_metrics()}
+            if global_step != previous + 1 or self.state["prepared_update"] is not None:
+                raise ControllerRecoveryRequired("Experience rounds must advance once without a learner transaction")
+            if self.learning["update_skills"]:
+                fields, sources = self._sample_fields(solver_data)
+                self._enqueue_probe_jobs(fields, global_step)
+            else:
+                sources = []
+            self.state.update(experience_round=global_step, last_global_step=global_step)
+            if self.learning["update_skills"]:
+                self._offer_sources(sources, global_step, "experience_" + _digest(
+                    [self.protocol_fingerprint, global_step]
+                ))
+            report = self._curation_round_metrics()
+            self.save_state()
+            return {**report, "experience_round": global_step, "optimizer_step": clock, **self.background_metrics()}
+        finally:
+            self._busy = False
 
     def _settle_window(self, window_id, pending):
         label = self.ledger.settle(window_id)
@@ -614,6 +689,8 @@ class SkillJointController:
             prepare_solver_only_batch,
         )
 
+        if not self.learning["update_parameters"]:
+            raise RuntimeError("Frozen parameters must advance experience without preparing an optimizer update")
         if self._busy:
             raise RuntimeError("Joint controller operations cannot overlap")
         self._busy = True
@@ -631,8 +708,11 @@ class SkillJointController:
                 raise ControllerRecoveryRequired(
                     "Actor/controller optimizer clocks require coherent checkpoint reconciliation"
                 )
-            fields, sources = self._sample_fields(solver_TensorDict)
-            self._enqueue_probe_jobs(fields, global_step)
+            if self.learning["update_skills"]:
+                fields, sources = self._sample_fields(solver_TensorDict)
+                self._enqueue_probe_jobs(fields, global_step)
+            else:
+                sources = []
             update_id = "update_" + _digest([self.protocol_fingerprint, global_step, clock + 1])
             prepared = {
                 "update_id": update_id,
@@ -646,7 +726,8 @@ class SkillJointController:
             }
             self.state["prepared_update"] = prepared
             self.save_state()
-            ready = self.ledger.sample_ready(len(self.state["pending"]), seed=self.settings.seed + global_step)
+            ready = (self.ledger.sample_ready(len(self.state["pending"]), seed=self.settings.seed + global_step)
+                     if self.learning["update_skills"] else [])
             labels = []
             for label in ready:
                 record = self.replay.get(label.curate_record_id)
@@ -770,7 +851,7 @@ class SkillJointController:
             "record_id": result.record_id,
             "candidate_id": result.candidate.candidate_id,
             "skill_ref": result.artifact.ref.to_dict(),
-            "opened_step": step,
+            "opened_step": max(step, self.state.get("experience_round", step)),
             "producer_task_id": job["task_id"],
             "task_type": job["task_type"],
             "cohort_id": cohort_id,
@@ -1111,24 +1192,32 @@ class SkillJointController:
             cohort["status"] = "abstained" if all(job["status"] == "abstained" for job in jobs) else "registered"
             self.save_state()
 
+    def _curation_counts(self):
+        jobs = [job for entry in self.source_queue.state["jobs"].values() for job in entry["curator_jobs"]]
+        return {
+            "curate_semantic_rejections": sum(job["status"] == "semantic_rejected" for job in jobs),
+            "curate_censored_jobs": sum(job["status"] in {"censored", "source_censored"} for job in jobs),
+            "curate_retained_actions": sum("record_id" in job for job in jobs),
+            "curate_censored_cohorts": len({
+                job["candidate_group_id"] for job in jobs
+                if job["status"] in {"censored", "source_censored", "semantic_rejected"}
+            }),
+        }
+
+    def _curation_round_metrics(self):
+        totals = {"new_curate_windows": len(self.state["pending"]), **self._curation_counts()}
+        previous = self.state.get("curate_metrics", {})
+        delta = {key: value - previous.get(key, 0) for key, value in totals.items()}
+        self.state["curate_metrics"] = totals
+        return delta
+
     def _complete_post_update(self, current, prepared, optimizer_step):
-        jobs = current["curate_jobs"]
         report = {
             "schema_version": 1,
             "update_id": prepared.update_id,
             "optimizer_step": optimizer_step,
             "global_step": prepared.global_step,
-            "new_curate_windows": sum(job["status"] == "registered" for job in jobs),
-            "curate_semantic_rejections": sum(job["status"] == "semantic_rejected" for job in jobs),
-            "curate_censored_jobs": sum(job["status"] in {"censored", "source_censored"} for job in jobs),
-            "curate_retained_actions": sum("record_id" in job for job in jobs),
-            "curate_censored_cohorts": len(
-                {
-                    job["candidate_group_id"]
-                    for job in jobs
-                    if job["status"] in {"censored", "source_censored", "semantic_rejected"}
-                }
-            ),
+            **self._curation_round_metrics(),
         }
         path = self.artifact_root / "controller/updates" / (prepared.update_id + ".json")
         if path.exists() and _read_state(path) != report:
@@ -1138,15 +1227,6 @@ class SkillJointController:
         final_state = dict(self.state)
         final_state["post_update_reports"] = dict(final_state.get("post_update_reports", {}))
         final_state["post_update_reports"][prepared.update_id] = report
-        totals = final_state["curate_metrics"] = dict(final_state.get("curate_metrics", {}))
-        for key in (
-            "new_curate_windows",
-            "curate_semantic_rejections",
-            "curate_censored_jobs",
-            "curate_retained_actions",
-            "curate_censored_cohorts",
-        ):
-            totals[key] = totals.get(key, 0) + report[key]
         final_state["prepared_update"] = None
         _write_state(self.state_path, final_state)
         self.state = final_state
@@ -1173,8 +1253,10 @@ class SkillJointController:
             if job["status"] == "running":
                 job.update(status="unobserved", reason="interrupted_background_pair")
                 self.state["pending"][job["window_id"]]["unobserved"][job["logical_id"]] = job["reason"]
+                self._censor_window(job["window_id"], job["reason"])
         self.save_state()
-        self._background_pump = asyncio.create_task(self._pump_background(), name="skill-background-pump")
+        if self.learning["update_skills"]:
+            self._background_pump = asyncio.create_task(self._pump_background(), name="skill-background-pump")
 
     def _offer_sources(self, sources, step, update_id):
         prepared = [{**source, "update_id": update_id} for source in sources]
@@ -1255,7 +1337,10 @@ class SkillJointController:
         try:
             original_loader(entry["episode_output_dir"])
             self.source_queue.mark_read(key)
-            await self._collect_cohorts({"curate_jobs": jobs}, behavior, self.state["optimizer_step"])
+            await self._collect_cohorts(
+                {"curate_jobs": jobs}, behavior,
+                self.state.get("experience_round", self.state["optimizer_step"]),
+            )
             await self._writes_allowed.wait()
             if any(job["status"] == "registered" for job in jobs):
                 terminal = "generated"
@@ -1288,13 +1373,17 @@ class SkillJointController:
             )
             await self._writes_allowed.wait()
             pending = self.state["pending"][job["window_id"]]
-            job["status"] = "complete" if job["logical_id"] in pending["observed"] else "unobserved"
+            job["status"] = ("complete" if job["logical_id"] in pending["observed"]
+                             else "censored" if pending["status"] == "censored" else "unobserved")
+            if job["logical_id"] in pending["unobserved"]:
+                job.update(status="unobserved", reason=pending["unobserved"][job["logical_id"]])
         except asyncio.CancelledError:
             raise
         except Exception as error:
             await self._writes_allowed.wait()
             job.update(status="failed", reason=type(error).__name__, message=str(error)[:2000])
             self.state["pending"][job["window_id"]]["unobserved"][job["logical_id"]] = type(error).__name__
+            self._censor_window(job["window_id"], type(error).__name__ + ": " + str(error)[:2000])
         self.save_state()
 
     async def _pump_background(self):
@@ -1337,14 +1426,23 @@ class SkillJointController:
     def background_metrics(self):
         metrics = {"source_" + key.removeprefix("sources_"): value
                    for key, value in self.source_queue.metrics().items()}
-        for status in ("queued", "running", "complete", "unobserved", "failed"):
+        for status in ("queued", "running", "complete", "unobserved", "failed", "censored"):
             metrics["probe_" + status] = sum(job["status"] == status for job in self.state["probe_jobs"].values())
         metrics["source_sampled"] = sum(
             any("record_id" in job or job.get("disposition", {}).get("sampled") is True
                 for job in entry["curator_jobs"])
             for entry in self.source_queue.state["jobs"].values()
         )
-        metrics["curator_weight_version"] = self.routes["curator"].optimizer_step
+        metrics["curator_weight_version"] = (self.routes["curator"].optimizer_step
+                                               if self.learning["update_skills"] else self.state["optimizer_step"])
+        metrics.update(self._curation_counts())
+        metrics.update(
+            experience_round=self.state.get("experience_round", self.state.get("last_global_step", 0)),
+            credit_windows=len(self.state["pending"]),
+            credit_windows_settled=sum(row["status"] == "settled" for row in self.state["pending"].values()),
+            credit_windows_censored=sum(row["status"] == "censored" for row in self.state["pending"].values()),
+            credit_valid_exposures=sum(len(row["observed"]) for row in self.state["pending"].values()),
+        )
         return metrics
 
     async def pause_background_writes(self):
@@ -1428,8 +1526,8 @@ class SkillJointController:
             # Publication is a short learner boundary operation and is
             # skipped while an already pinned curator generation is live.
             # Background workers never issue online optimizer/model RPCs.
-            self._ema_refresh_requested = True
-            if not any(key.startswith("curate:") for key in self._background_tasks):
+            self._ema_refresh_requested = self.learning["update_skills"]
+            if self.learning["update_skills"] and not any(key.startswith("curate:") for key in self._background_tasks):
                 self._ema_syncing = True
                 try:
                     await self.routes["curator"].sync_ema(actual)
@@ -1437,7 +1535,9 @@ class SkillJointController:
                     self._ema_refresh_requested = False
                 finally:
                     self._ema_syncing = False
-            self._offer_sources(current["sources"], step, prepared.update_id)
+            self.state["experience_round"] = step
+            if self.learning["update_skills"]:
+                self._offer_sources(current["sources"], step, prepared.update_id)
             report = self._complete_post_update(current, prepared, actual)
             return {**report, **self.background_metrics()}
         finally:

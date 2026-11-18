@@ -29,7 +29,16 @@ from typing import Any
 from .alfworld.accounts import AccountPool
 from .alfworld.budget import BudgetOutcomeUnknown, budget_failure_claimed, verify_budget_failure
 from .alfworld.terminal_guard import _validated_state
-from .context import CONTEXT_BUILDER_VERSION, _local_tokenizer, _skill_block, _user_index, pin_prompt_group
+from .context import (
+    CONTEXT_BUILDER_VERSION,
+    PAIRED_CONTEXT_VERSION,
+    PairedContextUnavailable,
+    TokenizerRenderer,
+    _local_tokenizer,
+    _skill_block,
+    _user_index,
+    pin_prompt_group,
+)
 from .credit import CreditProtocol, EvaluationOutcome, UsageEvent
 from .replay import _identifier, _plain, _publish_immutable, _read_payload
 from .store import SkillRef, SkillStore, SkillStoreError
@@ -869,6 +878,7 @@ async def collect_counterfactual_probe(
     run_branch=native_probe_branch,
     decode_prompt_ids=None,
     _account_pool=None,
+    context_renderer=None,
 ):
     """Return one paired event; the ledger performs durable causal settlement.
 
@@ -885,6 +895,16 @@ async def collect_counterfactual_probe(
     physical_id = probe_physical_id(request)
     root = Path(artifact_root) / "credit_probes" / physical_id
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if context_renderer is None:
+        context_renderer = TokenizerRenderer(
+            _local_tokenizer(loading["tokenizer_path"], loading.get("tokenizer_revision")),
+            render_kwargs=loading.get("render_kwargs", {}),
+        )
+    target_block, _ = _skill_block([store.read_only_view(request.with_snapshot_id).load_artifact(request.skill_ref)])
+    if loading["top_k"] < 1 or len(context_renderer.encode(target_block)) > loading["skill_token_budget"]:
+        error = ProbeNotObserved("The target alone exceeds the paired skill budget")
+        _probe_failure_artifact(root / "context-preflight.json", {"status": "unobserved", "reason": str(error)}, error)
+        raise error
     intent = {
         "schema_version": 1,
         "probe_id": request.probe_id,
@@ -956,6 +976,15 @@ async def collect_counterfactual_probe(
                     )
                     settings = dict(loading, enabled=True)
                     settings["snapshot_id"] = request.with_snapshot_id if loaded else request.without_snapshot_id
+                    settings["paired_context"] = {
+                        "version": PAIRED_CONTEXT_VERSION,
+                        "plan_id": physical_id,
+                        "directory": str(Path(artifact_root) / "context_groups" / "paired"),
+                        "target_ref": request.skill_ref.to_dict(),
+                        "with_snapshot_id": request.with_snapshot_id,
+                        "without_snapshot_id": request.without_snapshot_id,
+                        "loaded": loaded,
+                    }
                     fields = pin_prompt_group(
                         fields,
                         loading=settings,
@@ -974,6 +1003,8 @@ async def collect_counterfactual_probe(
                             task_config_path=task_config_path,
                             frozen_attestation=frozen_attestation,
                         )
+                    except PairedContextUnavailable as error:
+                        raise ProbeNotObserved(str(error)) from error
                     except BudgetOutcomeUnknown as error:
                         if getattr(error, "safely_closed_budget_censor", False) is not True:
                             raise

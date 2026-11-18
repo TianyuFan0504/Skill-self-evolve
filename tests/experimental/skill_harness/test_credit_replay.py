@@ -216,6 +216,27 @@ class TestCurateReplay(CreditFixture):
 
 
 class TestCreditLedger(CreditFixture):
+    def test_explicit_censor_preserves_partial_evidence_without_zero_label_or_later_usage(self):
+        item, proto, window = self.register()
+        self.ledger.add_usage(usage(item, proto, window, "p0"), now=20)
+        status = self.ledger.censor_window(window, reason="target_does_not_fit")
+        self.assertEqual(status["state"], "censored")
+        self.assertEqual(status["observed_exposures"], 1)
+        self.assertEqual(status["reason"], "target_does_not_fit")
+        self.assertEqual(self.ledger.censor_window(window, reason="target_does_not_fit"), status)
+        with self.assertRaises(credit.WindowNotMature):
+            self.ledger.settle(window, now=30)
+        with self.assertRaisesRegex(credit.CreditError, "censored"):
+            self.ledger.add_usage(usage(item, proto, window, "p1"), now=30)
+        with self.assertRaisesRegex(credit.CreditError, "rewritten"):
+            self.ledger.censor_window(window, reason="different")
+        self.assertEqual(self.ledger.sample_ready(10), [])
+
+    def test_mature_credit_cannot_be_censored(self):
+        label = self.mature()
+        with self.assertRaisesRegex(credit.CreditError, "Mature or settled"):
+            self.ledger.censor_window(label.window_id, reason="late_failure")
+
     def test_pending_censored_and_observed_zero_have_distinct_semantics(self):
         item, proto, window = self.register(deadline=25.0)
         self.assertEqual(self.ledger.window_status(window, now=15)["state"], "pending")
